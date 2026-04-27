@@ -1,0 +1,124 @@
+﻿# Automated Invoicing and Payroll - Prompt Guide
+
+## What this is
+This repository is set up to run a coding agent with structured, phase-based prompts.
+
+The goal is to keep work safe, focused, and sequential (foundation first, then models, then workflows, etc.) for an Automated Invoicing and Payroll system.
+
+## Core files
+- `AGENT.md`: Project rules, architecture direction, scope, and build order.
+- `TASK.md`: Task requirements for the implementation.
+- `PROMPTS.md`: Prompt library and dispatcher pattern you send to the agent.
+- `QA_GATE.md`: Phase-based quality gate to review the current completed phase before moving forward.
+
+## How to use (exact steps)
+1. Open `PROMPTS.md`.
+2. Choose one prompt key from the key map:
+   - `P01` to `P12`
+   - `VERIFY`
+   - `REFACTOR`
+   - `BUGFIX`
+   - `HANDOVER`
+3. Copy the **Dispatcher Prompt** block from `PROMPTS.md`.
+4. Replace:
+   - `PROMPT_KEY: <PUT_KEY_HERE>`
+   with your selected key, for example:
+   - `PROMPT_KEY: P03`
+5. Send that full dispatcher prompt to your coding agent.
+6. The agent should execute only that selected prompt and return:
+   1. What was changed
+   2. Why it was changed
+   3. What is complete
+   4. What still remains
+   5. Risks or assumptions
+
+## Example usage
+Use this in your message to the agent:
+
+```text
+You are working in this repository.
+
+Read and follow:
+1) AGENT.md
+2) TASK.md
+3) PROMPTS.md
+
+PROMPT_KEY: P01
+
+Rules:
+- Execute only the prompt that matches PROMPT_KEY.
+- If PROMPT_KEY is invalid or missing, stop and ask for a valid key.
+- Do not start later phases.
+- Make focused, safe, incremental changes only.
+
+Output format:
+1. What was changed
+2. Why it was changed
+3. What is complete
+4. What still remains
+5. Risks or assumptions
+```
+
+## How to use QA Gate (after each phase)
+Run QA Gate after a phase is completed and before starting the next phase.
+
+1. Complete a phase using one prompt key (for example `P03`).
+2. Ask the agent to run the QA gate using `QA_GATE.md`.
+3. Ensure the QA gate reviews only the current phase against:
+   - `AGENT.md`
+   - `TASK.md`
+   - the current phase prompt in `PROMPTS.md`
+4. Read the approval decision:
+   - `PASS`: continue to next phase
+   - `PASS WITH MINOR RISKS`: continue, but track listed risks
+   - `FAIL`: fix blocking issues first, then run QA gate again
+
+### QA gate message example
+```text
+Run the QA gate for the current completed phase only.
+
+Follow:
+1) QA_GATE.md
+2) AGENT.md
+3) TASK.md
+4) PROMPTS.md
+
+Do not add new features.
+Do not review future phases.
+Apply only minimal safe fixes if required.
+
+Return exactly:
+1. Phase reviewed
+2. Files checked
+3. Issues found
+4. Fixes made
+5. Remaining risks
+6. Approval decision
+7. Next recommendation
+```
+
+## Prompt key guide
+- `P01`: Foundation setup (DONE)
+- `P02`: Core data models (DONE)
+- `P03`: Invoicing MVP
+- `P04`: Invoice PDF and Excel output
+- `P05`: Invoice email sending
+- `P06`: Payroll MVP
+- `P07`: Payroll PDF output
+- `P08`: Bulk import framework
+- `P09`: Background jobs and reminders
+- `P10`: Stripe payments
+- `P11`: Reporting dashboard
+- `P12`: Hardening and cleanup
+- `VERIFY`: Validate current phase and fix phase-related issues only
+- `REFACTOR`: Safe refactor of current phase only
+- `BUGFIX`: Bug fixing for current phase only
+- `HANDOVER`: Final review before handover
+
+## Tips
+- Run one phase key at a time (`P01`, then `P02`, etc.).
+- Avoid jumping ahead to later phases until earlier phases are stable.
+- Use `VERIFY` after each major phase to catch quality issues early.
+- Use `QA_GATE.md` as the release checkpoint between phases.
+- Use `REFACTOR` only when behavior should stay the same.
+- Use `BUGFIX` when you already know the current phase has defects.
