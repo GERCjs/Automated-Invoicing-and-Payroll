@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Create Invoice | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">Create Invoice</h1>
+
+<form method="post" novalidate>
+    {% csrf_token %}
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Customer</label>
+                    {{ form.customer }}
+                    {% for error in form.customer.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Issue Date</label>
+                    {{ form.issue_date }}
+                    {% for error in form.issue_date.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Due Date</label>
+                    {{ form.due_date }}
+                    {% for error in form.due_date.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Currency</label>
+                    {{ form.currency }}
+                    {% for error in form.currency.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-10">
+                    <label class="form-label">Notes</label>
+                    {{ form.notes }}
+                    {% for error in form.notes.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+        <div class="card-header">Invoice Items</div>
+        <div class="card-body">
+            {{ formset.management_form }}
+            {% if formset.non_form_errors %}
+            <div class="alert alert-danger">{{ formset.non_form_errors }}</div>
+            {% endif %}
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Description</th>
+                            <th>Qty</th>
+                            <th>Unit Price</th>
+                            <th>Tax %</th>
+                            <th>Delete</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item_form in formset %}
+                        <tr>
+                            <td>
+                                {{ item_form.description }}
+                                {% for error in item_form.description.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                            </td>
+                            <td>
+                                {{ item_form.quantity }}
+                                {% for error in item_form.quantity.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                            </td>
+                            <td>
+                                {{ item_form.unit_price }}
+                                {% for error in item_form.unit_price.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                            </td>
+                            <td>
+                                {{ item_form.tax_rate }}
+                                {% for error in item_form.tax_rate.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                            </td>
+                            <td>
+                                {{ item_form.DELETE }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Draft Invoice</button>
+    <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Cancel</a>
+</form>
+{% endblock %}

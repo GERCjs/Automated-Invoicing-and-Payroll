@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Invoices | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Invoices</h1>
+    <a href="{% url 'invoice-create' %}" class="btn btn-primary">Create Invoice</a>
+</div>
+
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Invoice #</th>
+                    <th>Customer</th>
+                    <th>Status</th>
+                    <th>Issue Date</th>
+                    <th>Due Date</th>
+                    <th class="text-end">Total</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for invoice in invoices %}
+                <tr>
+                    <td>{{ invoice.invoice_number }}</td>
+                    <td>{{ invoice.customer.name }}</td>
+                    <td><span class="badge text-bg-secondary">{{ invoice.get_status_display }}</span></td>
+                    <td>{{ invoice.issue_date }}</td>
+                    <td>{{ invoice.due_date }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</td>
+                    <td class="text-end">
+                        <a href="{% url 'invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="text-center py-4">No invoices found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,7 +1,13 @@
+import uuid
+
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q
+
+
+def generate_public_view_token():
+    return uuid.uuid4().hex
 
 
 class Customer(models.Model):
@@ -63,6 +69,9 @@ class Invoice(models.Model):
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
+    public_view_token = models.CharField(max_length=64, db_index=True, default=generate_public_view_token)
+    viewed_at = models.DateTimeField(null=True, blank=True)
+    view_count = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -80,6 +89,7 @@ class Invoice(models.Model):
             models.Index(fields=["status"]),
             models.Index(fields=["issue_date"]),
             models.Index(fields=["due_date"]),
+            models.Index(fields=["public_view_token"]),
         ]
         constraints = [
             models.CheckConstraint(

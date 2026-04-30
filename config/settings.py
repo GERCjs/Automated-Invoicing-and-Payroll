@@ -107,4 +107,9 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 
+COMPANY_NAME = os.getenv("COMPANY_NAME", "Automated Invoicing and Payroll Pte Ltd")
+COMPANY_EMAIL = os.getenv("COMPANY_EMAIL", "finance@example.com")
+COMPANY_PHONE = os.getenv("COMPANY_PHONE", "+65 6000 0000")
+COMPANY_ADDRESS = os.getenv("COMPANY_ADDRESS", "123 Business Street, Singapore 123456")
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

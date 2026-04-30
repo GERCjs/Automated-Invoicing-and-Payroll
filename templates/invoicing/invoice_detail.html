@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice {{ invoice.invoice_number }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Invoice {{ invoice.invoice_number }}</h1>
+    <div class="d-flex gap-2">
+        <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
+        <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-outline-success">Download Excel</a>
+        <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Back to List</a>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <p class="mb-1"><strong>Customer:</strong> {{ invoice.customer.name }}</p>
+                <p class="mb-1"><strong>Email:</strong> {{ invoice.customer.email }}</p>
+                <p class="mb-1"><strong>Status:</strong> <span class="badge text-bg-secondary">{{ invoice.get_status_display }}</span></p>
+                <p class="mb-1"><strong>Issue Date:</strong> {{ invoice.issue_date }}</p>
+                <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
+                <p class="mb-1"><strong>Public Link:</strong> <a href="{% url 'invoice-public-view' invoice.public_view_token %}" target="_blank">Open Online View</a></p>
+                <p class="mb-1"><strong>Viewed At:</strong> {{ invoice.viewed_at|default:"-" }}</p>
+                <p class="mb-0"><strong>View Count:</strong> {{ invoice.view_count }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="h6">Change Status</h2>
+                <form method="post" action="{% url 'invoice-status-update' invoice.pk %}">
+                    {% csrf_token %}
+                    <label for="status" class="form-label">New Status</label>
+                    <select class="form-select mb-2" id="status" name="status">
+                        {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if invoice.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-primary btn-sm">Update</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">Items</div>
+    <div class="table-responsive">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th class="text-end">Qty</th>
+                    <th class="text-end">Unit Price</th>
+                    <th class="text-end">Tax %</th>
+                    <th class="text-end">Line Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td class="text-end">{{ item.quantity }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ item.unit_price }}</td>
+                    <td class="text-end">{{ item.tax_rate }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ item.line_total }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="text-center py-3">No items available.</td></tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th colspan="4" class="text-end">Subtotal</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.subtotal }}</th>
+                </tr>
+                <tr>
+                    <th colspan="4" class="text-end">Tax</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.tax_amount }}</th>
+                </tr>
+                <tr>
+                    <th colspan="4" class="text-end">Total</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</th>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endblock %}

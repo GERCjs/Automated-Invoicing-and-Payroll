@@ -1,0 +1,40 @@
+from django import forms
+from django.forms import inlineformset_factory
+
+from .models import Invoice, InvoiceItem
+
+
+class InvoiceForm(forms.ModelForm):
+    class Meta:
+        model = Invoice
+        fields = ["customer", "issue_date", "due_date", "currency", "notes"]
+        widgets = {
+            "issue_date": forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+            "due_date": forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+            "currency": forms.TextInput(attrs={"class": "form-control", "maxlength": 3}),
+            "notes": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+            "customer": forms.Select(attrs={"class": "form-select"}),
+        }
+
+
+class InvoiceItemForm(forms.ModelForm):
+    class Meta:
+        model = InvoiceItem
+        fields = ["description", "quantity", "unit_price", "tax_rate"]
+        widgets = {
+            "description": forms.TextInput(attrs={"class": "form-control"}),
+            "quantity": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0.01"}),
+            "unit_price": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "tax_rate": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0", "max": "100"}),
+        }
+
+
+InvoiceItemFormSet = inlineformset_factory(
+    parent_model=Invoice,
+    model=InvoiceItem,
+    form=InvoiceItemForm,
+    extra=1,
+    min_num=1,
+    validate_min=True,
+    can_delete=True,
+)

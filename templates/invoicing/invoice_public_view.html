@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice {{ invoice.invoice_number }}{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <h1 class="h4">Invoice {{ invoice.invoice_number }}</h1>
+        <p class="mb-1"><strong>Customer:</strong> {{ invoice.customer.name }}</p>
+        <p class="mb-1"><strong>Issue Date:</strong> {{ invoice.issue_date }}</p>
+        <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
+        <p class="mb-0"><strong>Status:</strong> {{ invoice.get_status_display }}</p>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th class="text-end">Qty</th>
+                    <th class="text-end">Unit Price</th>
+                    <th class="text-end">Tax %</th>
+                    <th class="text-end">Line Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td class="text-end">{{ item.quantity }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ item.unit_price }}</td>
+                    <td class="text-end">{{ item.tax_rate }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ item.line_total }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th colspan="4" class="text-end">Subtotal</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.subtotal }}</th>
+                </tr>
+                <tr>
+                    <th colspan="4" class="text-end">Tax</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.tax_amount }}</th>
+                </tr>
+                <tr>
+                    <th colspan="4" class="text-end">Total</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</th>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endblock %}
