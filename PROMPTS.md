@@ -213,25 +213,51 @@ Read AGENT.md and TASK.md and follow them strictly.
 
 Work on Phase 5 only.
 
-Add invoice email sending and tracking.
+Add invoice email sending and tracking with a provider decision matrix.
 
+Step 1 - Create and use an email provider decision matrix before implementation.
+Compare options that are realistic for this Django project:
+- Resend via SMTP
+- Resend via API
+- Generic SMTP provider (for example SendGrid SMTP or SES SMTP)
+
+Score each option from 1 to 5 on:
+- Django integration effort
+- Delivery visibility (events, bounces, failures)
+- Logging fit with EmailDeliveryLog model
+- Idempotency and retry safety
+- Invoice status safety on send failure
+- Reusability for future payroll email use
+- Operational complexity and lock-in
+- Cost predictability
+
+Pick one option and state a short reason based on score and tradeoffs.
+
+Step 2 - Implement Phase 5 only.
 Focus only on:
 - email backend configuration
-- invoice email template
-- send invoice action
-- online invoice link in email
-- delivery log usage
-- sent status update when appropriate
-- failure-safe sending behavior
+- invoice email template (professional and clear)
+- send invoice action from invoicing workflow
+- online invoice public link inside email
+- delivery attempt logging via EmailDeliveryLog
+- update invoice status to Sent only when send succeeds
+- failure-safe behavior (send failure must not corrupt invoice data)
+- reusable sending service design for future payroll emails
 
-Requirements:
-- sending an invoice must not corrupt invoice data on failure
-- email content should be professional and clear
-- delivery attempts should be logged
-- keep sending logic reusable for future payroll email use
-- do not implement reminder schedules, Celery, payroll email, Stripe, or dashboards yet
+Hard constraints:
+- do not implement reminder schedules, Celery, payroll email, Stripe, or dashboards
+- do not add later-phase features
+- keep changes incremental and maintainable
+
+Acceptance checks (must all pass):
+- invoice can be emailed
+- email content is correct
+- delivery attempt is logged
+- send failures do not corrupt invoice data
+- sent status works as intended
 
 After completion, report:
+- decision matrix table and chosen option
 - files created
 - files updated
 - what now works

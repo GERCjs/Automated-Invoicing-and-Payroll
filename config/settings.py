@@ -12,6 +12,12 @@ load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-development-secret-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",")
@@ -111,5 +117,35 @@ COMPANY_NAME = os.getenv("COMPANY_NAME", "Automated Invoicing and Payroll Pte Lt
 COMPANY_EMAIL = os.getenv("COMPANY_EMAIL", "finance@example.com")
 COMPANY_PHONE = os.getenv("COMPANY_PHONE", "+65 6000 0000")
 COMPANY_ADDRESS = os.getenv("COMPANY_ADDRESS", "123 Business Street, Singapore 123456")
+COMPANY_REG_NO = os.getenv("COMPANY_REG_NO", "201535968M")
+REGISTERED_OFFICE_TEXT = os.getenv(
+    "REGISTERED_OFFICE_TEXT",
+    "Attention: finance@vaniday.com, 7 Temasek Boulevard, #12-07 Suntec Tower One, Singapore 038987, Singapore.",
+)
+INVOICE_PAYMENT_TERM_DAYS = int(os.getenv("INVOICE_PAYMENT_TERM_DAYS", "30"))
+INVOICE_BANK_TEXT = os.getenv(
+    "INVOICE_BANK_TEXT",
+    "Vaniday Singapore Pte Ltd\n"
+    "Bank: Oversea-Chinese Banking Corporation Limited (OCBC)\n"
+    "BIC/SWIFT: OCBCSGSGXXX\n"
+    "Account Number: 695105486001\n"
+    "Payment via PayNow to 201535968M",
+)
+INVOICE_PAYMENT_NOTES = os.getenv(
+    "INVOICE_PAYMENT_NOTES",
+    "Please include your invoice number and salon name as reference for electronic payments.\n"
+    "We will payout within 10 days from Invoice Date.\n"
+    "This is a computer generated invoice and therefore no signature is required.",
+)
+
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", COMPANY_EMAIL)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "20"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
-{% block title %}Create Invoice | Automated Invoicing & Payroll{% endblock %}
+{% block title %}{% if is_edit %}Edit Invoice {{ invoice.invoice_number }}{% else %}Create Invoice{% endif %} | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<h1 class="h3 mb-3">Create Invoice</h1>
+<h1 class="h3 mb-3">{% if is_edit %}Edit Invoice {{ invoice.invoice_number }}{% else %}Create Invoice{% endif %}</h1>
 
 <form method="post" novalidate>
     {% csrf_token %}
@@ -61,8 +61,10 @@
                         {% for item_form in formset %}
                         <tr>
                             <td>
+                                {{ item_form.id }}
                                 {{ item_form.description }}
                                 {% for error in item_form.description.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                                {% for error in item_form.non_field_errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                             </td>
                             <td>
                                 {{ item_form.quantity }}
@@ -87,7 +89,7 @@
         </div>
     </div>
 
-    <button type="submit" class="btn btn-primary">Save Draft Invoice</button>
+    <button type="submit" class="btn btn-primary">{% if is_edit %}Update Invoice{% else %}Save Draft Invoice{% endif %}</button>
     <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Cancel</a>
 </form>
 {% endblock %}

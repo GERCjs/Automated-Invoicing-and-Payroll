@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Customer, Invoice, InvoiceItem
+from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow
 
 
 class InvoiceItemInline(admin.TabularInline):
@@ -35,3 +35,18 @@ class InvoiceItemAdmin(admin.ModelAdmin):
     list_display = ("invoice", "description", "quantity", "unit_price", "line_total")
     list_filter = ("created_at",)
     search_fields = ("invoice__invoice_number", "description")
+
+
+@admin.register(InvoiceSourceRow)
+class InvoiceSourceRowAdmin(admin.ModelAdmin):
+    list_display = (
+        "order_id",
+        "shop_title",
+        "customer_name",
+        "email",
+        "service_name",
+        "booked_date",
+        "total_revenue",
+    )
+    list_filter = ("status", "order_status", "booked_date", "created_at")
+    search_fields = ("order_id", "shop_title", "customer_name", "email", "service_name")

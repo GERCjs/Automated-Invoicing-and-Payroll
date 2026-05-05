@@ -2,11 +2,13 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.http import Http404, HttpResponse
+from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from accounts.permissions import role_required
 from accounts.roles import ADMIN, FINANCE
 from core.audit import get_client_ip, log_event
+from notifications.services import send_invoice_email
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
 from .forms import InvoiceForm, InvoiceItemFormSet
@@ -78,6 +80,51 @@ def invoice_create(request):
         {
             "form": form,
             "formset": formset,
+            "is_edit": False,
+            "invoice": None,
+        },
+    )
+
+
+@login_required
+@role_required(ADMIN, FINANCE)
+def invoice_edit(request, pk):
+    invoice = get_object_or_404(Invoice, pk=pk)
+    if invoice.status != Invoice.STATUS_DRAFT:
+        messages.error(request, "Only Draft invoices can be edited.")
+        return redirect("invoice-detail", pk=invoice.pk)
+
+    if request.method == "POST":
+        form = InvoiceForm(request.POST, instance=invoice)
+        formset = InvoiceItemFormSet(request.POST, instance=invoice, prefix="items")
+        if form.is_valid() and formset.is_valid():
+            with transaction.atomic():
+                form.save()
+                formset.save()
+                recalculate_invoice_totals(invoice)
+
+            log_event(
+                action="invoice.edited",
+                user=request.user,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={"invoice_number": invoice.invoice_number},
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Invoice updated.")
+            return redirect("invoice-detail", pk=invoice.pk)
+    else:
+        form = InvoiceForm(instance=invoice)
+        formset = InvoiceItemFormSet(instance=invoice, prefix="items")
+
+    return render(
+        request,
+        "invoicing/invoice_form.html",
+        {
+            "form": form,
+            "formset": formset,
+            "is_edit": True,
+            "invoice": invoice,
         },
     )
 
@@ -199,3 +246,54 @@ def invoice_download_excel(request, pk):
     )
     response["Content-Disposition"] = f'attachment; filename="{invoice.invoice_number}.xlsx"'
     return response
+
+
+@login_required
+@role_required(ADMIN, FINANCE)
+def invoice_send_email(request, pk):
+    if request.method != "POST":
+        raise Http404()
+
+    invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
+    public_invoice_url = request.build_absolute_uri(
+        reverse("invoice-public-view", args=[invoice.public_view_token])
+    )
+    success, delivery_log = send_invoice_email(
+        invoice=invoice,
+        public_invoice_url=public_invoice_url,
+        triggered_by=request.user,
+    )
+
+    if success:
+        log_event(
+            action="invoice.email.sent",
+            user=request.user,
+            target_type="invoice",
+            target_id=str(invoice.id),
+            metadata={
+                "invoice_number": invoice.invoice_number,
+                "delivery_log_id": delivery_log.id,
+                "recipient_email": invoice.customer.email,
+            },
+            ip_address=get_client_ip(request),
+        )
+        messages.success(request, f"Invoice emailed to {invoice.customer.email}.")
+    else:
+        log_event(
+            action="invoice.email.failed",
+            user=request.user,
+            target_type="invoice",
+            target_id=str(invoice.id),
+            metadata={
+                "invoice_number": invoice.invoice_number,
+                "delivery_log_id": delivery_log.id,
+                "recipient_email": invoice.customer.email,
+                "error_message": delivery_log.error_message,
+            },
+            ip_address=get_client_ip(request),
+        )
+        messages.error(
+            request,
+            "Failed to send invoice email. Invoice status remains unchanged.",
+        )
+    return redirect("invoice-detail", pk=invoice.pk)

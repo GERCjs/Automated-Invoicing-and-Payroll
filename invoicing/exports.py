@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -21,6 +21,11 @@ def build_export_context(invoice: Invoice) -> dict:
         "company_email": settings.COMPANY_EMAIL,
         "company_phone": settings.COMPANY_PHONE,
         "company_address": settings.COMPANY_ADDRESS,
+        "company_reg_no": settings.COMPANY_REG_NO,
+        "registered_office_text": settings.REGISTERED_OFFICE_TEXT,
+        "invoice_payment_term_days": settings.INVOICE_PAYMENT_TERM_DAYS,
+        "invoice_bank_text": settings.INVOICE_BANK_TEXT,
+        "invoice_payment_notes": settings.INVOICE_PAYMENT_NOTES,
         "invoice": invoice,
         "items": items,
     }
@@ -39,78 +44,161 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         bottomMargin=14 * mm,
     )
     styles = getSampleStyleSheet()
-    body = styles["BodyText"]
-    title_style = styles["Heading2"]
-    title_style.textColor = colors.HexColor("#0d6efd")
+    body = ParagraphStyle(
+        "InvoiceBody",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+    )
+    small = ParagraphStyle(
+        "InvoiceSmall",
+        parent=body,
+        fontSize=8,
+        leading=10,
+    )
+    heading = ParagraphStyle(
+        "InvoiceHeading",
+        parent=body,
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=12,
+    )
+    invoice_title = ParagraphStyle(
+        "InvoiceTitle",
+        parent=body,
+        fontName="Helvetica-Bold",
+        fontSize=22,
+        leading=24,
+    )
+    right = ParagraphStyle(
+        "InvoiceRight",
+        parent=body,
+        alignment=2,
+    )
+    right_bold = ParagraphStyle(
+        "InvoiceRightBold",
+        parent=right,
+        fontName="Helvetica-Bold",
+    )
+
+    customer_display = invoice.customer.name
+    if invoice.customer.tax_number:
+        customer_display = f"{customer_display} ({invoice.customer.tax_number})"
+
+    office_line = f"Registered Office: {context['registered_office_text']}"
+    header_left = [
+        [Paragraph(f"<b>{context['company_name'].upper()}</b>", heading)],
+        [Paragraph(f"Reg No. {context['company_reg_no']}", body)],
+        [Paragraph(context["company_address"].replace("\n", "<br/>"), body)],
+    ]
+    left_header_table = Table(header_left, colWidths=[78 * mm])
+    left_header_table.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+
+    right_header_data = [
+        [Paragraph("INVOICE", invoice_title)],
+        [Paragraph(customer_display, right_bold)],
+        [Paragraph("<b>Invoice Date</b>", right)],
+        [Paragraph(str(invoice.issue_date.strftime("%d %b %Y")), right)],
+        [Paragraph("<b>Invoice Number</b>", right)],
+        [Paragraph(invoice.invoice_number, right)],
+    ]
+    right_header_table = Table(right_header_data, colWidths=[82 * mm])
+    right_header_table.setStyle(
+        TableStyle(
+            [
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ]
+        )
+    )
 
     story = [
-        Paragraph(context["company_name"], title_style),
-        Paragraph(context["company_address"], body),
-        Paragraph(f"Email: {context['company_email']} | Phone: {context['company_phone']}", body),
+        Paragraph(office_line, small),
         Spacer(1, 8),
-        Paragraph(f"<b>Invoice:</b> {invoice.invoice_number}", body),
-        Paragraph(f"<b>Status:</b> {invoice.get_status_display()}", body),
-        Paragraph(f"<b>Issue Date:</b> {invoice.issue_date}", body),
-        Paragraph(f"<b>Due Date:</b> {invoice.due_date}", body),
-        Spacer(1, 8),
-        Paragraph(f"<b>Bill To:</b> {invoice.customer.name}", body),
-        Paragraph(invoice.customer.billing_address or "-", body),
-        Paragraph(invoice.customer.email, body),
+        Table([[left_header_table, right_header_table]], colWidths=[78 * mm, 82 * mm]),
         Spacer(1, 10),
     ]
 
-    table_data = [["Description", "Qty", "Unit Price", "Tax %", "Line Total"]]
+    table_data = [["Description", "Quantity", "Unit Price", "Amount SGD"]]
     for item in context["items"]:
+        description = (item.description or "").replace("\n", "<br/>")
+        unit_value = f"{item.line_total:.2f}"
         table_data.append(
             [
-                item.description,
+                Paragraph(description, body),
                 str(item.quantity),
-                f"{invoice.currency} {item.unit_price}",
-                str(item.tax_rate),
-                f"{invoice.currency} {item.line_total}",
+                unit_value,
+                unit_value,
             ]
         )
     if len(table_data) == 1:
-        table_data.append(["No items", "-", "-", "-", "-"])
+        table_data.append(["No items", "-", "-", "-"])
 
-    table = Table(table_data, colWidths=[70 * mm, 22 * mm, 30 * mm, 20 * mm, 30 * mm])
+    table = Table(table_data, colWidths=[95 * mm, 20 * mm, 22 * mm, 23 * mm], repeatRows=1)
     table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d6efd")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.lightgrey),
-                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f9fa")]),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("LINEABOVE", (0, 0), (-1, 0), 0.8, colors.black),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.black),
+                ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.8, colors.black),
             ]
         )
     )
     story.append(table)
     story.append(Spacer(1, 10))
 
+    amount_paid = invoice.total_amount
+    amount_due = invoice.total_amount - amount_paid
     totals = [
-        ["Subtotal", f"{invoice.currency} {invoice.subtotal}"],
-        ["Tax", f"{invoice.currency} {invoice.tax_amount}"],
-        ["Total", f"{invoice.currency} {invoice.total_amount}"],
+        ["Subtotal", f"{invoice.subtotal:.2f}"],
+        [f"TOTAL {invoice.currency}", f"{invoice.total_amount:.2f}"],
+        ["Less Amount Paid", f"{amount_paid:.2f}"],
+        [f"AMOUNT DUE {invoice.currency}", f"{amount_due:.2f}"],
     ]
-    totals_table = Table(totals, colWidths=[120 * mm, 52 * mm])
+    totals_table = Table(totals, colWidths=[124 * mm, 36 * mm])
     totals_table.setStyle(
         TableStyle(
             [
+                ("ALIGN", (0, 0), (0, -1), "RIGHT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
                 ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("LINEABOVE", (0, 1), (-1, 1), 0.8, colors.black),
                 ("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
             ]
         )
     )
     story.append(totals_table)
 
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"Due Date: {invoice.due_date.strftime('%d %b %Y')}", body))
+    story.append(Paragraph(f"Payment Term: {context['invoice_payment_term_days']} Days", body))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("We accept payment via bank transfer to the following:", body))
+
+    for line in context["invoice_bank_text"].split("\n"):
+        story.append(Paragraph(line, body))
+
+    story.append(Spacer(1, 4))
+    for line in context["invoice_payment_notes"].split("\n"):
+        story.append(Paragraph(line, small))
+
     if invoice.notes:
-        story.append(Spacer(1, 10))
-        story.append(Paragraph("<b>Notes</b>", body))
-        story.append(Paragraph(invoice.notes, body))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(f"Notes: {invoice.notes}", body))
 
     doc.build(story)
     return buffer.getvalue()

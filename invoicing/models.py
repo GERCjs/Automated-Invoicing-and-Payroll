@@ -151,3 +151,49 @@ class InvoiceItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.invoice.invoice_number} - {self.description}"
+
+
+class InvoiceSourceRow(models.Model):
+    seller_id = models.CharField(max_length=50, blank=True)
+    shop_title = models.CharField(max_length=255, blank=True)
+    order_id = models.CharField(max_length=50, blank=True, db_index=True)
+    partner_type_name = models.CharField(max_length=100, blank=True)
+    payment_method = models.CharField(max_length=100, blank=True)
+    product_type = models.CharField(max_length=100, blank=True)
+    customer_id = models.CharField(max_length=50, blank=True)
+    status = models.CharField(max_length=50, blank=True)
+    order_status = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    customer_name = models.CharField(max_length=255, blank=True)
+    contact_no = models.CharField(max_length=50, blank=True)
+    qty = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    service_name = models.CharField(max_length=255, blank=True)
+    booked_date = models.DateTimeField(null=True, blank=True)
+    service_duration = models.PositiveIntegerField(null=True, blank=True)
+    staff_id = models.CharField(max_length=50, blank=True)
+    staff_name = models.CharField(max_length=255, blank=True)
+    total_revenue = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    credit_card = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    shipping_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    reward_point = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    vaniday_commission = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    vaniday_share = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    cashback_fee = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    cashback_discount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    cashback_date = models.DateField(null=True, blank=True)
+    salon_share = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    source_file_name = models.CharField(max_length=255, default="Vaniday Invoice Sample data_RP.csv")
+    raw_data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["order_id"]),
+            models.Index(fields=["email"]),
+            models.Index(fields=["booked_date"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.order_id} - {self.service_name}"

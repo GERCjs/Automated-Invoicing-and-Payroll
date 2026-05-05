@@ -21,8 +21,9 @@
                     {% if form.non_field_errors %}
                     <div class="alert alert-danger">{{ form.non_field_errors }}</div>
                     {% endif %}
-                    <div class="d-grid">
+                    <div class="d-grid gap-2">
                         <button type="submit" class="btn btn-primary">Login</button>
+                        <a href="{% url 'register' %}" class="btn btn-outline-secondary">Register</a>
                     </div>
                 </form>
             </div>

@@ -6,6 +6,13 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">Invoice {{ invoice.invoice_number }}</h1>
     <div class="d-flex gap-2">
+        {% if invoice.status == "draft" %}
+        <a href="{% url 'invoice-edit' invoice.pk %}" class="btn btn-primary">Edit</a>
+        {% endif %}
+        <form method="post" action="{% url 'invoice-send-email' invoice.pk %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-dark">Send Email</button>
+        </form>
         <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
         <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-outline-success">Download Excel</a>
         <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Back to List</a>

@@ -1,15 +1,19 @@
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
 from accounts.roles import FINANCE, STAFF
 from core.models import AuditLog
+from notifications.models import EmailDeliveryLog
 
 from .models import Customer, Invoice, InvoiceItem
 
@@ -161,6 +165,63 @@ class InvoicingMvpTests(TestCase):
         self.assertContains(response, "Please submit at least 1 form.")
         self.assertEqual(Invoice.objects.count(), 0)
 
+    def test_finance_can_edit_draft_invoice_and_recalculate_totals(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("invoice-edit", args=[invoice.pk]),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": invoice.issue_date,
+                "due_date": invoice.due_date,
+                "currency": "SGD",
+                "notes": "Updated note",
+                "items-TOTAL_FORMS": "1",
+                "items-INITIAL_FORMS": "1",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-id": invoice.items.first().pk,
+                "items-0-description": "Updated Service Fee",
+                "items-0-quantity": "3",
+                "items-0-unit_price": "100.00",
+                "items-0-tax_rate": "9.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.notes, "Updated note")
+        self.assertEqual(invoice.subtotal, Decimal("300.00"))
+        self.assertEqual(invoice.tax_amount, Decimal("27.00"))
+        self.assertEqual(invoice.total_amount, Decimal("327.00"))
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="invoice.edited",
+                target_type="invoice",
+                target_id=str(invoice.id),
+            ).exists()
+        )
+
+    def test_staff_cannot_edit_invoice(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="staff_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-edit", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_draft_invoice_cannot_be_edited(self):
+        invoice = self._create_invoice_with_item()
+        invoice.status = Invoice.STATUS_SENT
+        invoice.save(update_fields=["status", "updated_at"])
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-edit", args=[invoice.pk]), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Only Draft invoices can be edited.")
+
     def test_finance_can_download_invoice_pdf(self):
         invoice = self._create_invoice_with_item()
         self.client.login(username="finance_u", password="TempPass123!")
@@ -201,3 +262,73 @@ class InvoicingMvpTests(TestCase):
 
         self.assertEqual(pdf_response.status_code, 403)
         self.assertEqual(excel_response.status_code, 403)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    def test_finance_can_send_invoice_email_and_log_delivery(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.post(reverse("invoice-send-email", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(invoice.invoice_number, mail.outbox[0].subject)
+        self.assertIn("http://testserver/invoices/view/", mail.outbox[0].body)
+        self.assertEqual(mail.outbox[0].to, [invoice.customer.email])
+        log = EmailDeliveryLog.objects.latest("attempted_at")
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)
+        self.assertEqual(log.related_object_type, "invoice")
+        self.assertEqual(log.related_object_id, str(invoice.id))
+        self.assertIsNotNone(log.sent_at)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="invoice.email.sent",
+                target_type="invoice",
+                target_id=str(invoice.id),
+            ).exists()
+        )
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    def test_send_invoice_email_failure_does_not_change_invoice_status(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        with patch("notifications.services.EmailMultiAlternatives.send", side_effect=Exception("SMTP unavailable")):
+            response = self.client.post(reverse("invoice-send-email", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.STATUS_DRAFT)
+        log = EmailDeliveryLog.objects.latest("attempted_at")
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_FAILED)
+        self.assertIn("SMTP unavailable", log.error_message)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action="invoice.email.sent",
+                target_type="invoice",
+                target_id=str(invoice.id),
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="invoice.email.failed",
+                target_type="invoice",
+                target_id=str(invoice.id),
+            ).exists()
+        )
+
+    def test_staff_cannot_send_invoice_email(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="staff_u", password="TempPass123!")
+
+        response = self.client.post(reverse("invoice-send-email", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 403)

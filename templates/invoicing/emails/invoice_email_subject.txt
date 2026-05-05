@@ -1,0 +1,1 @@
+Invoice {{ invoice.invoice_number }} from {{ company_name }}
