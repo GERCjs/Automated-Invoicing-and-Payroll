@@ -4,13 +4,14 @@ from django.contrib.auth.mixins import UserPassesTestMixin
 from django.core.exceptions import PermissionDenied
 
 from core.audit import get_client_ip, log_event
+from .roles import SUPERADMIN
 
 
 def get_user_role(user):
     if not user.is_authenticated:
         return None
     if user.is_superuser:
-        return "admin"
+        return SUPERADMIN
     profile = getattr(user, "role_profile", None)
     if profile is None:
         return None

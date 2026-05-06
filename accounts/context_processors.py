@@ -1,8 +1,11 @@
+from .roles import SUPERADMIN
+
+
 def user_role(request):
     if not request.user.is_authenticated:
         return {"current_user_role": None, "current_user_role_label": None}
     if request.user.is_superuser:
-        return {"current_user_role": "admin", "current_user_role_label": "Admin"}
+        return {"current_user_role": SUPERADMIN, "current_user_role_label": "SuperAdmin"}
     profile = getattr(request.user, "role_profile", None)
     if profile is None:
         return {"current_user_role": None, "current_user_role_label": None}

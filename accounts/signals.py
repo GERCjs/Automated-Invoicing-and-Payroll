@@ -6,6 +6,7 @@ from django.dispatch import receiver
 from core.audit import get_client_ip, log_event
 
 from .models import UserRole
+from .roles import SUPERADMIN
 
 User = get_user_model()
 
@@ -13,9 +14,13 @@ User = get_user_model()
 @receiver(post_save, sender=User)
 def create_or_update_user_role(sender, instance, created, **kwargs):
     if created:
-        UserRole.objects.create(user=instance)
+        role = SUPERADMIN if instance.is_superuser else UserRole._meta.get_field("role").default
+        UserRole.objects.create(user=instance, role=role)
         return
-    UserRole.objects.get_or_create(user=instance)
+    role_profile, _ = UserRole.objects.get_or_create(user=instance)
+    if instance.is_superuser and role_profile.role != SUPERADMIN:
+        role_profile.role = SUPERADMIN
+        role_profile.save(update_fields=["role", "updated_at"])
 
 
 @receiver(user_logged_in)

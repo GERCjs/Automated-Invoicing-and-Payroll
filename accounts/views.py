@@ -9,7 +9,7 @@ from core.audit import get_client_ip, log_event
 
 from .forms import AdminAccountCreationForm, LoginForm, RegistrationForm
 from .permissions import role_required
-from .roles import ADMIN, STAFF
+from .roles import ADMIN, CUSTOMER, SUPERADMIN
 
 
 class UserLoginView(LoginView):
@@ -30,7 +30,7 @@ def register(request):
         form = RegistrationForm(request.POST)
         if form.is_valid():
             user = form.save()
-            user.role_profile.role = STAFF
+            user.role_profile.role = CUSTOMER
             user.role_profile.save(update_fields=["role", "updated_at"])
             log_event(
                 action="auth.registered",
@@ -50,7 +50,7 @@ def register(request):
 
 
 @login_required
-@role_required(ADMIN)
+@role_required(SUPERADMIN, ADMIN)
 def create_admin_account(request):
     if request.method == "POST":
         form = AdminAccountCreationForm(request.POST)

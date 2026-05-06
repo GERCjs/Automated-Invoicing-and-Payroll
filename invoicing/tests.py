@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from accounts.roles import FINANCE, STAFF
+from accounts.roles import CUSTOMER, FINANCE, STAFF
 from core.models import AuditLog
 from notifications.models import EmailDeliveryLog
 
@@ -29,6 +29,10 @@ class InvoicingMvpTests(TestCase):
         self.staff_user = User.objects.create_user(username="staff_u", password="TempPass123!")
         self.staff_user.role_profile.role = STAFF
         self.staff_user.role_profile.save()
+
+        self.customer_user = User.objects.create_user(username="customer_u", password="TempPass123!")
+        self.customer_user.role_profile.role = CUSTOMER
+        self.customer_user.role_profile.save()
 
         self.customer = Customer.objects.create(
             name="Acme Pte Ltd",
@@ -100,6 +104,11 @@ class InvoicingMvpTests(TestCase):
 
     def test_staff_cannot_access_invoice_pages(self):
         self.client.login(username="staff_u", password="TempPass123!")
+        response = self.client.get(reverse("invoice-list"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_customer_cannot_access_invoice_pages(self):
+        self.client.login(username="customer_u", password="TempPass123!")
         response = self.client.get(reverse("invoice-list"))
         self.assertEqual(response.status_code, 403)
 

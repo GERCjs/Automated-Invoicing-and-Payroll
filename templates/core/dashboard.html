@@ -7,7 +7,7 @@
     <h1 class="h3 mb-2">Foundation Dashboard</h1>
     <p class="mb-1">You are logged in and authenticated access is active.</p>
     <p class="text-muted mb-0">This Phase 1 dashboard is intentionally minimal and protected.</p>
-    {% if current_user_role == "admin" %}
+    {% if current_user_role == "superadmin" or current_user_role == "admin" %}
     <div class="mt-3">
         <a href="{% url 'create-admin-account' %}" class="btn btn-primary btn-sm">Create Admin Account</a>
     </div>

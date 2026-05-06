@@ -4,7 +4,7 @@ from django.urls import reverse
 
 from core.models import AuditLog
 
-from .roles import ADMIN, FINANCE, STAFF
+from .roles import ADMIN, CUSTOMER, FINANCE, STAFF, SUPERADMIN
 
 User = get_user_model()
 
@@ -44,7 +44,7 @@ class AccountsPhaseOneTests(TestCase):
             ).exists()
         )
 
-    def test_public_user_can_register_and_gets_staff_role(self):
+    def test_public_user_can_register_and_gets_customer_role(self):
         response = self.client.post(
             reverse("register"),
             data={
@@ -58,7 +58,7 @@ class AccountsPhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], reverse("dashboard"))
         user = User.objects.get(username="newstaff")
-        self.assertEqual(user.role_profile.role, STAFF)
+        self.assertEqual(user.role_profile.role, CUSTOMER)
         self.assertTrue(
             AuditLog.objects.filter(
                 action="auth.registered",
@@ -106,6 +106,20 @@ class AccountsPhaseOneTests(TestCase):
                 user=admin,
             ).exists()
         )
+
+    def test_superadmin_user_can_open_finance_console(self):
+        superadmin = User.objects.create_superuser(
+            username="rootsa",
+            email="rootsa@example.com",
+            password="TempPass123!",
+        )
+
+        self.client.login(username="rootsa", password="TempPass123!")
+        response = self.client.get(reverse("finance-console"))
+
+        self.assertEqual(response.status_code, 200)
+        superadmin.refresh_from_db()
+        self.assertEqual(superadmin.role_profile.role, SUPERADMIN)
 
     def test_staff_enabled_user_sees_admin_console_link(self):
         admin = User.objects.create_user(username="staffadmin", password="TempPass123!", is_staff=True)

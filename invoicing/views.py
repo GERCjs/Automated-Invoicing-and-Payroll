@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from accounts.permissions import role_required
-from accounts.roles import ADMIN, FINANCE
+from accounts.roles import ADMIN, FINANCE, SUPERADMIN
 from core.audit import get_client_ip, log_event
 from notifications.services import send_invoice_email
 
@@ -24,7 +24,7 @@ from .services import (
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_list(request):
     updated_count = refresh_overdue_invoices()
     invoices = Invoice.objects.select_related("customer").all()
@@ -38,7 +38,7 @@ def invoice_list(request):
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_create(request):
     if request.method == "POST":
         form = InvoiceForm(request.POST)
@@ -87,7 +87,7 @@ def invoice_create(request):
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_edit(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
     if invoice.status != Invoice.STATUS_DRAFT:
@@ -130,7 +130,7 @@ def invoice_edit(request, pk):
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_detail(request, pk):
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
     apply_overdue_status(invoice)
@@ -155,7 +155,7 @@ def invoice_detail(request, pk):
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_status_update(request, pk):
     if request.method != "POST":
         raise Http404()
@@ -210,7 +210,7 @@ def invoice_public_view(request, token):
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_download_pdf(request, pk):
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
     pdf_bytes = generate_invoice_pdf(invoice)
@@ -228,7 +228,7 @@ def invoice_download_pdf(request, pk):
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_download_excel(request, pk):
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
     excel_bytes = generate_invoice_excel(invoice)
@@ -249,7 +249,7 @@ def invoice_download_excel(request, pk):
 
 
 @login_required
-@role_required(ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_send_email(request, pk):
     if request.method != "POST":
         raise Http404()
