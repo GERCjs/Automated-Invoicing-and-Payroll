@@ -71,6 +71,8 @@ class AdminAccountCreationForm(RegistrationForm):
     def save(self, commit=True):
         user = super().save(commit=commit)
         if commit:
+            user.is_staff = True
+            user.save(update_fields=["is_staff"])
             user.role_profile.role = ADMIN
             user.role_profile.save(update_fields=["role", "updated_at"])
         return user

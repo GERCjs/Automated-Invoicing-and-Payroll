@@ -97,6 +97,7 @@ class AccountsPhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 302)
         created = User.objects.get(username="admin_created")
         self.assertEqual(created.role_profile.role, ADMIN)
+        self.assertTrue(created.is_staff)
         self.assertTrue(
             AuditLog.objects.filter(
                 action="auth.admin_account.created",
@@ -105,3 +106,24 @@ class AccountsPhaseOneTests(TestCase):
                 user=admin,
             ).exists()
         )
+
+    def test_staff_enabled_user_sees_admin_console_link(self):
+        admin = User.objects.create_user(username="staffadmin", password="TempPass123!", is_staff=True)
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save()
+
+        self.client.login(username="staffadmin", password="TempPass123!")
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Admin Console")
+        self.assertContains(response, reverse("admin:index"))
+
+    def test_non_staff_user_does_not_see_admin_console_link(self):
+        user = User.objects.create_user(username="notstaff", password="TempPass123!")
+        user.role_profile.role = ADMIN
+        user.role_profile.save()
+
+        self.client.login(username="notstaff", password="TempPass123!")
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertNotContains(response, "Admin Console")
