@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Payroll Upload & Preview{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body">
+        <h1 class="h3 mb-3">Payroll Excel Upload</h1>
+        <p class="text-muted mb-3">Upload payroll data to preview payslip calculations, net pay, and CPF contributions (2026 rates).</p>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <a href="{% url 'payroll-template-download' %}" class="btn btn-outline-primary">Download Excel Template</a>
+        </div>
+        <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
+            {% csrf_token %}
+            <div class="col-md-8">
+                <label class="form-label" for="id_payroll_file">{{ form.payroll_file.label }}</label>
+                {{ form.payroll_file }}
+                <div class="form-text">{{ form.payroll_file.help_text }}</div>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">Upload & Preview</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if preview_rows %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h4 mb-0">Payslip Preview</h2>
+    <span class="badge text-bg-secondary">{{ preview_rows|length }} employee(s)</span>
+</div>
+
+{% for row in preview_rows %}
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-light">
+        <strong>Vaniday - Payslip</strong><br>
+        <span class="text-muted">Employee: {{ row.employee_name }}</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="p-3 border-bottom">
+            <div><strong>Primary work location:</strong> {{ row.primary_work_location }}</div>
+            <div><strong>Working days:</strong> {{ row.working_days }} | <strong>No pay leave:</strong> {{ row.no_pay_leave_days }}</div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-bordered mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Earnings</th>
+                        <th class="text-end">Amount (SGD)</th>
+                        <th>Deductions</th>
+                        <th class="text-end">Amount (SGD)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Basic salary</td>
+                        <td class="text-end">{{ row.basic_salary }}</td>
+                        <td>Loan</td>
+                        <td class="text-end">{{ row.loan_deduction }}</td>
+                    </tr>
+                    <tr>
+                        <td>Physical products commission</td>
+                        <td class="text-end">{{ row.physical_products_commission }}</td>
+                        <td>Other deductions</td>
+                        <td class="text-end">{{ row.other_deductions }}</td>
+                    </tr>
+                    <tr>
+                        <td>Credit commission</td>
+                        <td class="text-end">{{ row.credit_commission }}</td>
+                        <td>CPF employee share ({{ row.cpf_employee_rate }}%)</td>
+                        <td class="text-end">{{ row.cpf_employee_amount }}</td>
+                    </tr>
+                    <tr>
+                        <td>Services commission</td>
+                        <td class="text-end">{{ row.services_commission }}</td>
+                        <td>CPF employer share ({{ row.cpf_employer_rate }}%)</td>
+                        <td class="text-end">{{ row.cpf_employer_amount }}</td>
+                    </tr>
+                    <tr class="fw-semibold">
+                        <td>Total earnings</td>
+                        <td class="text-end">{{ row.total_earnings }}</td>
+                        <td>Total deductions</td>
+                        <td class="text-end">{{ row.total_deductions }}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="3" class="text-end fw-bold">Net pay</td>
+                        <td class="text-end fw-bold">{{ row.net_pay }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        {% if row.notes %}
+        <div class="p-3 border-top">
+            <strong>Note:</strong> {{ row.notes }}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

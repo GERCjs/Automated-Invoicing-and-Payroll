@@ -5,6 +5,7 @@
 {% block content %}
 <div class="p-4 bg-white rounded shadow-sm border">
     <h1 class="h3 mb-2">Finance Console</h1>
-    <p class="mb-0">Only Admin and Finance roles can view this page.</p>
+    <p class="mb-3">Only Admin and Finance roles can view this page.</p>
+    <a href="{% url 'payroll-upload-preview' %}" class="btn btn-primary">Payroll Upload & Preview</a>
 </div>
 {% endblock %}
