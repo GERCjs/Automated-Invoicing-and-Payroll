@@ -1,40 +1,421 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import Count, Sum
+from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+import uuid
 
 from accounts.permissions import role_required
-from accounts.roles import ADMIN, FINANCE, SUPERADMIN
+from accounts.roles import ADMIN, CUSTOMER, FINANCE, SUPERADMIN
 from core.audit import get_client_ip, log_event
+from imports.models import ImportJob, ImportRowError
 from notifications.services import send_invoice_email
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
-from .forms import InvoiceForm, InvoiceItemFormSet
+from .forms import InvoiceCsvUploadForm, InvoiceForm, InvoiceItemFormSet
+from .models import Customer as InvoiceCustomer
 from .models import Invoice
 from .services import (
     apply_overdue_status,
     generate_invoice_number,
+    import_invoice_rows_from_preview,
     mark_invoice_viewed,
+    parse_invoice_csv,
     recalculate_invoice_totals,
     refresh_overdue_invoices,
     transition_invoice_status,
 )
+
+CSV_IMPORT_SESSION_KEY_PREFIX = "invoice_csv_import_preview_"
+
+
+def _get_linked_customer_for_user(user):
+    email = (user.email or "").strip()
+    if not email:
+        return None
+    return InvoiceCustomer.objects.filter(email__iexact=email).first()
+
+
+def _get_customer_invoice_queryset(user):
+    linked_customer = _get_linked_customer_for_user(user)
+    if linked_customer is None:
+        return None, Invoice.objects.none()
+    invoices = Invoice.objects.select_related("customer").filter(customer=linked_customer)
+    return linked_customer, invoices
+
+
+def _csv_import_session_key(import_token: str) -> str:
+    return f"{CSV_IMPORT_SESSION_KEY_PREFIX}{import_token}"
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_csv_upload(request):
+    form = InvoiceCsvUploadForm()
+    preview_payload = None
+
+    if request.method == "POST":
+        action = request.POST.get("action", "preview")
+
+        if action == "confirm":
+            import_token = request.POST.get("import_token", "").strip()
+            session_key = _csv_import_session_key(import_token)
+            preview_payload = request.session.get(session_key)
+            if not preview_payload:
+                messages.error(request, "Import preview expired. Please upload the CSV again.")
+                return redirect("invoice-csv-upload")
+
+            import_job = get_object_or_404(ImportJob, pk=preview_payload["import_job_id"])
+            valid_rows = preview_payload["valid_rows"]
+            all_rows = preview_payload["all_rows"]
+
+            import_job.status = ImportJob.STATUS_PROCESSING
+            import_job.started_at = timezone.now()
+            import_job.save(update_fields=["status", "started_at", "updated_at"])
+
+            if not valid_rows:
+                import_job.status = ImportJob.STATUS_COMPLETED_WITH_ERRORS
+                import_job.completed_at = timezone.now()
+                import_job.saved_rows = 0
+                import_job.save(update_fields=["status", "completed_at", "saved_rows", "updated_at"])
+                messages.error(request, "No valid rows to import. Please fix CSV errors and retry.")
+                return redirect("invoice-csv-upload")
+
+            summary = import_invoice_rows_from_preview(
+                valid_rows=valid_rows,
+                all_rows=all_rows,
+                source_file_name=preview_payload["source_file_name"],
+                initiated_by=request.user,
+            )
+
+            import_job.status = (
+                ImportJob.STATUS_COMPLETED
+                if import_job.invalid_rows == 0
+                else ImportJob.STATUS_COMPLETED_WITH_ERRORS
+            )
+            import_job.completed_at = timezone.now()
+            import_job.saved_rows = summary["saved_rows"]
+            import_job.save(update_fields=["status", "completed_at", "saved_rows", "updated_at"])
+
+            request.session.pop(session_key, None)
+            log_event(
+                action="invoice.csv_import.confirmed",
+                user=request.user,
+                metadata={
+                    "path": request.path,
+                    "import_job_id": import_job.id,
+                    "saved_rows": summary["saved_rows"],
+                    "created_invoices": summary["created_invoices"],
+                },
+                ip_address=get_client_ip(request),
+            )
+            messages.success(
+                request,
+                (
+                    f"CSV import completed. Invoices created: {summary['created_invoices']}, "
+                    f"items created: {summary['created_items']}, source rows stored: {summary['stored_source_rows']}."
+                ),
+            )
+            return redirect("invoice-list")
+
+        form = InvoiceCsvUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            csv_file = form.cleaned_data["csv_file"]
+            try:
+                parsed = parse_invoice_csv(csv_file)
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return render(
+                    request,
+                    "invoicing/invoice_csv_upload_preview.html",
+                    {"form": form, "preview": None},
+                )
+
+            import_job = ImportJob.objects.create(
+                module=ImportJob.MODULE_INVOICING,
+                source_file_name=csv_file.name,
+                status=ImportJob.STATUS_PENDING,
+                total_rows=parsed["total_rows"],
+                valid_rows=len(parsed["valid_rows"]),
+                invalid_rows=len(parsed["invalid_rows"]),
+                initiated_by=request.user,
+            )
+
+            row_errors = []
+            for row in parsed["invalid_rows"]:
+                for error_message in row["errors"]:
+                    row_errors.append(
+                        ImportRowError(
+                            import_job=import_job,
+                            row_number=row["row_number"],
+                            field_name="",
+                            error_message=error_message,
+                            raw_data=row["source"],
+                        )
+                    )
+            if row_errors:
+                ImportRowError.objects.bulk_create(row_errors)
+
+            import_token = uuid.uuid4().hex
+            session_key = _csv_import_session_key(import_token)
+            preview_payload = {
+                "import_token": import_token,
+                "import_job_id": import_job.id,
+                "source_file_name": csv_file.name,
+                "total_rows": parsed["total_rows"],
+                "valid_rows": parsed["valid_rows"],
+                "invalid_rows": parsed["invalid_rows"],
+                "all_rows": parsed["all_rows"],
+                "preview_groups": parsed["preview_groups"],
+            }
+            request.session[session_key] = preview_payload
+            log_event(
+                action="invoice.csv_import.previewed",
+                user=request.user,
+                metadata={
+                    "path": request.path,
+                    "import_job_id": import_job.id,
+                    "total_rows": parsed["total_rows"],
+                    "valid_rows": len(parsed["valid_rows"]),
+                    "invalid_rows": len(parsed["invalid_rows"]),
+                },
+                ip_address=get_client_ip(request),
+            )
+    return render(
+        request,
+        "invoicing/invoice_csv_upload_preview.html",
+        {
+            "form": form,
+            "preview": preview_payload,
+            "invalid_preview_rows": (preview_payload or {}).get("invalid_rows", [])[:20],
+            "group_preview_rows": (preview_payload or {}).get("preview_groups", []),
+        },
+    )
+
+
+@login_required
+@role_required(CUSTOMER)
+def customer_invoice_dashboard(request):
+    refresh_overdue_invoices()
+    linked_customer, scoped_invoices = _get_customer_invoice_queryset(request.user)
+
+    action_statuses = [
+        Invoice.STATUS_DRAFT,
+        Invoice.STATUS_SENT,
+        Invoice.STATUS_VIEWED,
+        Invoice.STATUS_OVERDUE,
+    ]
+    action_required_invoices = scoped_invoices.filter(status__in=action_statuses).order_by("due_date", "-issue_date")
+    paid_invoices = scoped_invoices.filter(status=Invoice.STATUS_PAID).order_by("-issue_date", "-created_at")
+
+    outstanding_amount = (
+        action_required_invoices.aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
+    overdue_count = action_required_invoices.filter(status=Invoice.STATUS_OVERDUE).count()
+
+    log_event(
+        action="invoice.customer.dashboard.viewed",
+        user=request.user,
+        metadata={
+            "path": request.path,
+            "linked_customer_id": str(linked_customer.id) if linked_customer else None,
+            "linked_customer_found": linked_customer is not None,
+        },
+        ip_address=get_client_ip(request),
+    )
+    return render(
+        request,
+        "invoicing/customer_invoice_dashboard.html",
+        {
+            "linked_customer": linked_customer,
+            "action_required_invoices": action_required_invoices,
+            "paid_invoices": paid_invoices,
+            "outstanding_amount": outstanding_amount,
+            "overdue_count": overdue_count,
+        },
+    )
+
+
+@login_required
+@role_required(CUSTOMER)
+def customer_invoice_detail(request, pk):
+    linked_customer, scoped_invoices = _get_customer_invoice_queryset(request.user)
+    if linked_customer is None:
+        raise Http404()
+    invoice = get_object_or_404(scoped_invoices, pk=pk)
+    apply_overdue_status(invoice)
+    invoice.refresh_from_db()
+
+    log_event(
+        action="invoice.customer.detail.viewed",
+        user=request.user,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata={
+            "invoice_number": invoice.invoice_number,
+            "customer_id": linked_customer.id,
+        },
+        ip_address=get_client_ip(request),
+    )
+    return render(
+        request,
+        "invoicing/customer_invoice_detail.html",
+        {"invoice": invoice, "items": invoice.items.all()},
+    )
+
+
+@login_required
+@role_required(CUSTOMER)
+def customer_invoice_download_pdf(request, pk):
+    linked_customer, scoped_invoices = _get_customer_invoice_queryset(request.user)
+    if linked_customer is None:
+        raise Http404()
+    invoice = get_object_or_404(scoped_invoices, pk=pk)
+    pdf_bytes = generate_invoice_pdf(invoice)
+
+    log_event(
+        action="invoice.customer.pdf.downloaded",
+        user=request.user,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata={
+            "invoice_number": invoice.invoice_number,
+            "customer_id": linked_customer.id,
+        },
+        ip_address=get_client_ip(request),
+    )
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{invoice.invoice_number}.pdf"'
+    return response
 
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_list(request):
     updated_count = refresh_overdue_invoices()
+    selected_filter = request.GET.get("status", "").strip().lower()
+    search_query = request.GET.get("q", "").strip()
     invoices = Invoice.objects.select_related("customer").all()
+
+    filter_map = {
+        "draft": [Invoice.STATUS_DRAFT],
+        "sent": [Invoice.STATUS_SENT],
+        "viewed": [Invoice.STATUS_VIEWED],
+        "paid": [Invoice.STATUS_PAID],
+        "overdue": [Invoice.STATUS_OVERDUE],
+    }
+    active_statuses = filter_map.get(selected_filter)
+    if active_statuses:
+        invoices = invoices.filter(status__in=active_statuses)
+
+    if search_query:
+        invoices = invoices.filter(
+            Q(invoice_number__icontains=search_query)
+            | Q(customer__name__icontains=search_query)
+            | Q(customer__email__icontains=search_query)
+        )
+
+    status_summary = {
+        "total": Invoice.objects.count(),
+        "draft": Invoice.objects.filter(status=Invoice.STATUS_DRAFT).count(),
+        "sent": Invoice.objects.filter(status=Invoice.STATUS_SENT).count(),
+        "viewed": Invoice.objects.filter(status=Invoice.STATUS_VIEWED).count(),
+        "paid": Invoice.objects.filter(status=Invoice.STATUS_PAID).count(),
+        "overdue": Invoice.objects.filter(status=Invoice.STATUS_OVERDUE).count(),
+    }
+
+    filter_label_map = {
+        "draft": "Draft invoices",
+        "sent": "Sent invoices",
+        "viewed": "Viewed invoices",
+        "paid": "Paid invoices",
+        "overdue": "Overdue invoices",
+    }
+    active_filter_label = filter_label_map.get(selected_filter, "All invoices")
+
     log_event(
         action="invoice.list.viewed",
+        user=request.user,
+        metadata={
+            "path": request.path,
+            "overdue_updates": updated_count,
+            "filter": selected_filter or "all",
+            "search_query": search_query,
+        },
+        ip_address=get_client_ip(request),
+    )
+    return render(
+        request,
+        "invoicing/invoice_list.html",
+        {
+            "invoices": invoices,
+            "selected_filter": selected_filter,
+            "search_query": search_query,
+            "active_filter_label": active_filter_label,
+            "status_summary": status_summary,
+            "result_count": invoices.count(),
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_dashboard(request):
+    updated_count = refresh_overdue_invoices()
+
+    status_counts = Invoice.objects.values("status").annotate(total_count=Count("id"))
+    counts_by_status = {
+        row["status"]: row["total_count"] for row in status_counts if row["status"] is not None
+    }
+
+    total_invoices = sum(counts_by_status.values())
+    draft_count = counts_by_status.get(Invoice.STATUS_DRAFT, 0)
+    sent_count = counts_by_status.get(Invoice.STATUS_SENT, 0)
+    viewed_count = counts_by_status.get(Invoice.STATUS_VIEWED, 0)
+    paid_count = counts_by_status.get(Invoice.STATUS_PAID, 0)
+    overdue_count = counts_by_status.get(Invoice.STATUS_OVERDUE, 0)
+    unsent_count = draft_count
+
+    outstanding_amount = (
+        Invoice.objects.filter(
+            status__in=[
+                Invoice.STATUS_DRAFT,
+                Invoice.STATUS_SENT,
+                Invoice.STATUS_VIEWED,
+                Invoice.STATUS_OVERDUE,
+            ]
+        ).aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
+
+    recent_invoices = Invoice.objects.select_related("customer").order_by("-issue_date", "-created_at")[:8]
+
+    log_event(
+        action="invoice.dashboard.viewed",
         user=request.user,
         metadata={"path": request.path, "overdue_updates": updated_count},
         ip_address=get_client_ip(request),
     )
-    return render(request, "invoicing/invoice_list.html", {"invoices": invoices})
+    return render(
+        request,
+        "invoicing/invoice_dashboard.html",
+        {
+            "total_invoices": total_invoices,
+            "draft_count": draft_count,
+            "sent_count": sent_count,
+            "viewed_count": viewed_count,
+            "paid_count": paid_count,
+            "overdue_count": overdue_count,
+            "unsent_count": unsent_count,
+            "outstanding_amount": outstanding_amount,
+            "recent_invoices": recent_invoices,
+        },
+    )
 
 
 @login_required

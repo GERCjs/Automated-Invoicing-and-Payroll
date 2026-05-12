@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import csv
+from collections import defaultdict
+from datetime import datetime, timedelta
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
+from io import StringIO
+from typing import Any
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from .models import Invoice, InvoiceItem
+from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow
 
 ZERO = Decimal("0.00")
 TWOPLACES = Decimal("0.01")
@@ -122,3 +128,395 @@ def mark_invoice_viewed(invoice: Invoice) -> Invoice:
     invoice.save(update_fields=["viewed_at", "status", "updated_at"])
     apply_overdue_status(invoice)
     return invoice
+
+
+CSV_HEADER_ALIASES = {
+    "seller_id": ["seller_id", "sellerid"],
+    "shop_title": ["shop_title", "shoptitle", "merchant", "merchant_name"],
+    "order_id": ["orderid", "order_id"],
+    "partner_type_name": ["partnertypename", "partner_type_name"],
+    "payment_method": ["paymentmethod", "payment_method"],
+    "product_type": ["producttype", "product_type"],
+    "customer_id": ["customerid", "customer_id"],
+    "status": ["status"],
+    "order_status": ["orderstatus", "order_status"],
+    "email": ["email"],
+    "customer_name": ["customername", "customer_name"],
+    "contact_no": ["contactno", "contact_no"],
+    "qty": ["qty", "quantity"],
+    "service_name": ["servicename", "service_name"],
+    "booked_date": ["bookeddate", "booked_date"],
+    "service_duration": ["service_duration", "serviceduration"],
+    "staff_id": ["staffid", "staff_id"],
+    "staff_name": ["staffname", "staff_name"],
+    "total_revenue": ["total_revenue", "totalrevenue"],
+    "credit_card": ["credit_card", "creditcard"],
+    "shipping_amount": ["shippingamount", "shipping_amount"],
+    "reward_point": ["reward_point", "rewardpoint"],
+    "vaniday_commission": ["vanidaycommission", "vaniday_commission"],
+    "vaniday_share": ["vanidayshare", "vaniday_share"],
+    "cashback_fee": ["cashback_fee", "cashbackfee"],
+    "cashback_discount": ["cashback_discount", "cashbackdiscount"],
+    "cashback_date": ["cashback_date", "cashbackdate"],
+    "salon_share": ["salonshare", "salon_share"],
+}
+
+
+def _normalize_key(value: str) -> str:
+    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
+
+
+def _parse_decimal(raw_value: Any) -> Decimal | None:
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except Exception:
+        return None
+
+
+def _parse_int(raw_value: Any) -> int | None:
+    number = _parse_decimal(raw_value)
+    if number is None:
+        return None
+    try:
+        return int(number)
+    except Exception:
+        return None
+
+
+def _parse_datetime(raw_value: Any) -> datetime | None:
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%Y",
+    ]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(text, fmt)
+            if timezone.is_naive(parsed):
+                return timezone.make_aware(parsed, timezone.get_current_timezone())
+            return parsed
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_date(raw_value: Any) -> date | None:
+    parsed = _parse_datetime(raw_value)
+    return parsed.date() if parsed else None
+
+
+def _resolve_field(normalized_row: dict[str, Any], canonical_field: str) -> str:
+    for alias in CSV_HEADER_ALIASES.get(canonical_field, []):
+        if alias in normalized_row:
+            return str(normalized_row.get(alias, "")).strip()
+    return ""
+
+
+def _coalesce(*values: str) -> str:
+    for value in values:
+        cleaned = (value or "").strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _invoice_group_period(booked_date: datetime | None) -> str:
+    reference = booked_date.date() if booked_date else timezone.localdate()
+    return reference.strftime("%Y-%m")
+
+
+def _build_item_description(service_name: str, order_id: str, booked_date: datetime | None, product_type: str) -> str:
+    base_service = _coalesce(service_name, product_type, "Imported Service")
+    parts = [base_service]
+    if order_id:
+        parts.append(f"OrderID: {order_id}")
+    if booked_date:
+        parts.append(f"Booked: {booked_date.strftime('%d %b %Y')}")
+    return " | ".join(parts)
+
+
+def _sanitize_email(raw_email: str) -> str:
+    email = (raw_email or "").strip().lower()
+    return email if "@" in email else ""
+
+
+def _build_fallback_email(customer_name: str, seller_id: str) -> str:
+    safe_name = "".join(ch.lower() if ch.isalnum() else "-" for ch in customer_name).strip("-")
+    safe_name = safe_name or "merchant"
+    safe_seller = "".join(ch.lower() if ch.isalnum() else "" for ch in seller_id)
+    suffix = safe_seller[:12] or "import"
+    return f"{safe_name}-{suffix}@import.local"
+
+
+def parse_invoice_csv(uploaded_file) -> dict[str, Any]:
+    raw_bytes = uploaded_file.read()
+    uploaded_file.seek(0)
+    decode_attempts = ["utf-8-sig", "utf-8", "latin-1"]
+    decoded_text = None
+    for encoding in decode_attempts:
+        try:
+            decoded_text = raw_bytes.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if decoded_text is None:
+        raise ValueError("CSV encoding is not supported. Please upload UTF-8 or Latin-1 CSV.")
+
+    reader = csv.DictReader(StringIO(decoded_text))
+    headers = reader.fieldnames or []
+    if not headers:
+        raise ValueError("CSV file has no header row.")
+
+    normalized_rows: list[dict[str, Any]] = []
+    invalid_rows: list[dict[str, Any]] = []
+    valid_rows: list[dict[str, Any]] = []
+
+    for index, source_row in enumerate(reader, start=2):
+        normalized_source = {_normalize_key(key): value for key, value in source_row.items() if key is not None}
+        mapped = {
+            "seller_id": _resolve_field(normalized_source, "seller_id"),
+            "shop_title": _resolve_field(normalized_source, "shop_title"),
+            "order_id": _resolve_field(normalized_source, "order_id"),
+            "partner_type_name": _resolve_field(normalized_source, "partner_type_name"),
+            "payment_method": _resolve_field(normalized_source, "payment_method"),
+            "product_type": _resolve_field(normalized_source, "product_type"),
+            "customer_id": _resolve_field(normalized_source, "customer_id"),
+            "status": _resolve_field(normalized_source, "status"),
+            "order_status": _resolve_field(normalized_source, "order_status"),
+            "email": _resolve_field(normalized_source, "email"),
+            "customer_name": _resolve_field(normalized_source, "customer_name"),
+            "contact_no": _resolve_field(normalized_source, "contact_no"),
+            "qty": _resolve_field(normalized_source, "qty"),
+            "service_name": _resolve_field(normalized_source, "service_name"),
+            "booked_date": _resolve_field(normalized_source, "booked_date"),
+            "service_duration": _resolve_field(normalized_source, "service_duration"),
+            "staff_id": _resolve_field(normalized_source, "staff_id"),
+            "staff_name": _resolve_field(normalized_source, "staff_name"),
+            "total_revenue": _resolve_field(normalized_source, "total_revenue"),
+            "credit_card": _resolve_field(normalized_source, "credit_card"),
+            "shipping_amount": _resolve_field(normalized_source, "shipping_amount"),
+            "reward_point": _resolve_field(normalized_source, "reward_point"),
+            "vaniday_commission": _resolve_field(normalized_source, "vaniday_commission"),
+            "vaniday_share": _resolve_field(normalized_source, "vaniday_share"),
+            "cashback_fee": _resolve_field(normalized_source, "cashback_fee"),
+            "cashback_discount": _resolve_field(normalized_source, "cashback_discount"),
+            "cashback_date": _resolve_field(normalized_source, "cashback_date"),
+            "salon_share": _resolve_field(normalized_source, "salon_share"),
+        }
+
+        customer_name = _coalesce(mapped["shop_title"], mapped["customer_name"], mapped["email"])
+        email_value = _sanitize_email(mapped["email"])
+        amount_value = (
+            _parse_decimal(mapped["vaniday_share"])
+            or _parse_decimal(mapped["vaniday_commission"])
+            or _parse_decimal(mapped["total_revenue"])
+        )
+        quantity_value = _parse_decimal(mapped["qty"]) or Decimal("1.00")
+        booked_at = _parse_datetime(mapped["booked_date"])
+
+        row_errors = []
+        if not customer_name:
+            row_errors.append("Missing merchant/customer identity (shop_title, customerName, or email).")
+        if amount_value is None:
+            row_errors.append("Missing numeric amount (vanidayShare, vanidayCommission, or Total_Revenue).")
+        elif amount_value < ZERO:
+            row_errors.append("Amount must be zero or positive.")
+        if quantity_value <= ZERO:
+            row_errors.append("Quantity must be greater than zero.")
+        if mapped["booked_date"] and booked_at is None:
+            row_errors.append("bookedDate format is invalid.")
+
+        transformed = {
+            "row_number": index,
+            "source": mapped,
+            "customer_name": customer_name,
+            "email": email_value,
+            "amount": str(_to_money(amount_value or ZERO)),
+            "quantity": str(_to_money(quantity_value)),
+            "booked_at": booked_at.isoformat() if booked_at else "",
+            "item_description": _build_item_description(
+                mapped["service_name"],
+                mapped["order_id"],
+                booked_at,
+                mapped["product_type"],
+            ),
+            "group_period": _invoice_group_period(booked_at),
+            "errors": row_errors,
+        }
+        normalized_rows.append(transformed)
+        if row_errors:
+            invalid_rows.append(transformed)
+        else:
+            valid_rows.append(transformed)
+
+    preview_groups = defaultdict(lambda: {"customer_name": "", "period": "", "rows": 0, "amount_total": ZERO})
+    for row in valid_rows:
+        key = f"{row['customer_name']}|{row['email'] or 'no-email'}|{row['group_period']}"
+        group = preview_groups[key]
+        group["customer_name"] = row["customer_name"]
+        group["period"] = row["group_period"]
+        group["rows"] += 1
+        group["amount_total"] += Decimal(row["amount"])
+
+    return {
+        "headers": headers,
+        "total_rows": len(normalized_rows),
+        "all_rows": normalized_rows,
+        "valid_rows": valid_rows,
+        "invalid_rows": invalid_rows,
+        "preview_groups": [
+            {
+                "customer_name": group["customer_name"],
+                "period": group["period"],
+                "rows": group["rows"],
+                "amount_total": f"{_to_money(group['amount_total']):.2f}",
+            }
+            for group in preview_groups.values()
+        ],
+    }
+
+
+def import_invoice_rows_from_preview(
+    valid_rows: list[dict[str, Any]],
+    all_rows: list[dict[str, Any]],
+    source_file_name: str,
+    initiated_by=None,
+) -> dict[str, int]:
+    customers_cache: dict[str, Customer] = {}
+    created_customers = 0
+    created_invoices = 0
+    created_items = 0
+
+    grouped_valid_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in valid_rows:
+        group_key = f"{row['customer_name']}|{row['email'] or 'no-email'}|{row['group_period']}"
+        grouped_valid_rows[group_key].append(row)
+
+    with transaction.atomic():
+        for row in all_rows:
+            source = row["source"]
+            InvoiceSourceRow.objects.create(
+                seller_id=source["seller_id"],
+                shop_title=source["shop_title"],
+                order_id=source["order_id"],
+                partner_type_name=source["partner_type_name"],
+                payment_method=source["payment_method"],
+                product_type=source["product_type"],
+                customer_id=source["customer_id"],
+                status=source["status"],
+                order_status=source["order_status"],
+                email=_sanitize_email(source["email"]),
+                customer_name=source["customer_name"],
+                contact_no=source["contact_no"],
+                qty=_parse_decimal(source["qty"]),
+                service_name=source["service_name"],
+                booked_date=_parse_datetime(source["booked_date"]),
+                service_duration=_parse_int(source["service_duration"]),
+                staff_id=source["staff_id"],
+                staff_name=source["staff_name"],
+                total_revenue=_parse_decimal(source["total_revenue"]),
+                credit_card=_parse_decimal(source["credit_card"]),
+                shipping_amount=_parse_decimal(source["shipping_amount"]),
+                reward_point=_parse_decimal(source["reward_point"]),
+                vaniday_commission=_parse_decimal(source["vaniday_commission"]),
+                vaniday_share=_parse_decimal(source["vaniday_share"]),
+                cashback_fee=_parse_decimal(source["cashback_fee"]),
+                cashback_discount=_parse_decimal(source["cashback_discount"]),
+                cashback_date=_parse_date(source["cashback_date"]),
+                salon_share=_parse_decimal(source["salon_share"]),
+                source_file_name=source_file_name,
+                raw_data=source,
+            )
+
+        for grouped_rows in grouped_valid_rows.values():
+            sample = grouped_rows[0]
+            customer_name = sample["customer_name"]
+            email_value = sample["email"]
+            seller_id = sample["source"]["seller_id"]
+            customer_email = email_value or _build_fallback_email(customer_name, seller_id)
+
+            if customer_email in customers_cache:
+                customer = customers_cache[customer_email]
+            else:
+                customer = Customer.objects.filter(email__iexact=customer_email).first()
+                if customer is None:
+                    customer = Customer.objects.create(
+                        name=customer_name[:255],
+                        email=customer_email,
+                        phone=sample["source"]["contact_no"][:30],
+                        created_by=initiated_by,
+                    )
+                    created_customers += 1
+                else:
+                    updated_fields = []
+                    if not customer.name and customer_name:
+                        customer.name = customer_name[:255]
+                        updated_fields.append("name")
+                    if not customer.phone and sample["source"]["contact_no"]:
+                        customer.phone = sample["source"]["contact_no"][:30]
+                        updated_fields.append("phone")
+                    if updated_fields:
+                        updated_fields.append("updated_at")
+                        customer.save(update_fields=updated_fields)
+                customers_cache[customer_email] = customer
+
+            booked_dates = [
+                datetime.fromisoformat(row["booked_at"]).date()
+                for row in grouped_rows
+                if row["booked_at"]
+            ]
+            issue_date = min(booked_dates) if booked_dates else timezone.localdate()
+            payment_term_days = getattr(settings, "INVOICE_PAYMENT_TERM_DAYS", 30)
+            due_date = issue_date + timedelta(days=payment_term_days)
+
+            invoice = Invoice.objects.create(
+                invoice_number=generate_invoice_number(),
+                customer=customer,
+                status=Invoice.STATUS_DRAFT,
+                issue_date=issue_date,
+                due_date=due_date,
+                currency="SGD",
+                created_by=initiated_by,
+                notes=f"Imported from CSV: {source_file_name}",
+            )
+            created_invoices += 1
+
+            for row in grouped_rows:
+                amount = Decimal(row["amount"])
+                quantity = Decimal(row["quantity"])
+                unit_price = _to_money(amount / quantity) if quantity > ZERO else amount
+                InvoiceItem.objects.create(
+                    invoice=invoice,
+                    description=row["item_description"][:255],
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    tax_rate=ZERO,
+                    line_total=amount,
+                )
+                created_items += 1
+
+            recalculate_invoice_totals(invoice)
+
+    return {
+        "created_customers": created_customers,
+        "created_invoices": created_invoices,
+        "created_items": created_items,
+        "saved_rows": len(valid_rows),
+        "stored_source_rows": len(all_rows),
+    }

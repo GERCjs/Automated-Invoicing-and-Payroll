@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice {{ invoice.invoice_number }} | My Invoices{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Invoice {{ invoice.invoice_number }}</h1>
+    <div class="d-flex gap-2">
+        <a href="{% url 'customer-invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
+        <a href="{% url 'customer-invoice-dashboard' %}" class="btn btn-outline-secondary">Back to My Invoices</a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-6">
+                <p class="mb-1"><strong>Invoice #:</strong> {{ invoice.invoice_number }}</p>
+                <p class="mb-1"><strong>Invoice Date:</strong> {{ invoice.issue_date }}</p>
+                <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
+                <p class="mb-0"><strong>Status:</strong> <span class="badge text-bg-secondary">{{ invoice.get_status_display }}</span></p>
+            </div>
+            <div class="col-md-6">
+                <p class="mb-1"><strong>Customer:</strong> {{ invoice.customer.name }}</p>
+                <p class="mb-1"><strong>Email:</strong> {{ invoice.customer.email }}</p>
+                <p class="mb-1"><strong>Currency:</strong> {{ invoice.currency }}</p>
+                <p class="mb-0"><strong>Total:</strong> {{ invoice.currency }} {{ invoice.total_amount }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">Invoice Items</div>
+    <div class="table-responsive">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th class="text-end">Qty</th>
+                    <th class="text-end">Unit Price</th>
+                    <th class="text-end">Tax %</th>
+                    <th class="text-end">Line Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td class="text-end">{{ item.quantity }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ item.unit_price }}</td>
+                    <td class="text-end">{{ item.tax_rate }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ item.line_total }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" class="text-center py-3">No items available.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <th colspan="4" class="text-end">Subtotal</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.subtotal }}</th>
+                </tr>
+                <tr>
+                    <th colspan="4" class="text-end">Tax</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.tax_amount }}</th>
+                </tr>
+                <tr>
+                    <th colspan="4" class="text-end">Total</th>
+                    <th class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</th>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endblock %}

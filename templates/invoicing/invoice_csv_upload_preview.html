@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice CSV Upload | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body">
+        <h1 class="h3 mb-2">Invoice CSV Upload</h1>
+        <p class="text-muted mb-3">
+            Upload Vaniday CSV data, preview grouped invoices, and confirm import.
+        </p>
+        <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="preview">
+            <div class="col-md-8">
+                <label class="form-label" for="id_csv_file">{{ form.csv_file.label }}</label>
+                {{ form.csv_file }}
+                <div class="form-text">{{ form.csv_file.help_text }}</div>
+                {% for error in form.csv_file.errors %}
+                <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">Upload & Preview</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if preview %}
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <h2 class="h5 mb-3">Preview Summary</h2>
+        <div class="row g-3">
+            <div class="col-md-3">
+                <div class="border rounded p-3">
+                    <div class="text-muted small">Total Rows</div>
+                    <div class="h4 mb-0">{{ preview.total_rows }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="border rounded p-3">
+                    <div class="text-muted small">Valid Rows</div>
+                    <div class="h4 mb-0 text-success">{{ preview.valid_rows|length }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="border rounded p-3">
+                    <div class="text-muted small">Invalid Rows</div>
+                    <div class="h4 mb-0 text-danger">{{ preview.invalid_rows|length }}</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="border rounded p-3">
+                    <div class="text-muted small">Source File</div>
+                    <div class="small fw-semibold">{{ preview.source_file_name }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Grouped Invoice Preview</span>
+        <span class="badge text-bg-secondary">{{ group_preview_rows|length }} group(s)</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Merchant/Customer</th>
+                    <th>Period</th>
+                    <th class="text-end">Rows</th>
+                    <th class="text-end">Amount (SGD)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in group_preview_rows %}
+                <tr>
+                    <td>{{ row.customer_name }}</td>
+                    <td>{{ row.period }}</td>
+                    <td class="text-end">{{ row.rows }}</td>
+                    <td class="text-end">{{ row.amount_total }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" class="text-center py-4">No valid groups to import.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if invalid_preview_rows %}
+<div class="card shadow-sm mb-3 border-danger">
+    <div class="card-header bg-danger-subtle text-danger-emphasis">
+        Validation Issues (First 20 Invalid Rows)
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>CSV Row</th>
+                    <th>Merchant</th>
+                    <th>OrderID</th>
+                    <th>Error(s)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in invalid_preview_rows %}
+                <tr>
+                    <td>{{ row.row_number }}</td>
+                    <td>{{ row.customer_name|default:"-" }}</td>
+                    <td>{{ row.source.order_id|default:"-" }}</td>
+                    <td>
+                        {% for err in row.errors %}
+                        <div class="text-danger small">{{ err }}</div>
+                        {% endfor %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="d-flex gap-2">
+    <form method="post" class="d-inline">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="confirm">
+        <input type="hidden" name="import_token" value="{{ preview.import_token }}">
+        <button type="submit" class="btn btn-success" {% if not preview.valid_rows %}disabled{% endif %}>
+            Confirm Import
+        </button>
+    </form>
+    <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-secondary">Start New Upload</a>
+    <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark">Back to Invoice List</a>
+</div>
+{% endif %}
+{% endblock %}

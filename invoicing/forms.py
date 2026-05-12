@@ -1,5 +1,6 @@
 from django import forms
 from django.forms import inlineformset_factory
+from django.core.validators import FileExtensionValidator
 
 from .models import Invoice, InvoiceItem
 
@@ -38,3 +39,12 @@ InvoiceItemFormSet = inlineformset_factory(
     validate_min=True,
     can_delete=True,
 )
+
+
+class InvoiceCsvUploadForm(forms.Form):
+    csv_file = forms.FileField(
+        label="Vaniday Invoice CSV File",
+        help_text="Upload a CSV file exported from Vaniday invoice source data.",
+        validators=[FileExtensionValidator(allowed_extensions=["csv"])],
+        widget=forms.ClearableFileInput(attrs={"class": "form-control"}),
+    )

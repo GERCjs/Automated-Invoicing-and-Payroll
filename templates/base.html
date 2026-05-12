@@ -26,7 +26,12 @@
                     <a class="nav-link" href="{% url 'finance-console' %}">Payroll</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{% url 'invoice-list' %}">Invoices</a>
+                    <a class="nav-link" href="{% url 'invoice-dashboard' %}">Invoices</a>
+                </li>
+                {% endif %}
+                {% if current_user_role == "customer" %}
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'customer-invoice-dashboard' %}">My Invoices</a>
                 </li>
                 {% endif %}
                 {% if user.is_staff %}

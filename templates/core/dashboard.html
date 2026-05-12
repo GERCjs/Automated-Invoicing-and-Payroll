@@ -13,4 +13,23 @@
     </div>
     {% endif %}
 </div>
+
+{% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
+<div class="p-4 bg-white rounded shadow-sm border">
+    <h2 class="h5 mb-2">Invoice Officer Workspace</h2>
+    <p class="mb-3 text-muted">Open the action-based invoicing dashboard for draft, overdue, and outstanding follow-up.</p>
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="{% url 'invoice-dashboard' %}" class="btn btn-primary btn-sm">Open Invoice Dashboard</a>
+        <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark btn-sm">Open Invoice List</a>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user_role == "customer" %}
+<div class="p-4 bg-white rounded shadow-sm border mt-4">
+    <h2 class="h5 mb-2">Customer Invoice Access</h2>
+    <p class="mb-3 text-muted">View your pending, overdue, and paid invoices.</p>
+    <a href="{% url 'customer-invoice-dashboard' %}" class="btn btn-primary btn-sm">Open My Invoices</a>
+</div>
+{% endif %}
 {% endblock %}

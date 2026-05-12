@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice Officer Dashboard | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h1 class="h3 mb-1">Invoice Officer Dashboard</h1>
+        <p class="text-muted mb-0">Action-focused invoice overview for Finance users.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary">Upload CSV</a>
+        <a href="{% url 'invoice-create' %}" class="btn btn-primary">Create Invoice</a>
+        <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark">View Invoice List</a>
+    </div>
+</div>
+
+{% if overdue_count > 0 or unsent_count > 0 %}
+<div class="row g-3 mb-3">
+    {% if overdue_count > 0 %}
+    <div class="col-md-6">
+        <div class="alert alert-danger mb-0">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="fw-semibold">Overdue invoices require action</div>
+                    <div>{{ overdue_count }} invoice{{ overdue_count|pluralize }} overdue.</div>
+                </div>
+                <a href="{% url 'invoice-list' %}?status=overdue" class="btn btn-sm btn-danger">View Overdue</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    {% if unsent_count > 0 %}
+    <div class="col-md-6">
+        <div class="alert alert-warning mb-0">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="fw-semibold">Draft/unsent invoices need follow-up</div>
+                    <div>{{ unsent_count }} invoice{{ unsent_count|pluralize }} not sent.</div>
+                </div>
+                <a href="{% url 'invoice-list' %}?status=unsent" class="btn btn-sm btn-warning">View Unsent</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Invoices</div>
+                <div class="display-6 fw-semibold">{{ total_invoices }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-warning h-100">
+            <div class="card-body">
+                <div class="text-muted small">Draft Invoices</div>
+                <div class="display-6 fw-semibold text-warning">{{ draft_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-info h-100">
+            <div class="card-body">
+                <div class="text-muted small">Sent Invoices</div>
+                <div class="display-6 fw-semibold text-info">{{ sent_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-primary h-100">
+            <div class="card-body">
+                <div class="text-muted small">Viewed Invoices</div>
+                <div class="display-6 fw-semibold text-primary">{{ viewed_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-success h-100">
+            <div class="card-body">
+                <div class="text-muted small">Paid Invoices</div>
+                <div class="display-6 fw-semibold text-success">{{ paid_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-danger h-100">
+            <div class="card-body">
+                <div class="text-muted small">Overdue Invoices</div>
+                <div class="display-6 fw-semibold text-danger">{{ overdue_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-warning h-100">
+            <div class="card-body">
+                <div class="text-muted small">Not Yet Sent</div>
+                <div class="display-6 fw-semibold text-warning">{{ unsent_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-dark h-100">
+            <div class="card-body">
+                <div class="text-muted small">Outstanding Amount</div>
+                <div class="h3 fw-semibold mb-0">{{ outstanding_amount|floatformat:2 }}</div>
+                <div class="text-muted small">Sum of unpaid invoice totals</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <h2 class="h6">Quick Actions</h2>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary btn-sm">Upload Invoice CSV</a>
+            <a href="{% url 'invoice-create' %}" class="btn btn-primary btn-sm">Create Invoice</a>
+            <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark btn-sm">View All Invoices</a>
+            <a href="{% url 'invoice-list' %}?status=overdue" class="btn btn-outline-danger btn-sm">View Overdue Invoices</a>
+            <a href="{% url 'invoice-list' %}?status=unsent" class="btn btn-outline-warning btn-sm">View Draft/Unsent Invoices</a>
+            <a href="{% url 'invoice-list' %}?status=outstanding" class="btn btn-outline-secondary btn-sm">View Outstanding Invoices</a>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Recent Invoices</span>
+        <a href="{% url 'invoice-list' %}" class="btn btn-sm btn-outline-dark">Open List</a>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Invoice #</th>
+                    <th>Customer</th>
+                    <th>Status</th>
+                    <th>Due Date</th>
+                    <th class="text-end">Total</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for invoice in recent_invoices %}
+                <tr>
+                    <td>{{ invoice.invoice_number }}</td>
+                    <td>{{ invoice.customer.name }}</td>
+                    <td><span class="badge text-bg-secondary">{{ invoice.get_status_display }}</span></td>
+                    <td>{{ invoice.due_date }}</td>
+                    <td class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</td>
+                    <td class="text-end">
+                        <div class="d-flex justify-content-end gap-1 flex-wrap">
+                            <a href="{% url 'invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View</a>
+                            <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-sm btn-outline-secondary">PDF</a>
+                            <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-sm btn-outline-success">Excel</a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center py-4">No invoices available yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

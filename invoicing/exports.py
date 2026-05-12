@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from io import BytesIO
 
 from django.conf import settings
@@ -17,7 +18,7 @@ from .models import Invoice
 def build_export_context(invoice: Invoice) -> dict:
     items = list(invoice.items.all())
     return {
-        "company_name": settings.COMPANY_NAME,
+        "company_name": getattr(settings, "COMPANY_NAME", "Vaniday Singapore Pte Ltd"),
         "company_email": settings.COMPANY_EMAIL,
         "company_phone": settings.COMPANY_PHONE,
         "company_address": settings.COMPANY_ADDRESS,
@@ -26,6 +27,8 @@ def build_export_context(invoice: Invoice) -> dict:
         "invoice_payment_term_days": settings.INVOICE_PAYMENT_TERM_DAYS,
         "invoice_bank_text": settings.INVOICE_BANK_TEXT,
         "invoice_payment_notes": settings.INVOICE_PAYMENT_NOTES,
+        "invoice_attention_email": getattr(settings, "COMPANY_EMAIL", "finance@vaniday.com"),
+        "paynow_uen": getattr(settings, "COMPANY_REG_NO", "201535968M"),
         "invoice": invoice,
         "items": items,
     }
@@ -57,6 +60,11 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         fontSize=8,
         leading=10,
     )
+    small_right = ParagraphStyle(
+        "InvoiceSmallRight",
+        parent=small,
+        alignment=2,
+    )
     heading = ParagraphStyle(
         "InvoiceHeading",
         parent=body,
@@ -81,22 +89,42 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         parent=right,
         fontName="Helvetica-Bold",
     )
+    right_title = ParagraphStyle(
+        "InvoiceRightTitle",
+        parent=right_bold,
+        fontSize=22,
+        leading=24,
+    )
 
     customer_display = invoice.customer.name
     if invoice.customer.tax_number:
         customer_display = f"{customer_display} ({invoice.customer.tax_number})"
 
-    office_line = f"Registered Office: {context['registered_office_text']}"
+    registered_office = context["registered_office_text"]
+    attention_email = context["invoice_attention_email"]
+    office_line = f"Registered Office: {registered_office}"
+    attention_line = f"Attention: {attention_email}"
     header_left = [
-        [Paragraph(f"<b>{context['company_name'].upper()}</b>", heading)],
+        [Paragraph(f"<b>{context['company_name']}</b>", heading)],
         [Paragraph(f"Reg No. {context['company_reg_no']}", body)],
         [Paragraph(context["company_address"].replace("\n", "<br/>"), body)],
+        [Paragraph(f"Email: {context['company_email']}", body)],
+        [Paragraph(f"Phone: {context['company_phone']}", body)],
     ]
     left_header_table = Table(header_left, colWidths=[78 * mm])
-    left_header_table.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    left_header_table.setStyle(
+        TableStyle(
+            [
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ]
+        )
+    )
 
     right_header_data = [
-        [Paragraph("INVOICE", invoice_title)],
+        [Paragraph("INVOICE", right_title)],
         [Paragraph(customer_display, right_bold)],
         [Paragraph("<b>Invoice Date</b>", right)],
         [Paragraph(str(invoice.issue_date.strftime("%d %b %Y")), right)],
@@ -116,22 +144,25 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     )
 
     story = [
-        Paragraph(office_line, small),
-        Spacer(1, 8),
+        Paragraph(office_line, small_right),
+        Paragraph(attention_line, small_right),
+        Spacer(1, 6),
         Table([[left_header_table, right_header_table]], colWidths=[78 * mm, 82 * mm]),
         Spacer(1, 10),
     ]
 
-    table_data = [["Description", "Quantity", "Unit Price", "Amount SGD"]]
+    amount_header = f"Amount {invoice.currency}"
+    table_data = [["Description", "Quantity", "Unit Price", amount_header]]
     for item in context["items"]:
         description = (item.description or "").replace("\n", "<br/>")
-        unit_value = f"{item.line_total:.2f}"
+        unit_value = f"{item.unit_price:.2f}"
+        line_value = f"{item.line_total:.2f}"
         table_data.append(
             [
                 Paragraph(description, body),
                 str(item.quantity),
                 unit_value,
-                unit_value,
+                line_value,
             ]
         )
     if len(table_data) == 1:
@@ -158,7 +189,9 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     story.append(table)
     story.append(Spacer(1, 10))
 
-    amount_paid = invoice.total_amount
+    amount_paid = Decimal("0.00")
+    if invoice.status == Invoice.STATUS_PAID:
+        amount_paid = invoice.total_amount
     amount_due = invoice.total_amount - amount_paid
     totals = [
         ["Subtotal", f"{invoice.subtotal:.2f}"],
@@ -187,18 +220,38 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     story.append(Paragraph(f"Due Date: {invoice.due_date.strftime('%d %b %Y')}", body))
     story.append(Paragraph(f"Payment Term: {context['invoice_payment_term_days']} Days", body))
     story.append(Spacer(1, 6))
-    story.append(Paragraph("We accept payment via bank transfer to the following:", body))
+    story.append(Paragraph("<b>Bank Transfer Details</b>", body))
+    story.append(Paragraph("Please arrange payment via bank transfer to:", body))
 
     for line in context["invoice_bank_text"].split("\n"):
-        story.append(Paragraph(line, body))
+        if line.strip():
+            story.append(Paragraph(line, body))
+
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"<b>PayNow UEN:</b> {context['paynow_uen']}", body))
+    story.append(
+        Paragraph(
+            "Please include your invoice number and salon name as payment reference.",
+            body,
+        )
+    )
 
     story.append(Spacer(1, 4))
     for line in context["invoice_payment_notes"].split("\n"):
-        story.append(Paragraph(line, small))
+        if line.strip():
+            story.append(Paragraph(line, small))
 
     if invoice.notes:
         story.append(Spacer(1, 6))
         story.append(Paragraph(f"Notes: {invoice.notes}", body))
+
+    story.append(Spacer(1, 6))
+    story.append(
+        Paragraph(
+            "This is a computer generated invoice and therefore no signature is required.",
+            small,
+        )
+    )
 
     doc.build(story)
     return buffer.getvalue()

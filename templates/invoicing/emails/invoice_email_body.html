@@ -3,6 +3,7 @@
 <body style="font-family: Arial, sans-serif; color: #212529; line-height: 1.5;">
     <p>Hello {{ customer.name }},</p>
     <p>Your invoice is ready.</p>
+    <p><strong>Merchant/Customer:</strong> {{ customer.name }}</p>
     <table style="border-collapse: collapse; margin: 12px 0;">
         <tr>
             <td style="padding: 4px 10px 4px 0;"><strong>Invoice Number:</strong></td>
@@ -19,6 +20,10 @@
         <tr>
             <td style="padding: 4px 10px 4px 0;"><strong>Total Amount:</strong></td>
             <td style="padding: 4px 0;">{{ invoice.currency }} {{ invoice.total_amount }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Amount Due:</strong></td>
+            <td style="padding: 4px 0;">{{ invoice.currency }} {{ amount_due }}</td>
         </tr>
     </table>
     <p>

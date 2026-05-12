@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}My Invoices | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h1 class="h3 mb-1">My Invoices</h1>
+        <p class="text-muted mb-0">Track pending, overdue, and paid invoice history.</p>
+    </div>
+</div>
+
+{% if not linked_customer %}
+<div class="alert alert-warning">
+    No customer profile is linked to your account email yet. Please contact support/admin.
+</div>
+{% else %}
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="card shadow-sm border-dark h-100">
+            <div class="card-body">
+                <div class="text-muted small">Outstanding Amount</div>
+                <div class="h3 fw-semibold mb-0">{{ outstanding_amount|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-danger h-100">
+            <div class="card-body">
+                <div class="text-muted small">Overdue Invoices</div>
+                <div class="display-6 fw-semibold text-danger">{{ overdue_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-secondary h-100">
+            <div class="card-body">
+                <div class="text-muted small">Customer</div>
+                <div class="h5 fw-semibold mb-0">{{ linked_customer.name }}</div>
+                <div class="text-muted small">{{ linked_customer.email }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header">
+        Unpaid / Pending / Overdue Invoices
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Invoice #</th>
+                    <th>Invoice Date</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                    <th class="text-end">Total Amount</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for invoice in action_required_invoices %}
+                <tr>
+                    <td>{{ invoice.invoice_number }}</td>
+                    <td>{{ invoice.issue_date }}</td>
+                    <td>{{ invoice.due_date }}</td>
+                    <td>
+                        {% if invoice.status == "overdue" %}
+                        <span class="badge text-bg-danger">{{ invoice.get_status_display }}</span>
+                        {% elif invoice.status == "draft" %}
+                        <span class="badge text-bg-warning">{{ invoice.get_status_display }}</span>
+                        {% elif invoice.status == "sent" %}
+                        <span class="badge text-bg-info">{{ invoice.get_status_display }}</span>
+                        {% else %}
+                        <span class="badge text-bg-primary">{{ invoice.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</td>
+                    <td class="text-end">
+                        <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Details</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center py-4">No pending invoices.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">Paid Invoice History</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Invoice #</th>
+                    <th>Invoice Date</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                    <th class="text-end">Total Amount</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for invoice in paid_invoices %}
+                <tr>
+                    <td>{{ invoice.invoice_number }}</td>
+                    <td>{{ invoice.issue_date }}</td>
+                    <td>{{ invoice.due_date }}</td>
+                    <td><span class="badge text-bg-success">{{ invoice.get_status_display }}</span></td>
+                    <td class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</td>
+                    <td class="text-end">
+                        <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Details</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center py-4">No paid invoice history yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

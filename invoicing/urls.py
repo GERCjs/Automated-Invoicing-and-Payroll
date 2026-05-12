@@ -3,7 +3,12 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("my/dashboard/", views.customer_invoice_dashboard, name="customer-invoice-dashboard"),
+    path("my/<int:pk>/", views.customer_invoice_detail, name="customer-invoice-detail"),
+    path("my/<int:pk>/download/pdf/", views.customer_invoice_download_pdf, name="customer-invoice-download-pdf"),
+    path("upload/csv/", views.invoice_csv_upload, name="invoice-csv-upload"),
     path("", views.invoice_list, name="invoice-list"),
+    path("dashboard/", views.invoice_dashboard, name="invoice-dashboard"),
     path("create/", views.invoice_create, name="invoice-create"),
     path("<int:pk>/", views.invoice_detail, name="invoice-detail"),
     path("<int:pk>/edit/", views.invoice_edit, name="invoice-edit"),
