@@ -2,7 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
 
 from accounts.permissions import role_required
-from accounts.roles import ADMIN, FINANCE, SUPERADMIN
+from accounts.roles import ADMIN, HR, SUPERADMIN
 
 from .audit import get_client_ip, log_event
 
@@ -25,7 +25,7 @@ def dashboard(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE)
+@role_required(SUPERADMIN, ADMIN, HR)
 def finance_console(request):
     log_event(
         action="core.finance_console.viewed",

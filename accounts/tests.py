@@ -4,7 +4,8 @@ from django.urls import reverse
 
 from core.models import AuditLog
 
-from .roles import ADMIN, CUSTOMER, FINANCE, STAFF, SUPERADMIN
+from .signals import ADMIN_CONSOLE_GROUP_NAME
+from .roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 
 User = get_user_model()
 
@@ -14,7 +15,18 @@ class AccountsPhaseOneTests(TestCase):
         user = User.objects.create_user(username="rolecheck", password="TempPass123!")
         self.assertTrue(hasattr(user, "role_profile"))
 
-    def test_finance_user_can_open_finance_console(self):
+    def test_hr_user_can_open_finance_console(self):
+        user = User.objects.create_user(username="hr1", password="TempPass123!")
+        profile = user.role_profile
+        profile.role = HR
+        profile.save()
+
+        self.client.login(username="hr1", password="TempPass123!")
+        response = self.client.get(reverse("finance-console"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_finance_user_is_forbidden_from_finance_console(self):
         user = User.objects.create_user(username="finance1", password="TempPass123!")
         profile = user.role_profile
         profile.role = FINANCE
@@ -23,7 +35,7 @@ class AccountsPhaseOneTests(TestCase):
         self.client.login(username="finance1", password="TempPass123!")
         response = self.client.get(reverse("finance-console"))
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 403)
 
     def test_staff_user_is_forbidden_and_denial_is_audited(self):
         user = User.objects.create_user(username="staff1", password="TempPass123!")
@@ -132,12 +144,45 @@ class AccountsPhaseOneTests(TestCase):
         self.assertContains(response, "Admin Console")
         self.assertContains(response, reverse("admin:index"))
 
-    def test_non_staff_user_does_not_see_admin_console_link(self):
+    def test_admin_role_auto_sets_staff_and_shows_admin_console_link(self):
         user = User.objects.create_user(username="notstaff", password="TempPass123!")
         user.role_profile.role = ADMIN
         user.role_profile.save()
+        user.refresh_from_db()
 
         self.client.login(username="notstaff", password="TempPass123!")
         response = self.client.get(reverse("dashboard"))
 
+        self.assertTrue(user.is_staff)
+        self.assertContains(response, "Admin Console")
+
+    def test_finance_user_does_not_see_admin_console_link(self):
+        user = User.objects.create_user(username="finance_no_admin_link", password="TempPass123!")
+        user.role_profile.role = FINANCE
+        user.role_profile.save()
+
+        self.client.login(username="finance_no_admin_link", password="TempPass123!")
+        response = self.client.get(reverse("dashboard"))
+
         self.assertNotContains(response, "Admin Console")
+
+    def test_admin_role_is_not_superuser_but_has_admin_permissions(self):
+        user = User.objects.create_user(username="role_admin_perms", password="TempPass123!")
+        user.role_profile.role = ADMIN
+        user.role_profile.save()
+        user.refresh_from_db()
+
+        self.assertTrue(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(user.has_perm("accounts.view_userrole"))
+        self.assertTrue(user.groups.filter(name=ADMIN_CONSOLE_GROUP_NAME).exists())
+
+    def test_superadmin_role_is_superuser_and_not_forced_into_admin_group(self):
+        user = User.objects.create_user(username="role_superadmin_perms", password="TempPass123!")
+        user.role_profile.role = SUPERADMIN
+        user.role_profile.save()
+        user.refresh_from_db()
+
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+        self.assertFalse(user.groups.filter(name=ADMIN_CONSOLE_GROUP_NAME).exists())

@@ -40,6 +40,7 @@ class PaymentRecord(models.Model):
     currency = models.CharField(max_length=3, default="SGD")
     paid_at = models.DateTimeField(null=True, blank=True)
     external_transaction_id = models.CharField(max_length=255, blank=True)
+    stripe_checkout_session_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -60,3 +61,50 @@ class PaymentRecord(models.Model):
 
     def __str__(self) -> str:
         return self.payment_reference
+
+
+class StripeWebhookEvent(models.Model):
+    STATUS_RECEIVED = "received"
+    STATUS_PROCESSED = "processed"
+    STATUS_IGNORED = "ignored"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_RECEIVED, "Received"),
+        (STATUS_PROCESSED, "Processed"),
+        (STATUS_IGNORED, "Ignored"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=255)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_RECEIVED)
+    payload = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
+    payment_record = models.ForeignKey(
+        PaymentRecord,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="webhook_events",
+    )
+    invoice = models.ForeignKey(
+        "invoicing.Invoice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stripe_webhook_events",
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["event_type"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["processed_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.event_type} ({self.event_id})"

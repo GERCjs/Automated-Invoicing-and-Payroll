@@ -6,6 +6,12 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">Invoice {{ invoice.invoice_number }}</h1>
     <div class="d-flex gap-2">
+        {% if invoice.status != "paid" %}
+        <form method="post" action="{% url 'payment-checkout-customer' invoice.pk %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success">Pay with Card</button>
+        </form>
+        {% endif %}
         <a href="{% url 'customer-invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
         <a href="{% url 'customer-invoice-dashboard' %}" class="btn btn-outline-secondary">Back to My Invoices</a>
     </div>

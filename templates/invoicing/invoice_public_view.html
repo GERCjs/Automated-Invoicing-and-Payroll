@@ -10,6 +10,12 @@
         <p class="mb-1"><strong>Issue Date:</strong> {{ invoice.issue_date }}</p>
         <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
         <p class="mb-0"><strong>Status:</strong> {{ invoice.get_status_display }}</p>
+        {% if invoice.status != "paid" %}
+        <form method="post" action="{% url 'payment-checkout-public' invoice.public_view_token %}" class="mt-3">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success">Pay with Card</button>
+        </form>
+        {% endif %}
     </div>
 </div>
 

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Status{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h1 class="h4">Payment processing</h1>
+        <p class="mb-2">Stripe has returned to this page.</p>
+        {% if invoice %}
+        <p class="mb-1"><strong>Invoice:</strong> {{ invoice.invoice_number }}</p>
+        {% endif %}
+        {% if payment_record %}
+        <p class="mb-1"><strong>Payment Reference:</strong> {{ payment_record.payment_reference }}</p>
+        <p class="mb-1"><strong>Recorded Status:</strong> {{ payment_record.get_status_display }}</p>
+        {% endif %}
+        {% if payment_status %}
+        <p class="mb-3"><strong>Stripe Session Status:</strong> {{ payment_status }}</p>
+        {% endif %}
+        <p class="mb-0 text-muted">
+            Final invoice status is confirmed by webhook processing. Refresh your invoice page in a moment if needed.
+        </p>
+    </div>
+</div>
+{% endblock %}
