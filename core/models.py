@@ -18,6 +18,7 @@ class AuditLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "auditlog"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["action"]),

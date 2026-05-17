@@ -44,6 +44,7 @@ class Employee(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "employee"
         ordering = ["employee_code"]
         indexes = [
             models.Index(fields=["employee_code"]),
@@ -84,6 +85,7 @@ class PayrollBatch(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "payroll_details"
         ordering = ["-period_start", "-created_at"]
         indexes = [
             models.Index(fields=["batch_reference"]),
@@ -145,6 +147,7 @@ class PayrollEntry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "payroll"
         ordering = ["id"]
         constraints = [
             models.UniqueConstraint(fields=["batch", "employee"], name="unique_batch_employee"),
@@ -188,6 +191,7 @@ class PayslipRecord(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "payslip_record"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["payslip_number"]),

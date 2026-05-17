@@ -35,6 +35,7 @@ class Customer(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "customer"
         ordering = ["name"]
         indexes = [
             models.Index(fields=["status"]),
@@ -83,6 +84,7 @@ class Invoice(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "invoice"
         ordering = ["-issue_date", "-created_at"]
         indexes = [
             models.Index(fields=["invoice_number"]),
@@ -144,6 +146,7 @@ class InvoiceItem(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "invoice_item"
         ordering = ["id"]
         indexes = [
             models.Index(fields=["invoice"]),
@@ -188,6 +191,7 @@ class InvoiceSourceRow(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "invoice_full_details"
         ordering = ["-created_at", "-id"]
         indexes = [
             models.Index(fields=["order_id"]),
