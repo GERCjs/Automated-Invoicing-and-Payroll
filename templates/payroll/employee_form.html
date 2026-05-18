@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_edit %}Edit Employee{% else %}Add New Employee{% endif %} | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0">
+    <div class="card-body p-4">
+        <h1 class="h3 mb-4">{% if is_edit %}Edit Employee{% else %}Add New Employee{% endif %}</h1>
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            <h2 class="h6 fw-bold text-primary mb-3">Essentials</h2>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Linked User Account</label>
+                    {{ form.user }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Employee Code</label>
+                    {{ form.employee_code }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">NRIC</label>
+                    {{ form.nric }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">First Name</label>
+                    {{ form.first_name }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Last Name</label>
+                    {{ form.last_name }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Date of Birth</label>
+                    {{ form.date_of_birth }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Date of Appointment</label>
+                    {{ form.date_of_appointment }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Legal Status</label>
+                    {{ form.legal_status }}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Gender</label>
+                    {{ form.gender }}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Race</label>
+                    {{ form.race }}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Religion</label>
+                    {{ form.religion }}
+                </div>
+                <div class="col-12">
+                    <div class="form-check mb-2">
+                        {{ form.sdl_exempt }}
+                        <label class="form-check-label" for="{{ form.sdl_exempt.id_for_label }}">SDL Exempt</label>
+                    </div>
+                    <div class="form-check">
+                        {{ form.cpf_exempt }}
+                        <label class="form-check-label" for="{{ form.cpf_exempt.id_for_label }}">CPF Exempt</label>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Job Title</label>
+                    {{ form.job_title }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Email</label>
+                    {{ form.email }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Payment Method</label>
+                    {{ form.payment_method }}
+                </div>
+            </div>
+
+            <h2 class="h5 fw-bold mt-4 mb-3">Bank Account Details</h2>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Bank</label>
+                    {{ form.bank_name }}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Account Number</label>
+                    {{ form.bank_account_number }}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Branch Code</label>
+                    {{ form.bank_branch_code }}
+                </div>
+            </div>
+
+            {% if form.errors %}
+            <div class="alert alert-danger mt-3 mb-0">Please correct the highlighted fields.</div>
+            {% endif %}
+
+            <div class="d-flex gap-2 mt-4">
+                <a href="{% url 'employee-list' %}" class="btn btn-outline-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

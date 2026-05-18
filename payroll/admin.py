@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Employee, PayrollBatch, PayrollEntry, PayslipRecord
+from .models import Employee, PayrollBatch, PayrollEntry, PayrollRecord, PayslipRecord
 
 
 @admin.register(Employee)
@@ -29,3 +29,10 @@ class PayslipRecordAdmin(admin.ModelAdmin):
     list_display = ("payslip_number", "payroll_entry", "status", "issued_at")
     list_filter = ("status", "issued_at")
     search_fields = ("payslip_number", "payroll_entry__batch__batch_reference")
+
+
+@admin.register(PayrollRecord)
+class PayrollRecordAdmin(admin.ModelAdmin):
+    list_display = ("employee_name", "employee_id", "payment_date", "basic_salary", "net_salary")
+    list_filter = ("payment_date",)
+    search_fields = ("employee_name", "employee_id")

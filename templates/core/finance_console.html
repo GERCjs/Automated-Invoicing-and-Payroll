@@ -6,6 +6,10 @@
 <div class="p-4 bg-white rounded shadow-sm border">
     <h1 class="h3 mb-2">Finance Console</h1>
     <p class="mb-3">Only Admin and Finance roles can view this page.</p>
-    <a href="{% url 'payroll-upload-preview' %}" class="btn btn-primary">Payroll Upload & Preview</a>
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="{% url 'payroll-dashboard' %}" class="btn btn-primary">Open Payroll Dashboard</a>
+        <a href="{% url 'payroll-list' %}" class="btn btn-outline-dark">Open Payroll List</a>
+        <a href="{% url 'payroll-upload-preview' %}" class="btn btn-outline-primary">Payroll Upload & Preview</a>
+    </div>
 </div>
 {% endblock %}

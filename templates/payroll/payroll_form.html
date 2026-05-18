@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_edit %}Edit Payslip Record{% else %}Create Payslip Record{% endif %} | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">{% if is_edit %}Edit Payslip Record{% else %}Create Payslip Record{% endif %}</h1>
+
+<form method="post" novalidate>
+    {% csrf_token %}
+    <div class="card shadow-sm mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6"><label class="form-label">Employee Name</label>{{ form.employee_name }}</div>
+                <div class="col-md-6"><label class="form-label">Employee ID</label>{{ form.employee_id }}</div>
+                <div class="col-md-3"><label class="form-label">Basic Salary</label>{{ form.basic_salary }}</div>
+                <div class="col-md-3"><label class="form-label">Allowances</label>{{ form.allowances }}</div>
+                <div class="col-md-3"><label class="form-label">Deductions</label>{{ form.deductions }}</div>
+                <div class="col-md-3">
+                    <label class="form-label">CPF Contribution</label>
+                    {{ form.cpf_contribution }}
+                    <div class="form-text">Auto-calculated from basic salary and employee age (DOB) using CPF 2026 rates. Employee CPF exempt will set this to 0.</div>
+                    <div id="cpf-calc-status" class="small text-muted mt-1"></div>
+                </div>
+                <div class="col-md-4"><label class="form-label">Payment Date</label>{{ form.payment_date }}</div>
+            </div>
+            {% if form.errors %}
+            <div class="alert alert-danger mt-3 mb-0">Please correct the highlighted fields.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">{% if is_edit %}Update Payslip Record{% else %}Save Payslip Record{% endif %}</button>
+    <a href="{% url 'payroll-list' %}" class="btn btn-outline-secondary">Cancel</a>
+</form>
+<script>
+(() => {
+    const employeeIdInput = document.getElementById("id_employee_id");
+    const basicSalaryInput = document.getElementById("id_basic_salary");
+    const paymentDateInput = document.getElementById("id_payment_date");
+    const cpfInput = document.getElementById("id_cpf_contribution");
+    const statusNode = document.getElementById("cpf-calc-status");
+    if (!employeeIdInput || !basicSalaryInput || !paymentDateInput || !cpfInput) return;
+    cpfInput.readOnly = true;
+
+    let debounceTimer = null;
+    const previewUrl = "{% url 'payroll-cpf-preview' %}";
+
+    const refreshCpf = () => {
+        const employeeId = (employeeIdInput.value || "").trim();
+        const basicSalary = (basicSalaryInput.value || "").trim();
+        const paymentDate = (paymentDateInput.value || "").trim();
+        if (!employeeId || !basicSalary || !paymentDate) {
+            if (statusNode) statusNode.textContent = "Enter Employee ID, Basic Salary, and Payment Date to auto-calculate.";
+            return;
+        }
+
+        const params = new URLSearchParams({
+            employee_id: employeeId,
+            basic_salary: basicSalary,
+            payment_date: paymentDate,
+        });
+
+        fetch(`${previewUrl}?${params.toString()}`, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+            .then((r) => r.json())
+            .then((data) => {
+                if (data && data.ok && data.cpf_contribution !== undefined) {
+                    cpfInput.value = data.cpf_contribution;
+                    if (statusNode) statusNode.textContent = "CPF auto-calculated.";
+                } else if (statusNode) {
+                    statusNode.textContent = "Unable to auto-calculate CPF yet.";
+                }
+            })
+            .catch(() => {
+                if (statusNode) statusNode.textContent = "Failed to reach CPF calculator.";
+            });
+    };
+
+    const scheduleRefresh = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(refreshCpf, 220);
+    };
+
+    basicSalaryInput.addEventListener("input", scheduleRefresh);
+    employeeIdInput.addEventListener("input", scheduleRefresh);
+    paymentDateInput.addEventListener("input", scheduleRefresh);
+    paymentDateInput.addEventListener("change", scheduleRefresh);
+    refreshCpf();
+})();
+</script>
+{% endblock %}

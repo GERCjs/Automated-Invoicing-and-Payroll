@@ -25,6 +25,17 @@
 </div>
 {% endif %}
 
+{% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" or current_user_role == "hr" %}
+<div class="p-4 bg-white rounded shadow-sm border mt-4">
+    <h2 class="h5 mb-2">Payroll Workspace</h2>
+    <p class="mb-3 text-muted">Manage employee payroll records, deductions, CPF, and net salary payouts.</p>
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="{% url 'payroll-dashboard' %}" class="btn btn-primary btn-sm">Open Payroll Dashboard</a>
+        <a href="{% url 'payroll-list' %}" class="btn btn-outline-dark btn-sm">Open Payroll List</a>
+    </div>
+</div>
+{% endif %}
+
 {% if current_user_role == "customer" %}
 <div class="p-4 bg-white rounded shadow-sm border mt-4">
     <h2 class="h5 mb-2">Customer Invoice Access</h2>

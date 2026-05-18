@@ -12,7 +12,7 @@ class CoreConfig(AppConfig):
         from core.models import AuditLog
         from invoicing.models import Customer, Invoice, InvoiceItem, InvoiceSourceRow
         from payments.models import PaymentRecord
-        from payroll.models import Employee, PayrollBatch, PayrollEntry, PayslipRecord
+        from payroll.models import Employee, PayrollBatch, PayrollEntry, PayrollRecord, PayslipRecord
 
         def apply_table_mapping(use_renamed_tables):
             if use_renamed_tables:
@@ -33,7 +33,8 @@ class CoreConfig(AppConfig):
                 Employee._meta.db_table = "employee"
                 PayrollBatch._meta.db_table = "payroll_details"
                 PayrollEntry._meta.db_table = "payroll"
-                PayslipRecord._meta.db_table = "payslip_record"
+                PayslipRecord._meta.db_table = "legacy_payslip_record"
+                PayrollRecord._meta.db_table = "payslip_record"
             else:
                 User._meta.db_table = "auth_user"
                 Group._meta.db_table = "auth_group"
@@ -53,6 +54,7 @@ class CoreConfig(AppConfig):
                 PayrollBatch._meta.db_table = "payroll_payrollbatch"
                 PayrollEntry._meta.db_table = "payroll_payrollentry"
                 PayslipRecord._meta.db_table = "payroll_paysliprecord"
+                PayrollRecord._meta.db_table = "payroll_payrollrecord"
 
         def should_use_renamed_tables(db_connection):
             import os

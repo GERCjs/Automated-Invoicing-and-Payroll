@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import date
 from typing import Any
 
 from openpyxl import load_workbook
@@ -66,7 +67,9 @@ def cpf_for_2026(monthly_wage: Decimal, age: int) -> CPFResult:
         employee_amount = Decimal("0")
         employer_amount = monthly_wage * (employer_rate / Decimal("100"))
     elif monthly_wage <= Decimal("750"):
-        graduated_multiplier = employee_rate / Decimal("100")
+        # CPF Board graduated employee share for >$500 to $750 follows:
+        # 0.6 / 0.54 / 0.375 / 0.225 / 0.15 x (TW - 500) by age band in 2026.
+        graduated_multiplier = (employee_rate / Decimal("100")) * Decimal("3")
         employee_amount = graduated_multiplier * (monthly_wage - Decimal("500"))
         total_amount = (monthly_wage * (employer_rate / Decimal("100"))) + employee_amount
         employer_amount = total_amount - employee_amount
@@ -80,6 +83,21 @@ def cpf_for_2026(monthly_wage: Decimal, age: int) -> CPFResult:
         employee_amount=money(employee_amount),
         employer_amount=money(employer_amount),
     )
+
+
+def calculate_age_on(dob: date, on_date: date) -> int:
+    years = on_date.year - dob.year
+    if (on_date.month, on_date.day) < (dob.month, dob.day):
+        years -= 1
+    return years
+
+
+def employee_cpf_contribution_2026_from_basic_salary(
+    basic_salary: Decimal, dob: date, payment_date: date
+) -> Decimal:
+    age = calculate_age_on(dob, payment_date)
+    cpf = cpf_for_2026(basic_salary, age)
+    return cpf.employee_amount
 
 
 def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:

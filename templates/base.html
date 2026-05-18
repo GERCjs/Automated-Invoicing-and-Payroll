@@ -21,9 +21,12 @@
                 <li class="nav-item">
                     <a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a>
                 </li>
-                {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
+                {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" or current_user_role == "finance" %}
                 <li class="nav-item">
-                    <a class="nav-link" href="{% url 'finance-console' %}">Payroll</a>
+                    <a class="nav-link" href="{% url 'payroll-dashboard' %}">Payroll</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'employee-list' %}">Employees</a>
                 </li>
                 {% endif %}
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
@@ -34,6 +37,11 @@
                 {% if current_user_role == "customer" %}
                 <li class="nav-item">
                     <a class="nav-link" href="{% url 'customer-invoice-dashboard' %}">My Invoices</a>
+                </li>
+                {% endif %}
+                {% if current_user_role == "staff" %}
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'my-payslips' %}">My Payslips</a>
                 </li>
                 {% endif %}
                 {% if current_user_role == "superadmin" or current_user_role == "admin" %}

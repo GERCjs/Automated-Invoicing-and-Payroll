@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Employees | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Employees</h1>
+    <div class="d-flex gap-2">
+        <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-dark">Payroll Dashboard</a>
+        <a href="{% url 'employee-create' %}" class="btn btn-primary">Add New Employee</a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-md-6 col-lg-5">
+                <input type="text" class="form-control" name="q" value="{{ search_query }}" placeholder="Search employee code, name, or email">
+            </div>
+            <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Search</button></div>
+            <div class="col-auto"><a href="{% url 'employee-list' %}" class="btn btn-outline-secondary">Reset</a></div>
+        </form>
+        <p class="text-muted mb-0 mt-2">{% if search_query %}Search: "{{ search_query }}" | {% endif %}Results: {{ result_count }}</p>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Employee Code</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Linked Account</th>
+                    <th>Job Title</th>
+                    <th>Legal Status</th>
+                    <th>Payment Method</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for employee in employees %}
+                <tr>
+                    <td>{{ employee.employee_code }}</td>
+                    <td>{{ employee.first_name }} {{ employee.last_name }}</td>
+                    <td>{{ employee.email }}</td>
+                    <td>{% if employee.user %}{{ employee.user.username }}{% else %}-{% endif %}</td>
+                    <td>{{ employee.job_title|default:"-" }}</td>
+                    <td>{{ employee.get_legal_status_display|default:"-" }}</td>
+                    <td>{{ employee.get_payment_method_display|default:"-" }}</td>
+                    <td class="text-end"><a href="{% url 'employee-edit' employee.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" class="text-center py-4">No employees found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

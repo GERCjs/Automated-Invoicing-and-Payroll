@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Payroll | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Payroll</h1>
+    <div class="d-flex gap-2">
+        <a href="{% url 'payroll-upload-preview' %}" class="btn btn-outline-primary">Upload Excel</a>
+        <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-dark">Payroll Dashboard</a>
+        <a href="{% url 'payroll-create' %}" class="btn btn-primary">Create Payslip Record</a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-md-6 col-lg-5">
+                <input type="text" class="form-control" name="q" value="{{ search_query }}" placeholder="Search employee name or employee ID">
+            </div>
+            <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Search</button></div>
+            <div class="col-auto"><a href="{% url 'payroll-list' %}" class="btn btn-outline-secondary">Reset</a></div>
+        </form>
+        <p class="text-muted mb-0 mt-2">{% if search_query %}Search: "{{ search_query }}" | {% endif %}Results: {{ result_count }}</p>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Employee Name</th>
+                    <th>Employee ID</th>
+                    <th class="text-end">Basic Salary</th>
+                    <th class="text-end">Allowances</th>
+                    <th class="text-end">Deductions</th>
+                    <th class="text-end">CPF Contribution</th>
+                    <th class="text-end">Net Salary</th>
+                    <th>Payment Date</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payslip_record in payslip_records %}
+                <tr>
+                    <td>{{ payslip_record.employee_name }}</td>
+                    <td>{{ payslip_record.employee_id }}</td>
+                    <td class="text-end">SGD {{ payslip_record.basic_salary }}</td>
+                    <td class="text-end">SGD {{ payslip_record.allowances }}</td>
+                    <td class="text-end">SGD {{ payslip_record.deductions }}</td>
+                    <td class="text-end">SGD {{ payslip_record.cpf_contribution }}</td>
+                    <td class="text-end">SGD {{ payslip_record.net_salary }}</td>
+                    <td>{{ payslip_record.payment_date }}</td>
+                    <td class="text-end">
+                        <div class="d-flex justify-content-end gap-1 flex-wrap">
+                            <a href="{% url 'payroll-detail' payslip_record.pk %}" class="btn btn-sm btn-outline-primary">View</a>
+                            <a href="{% url 'payroll-edit' payslip_record.pk %}" class="btn btn-sm btn-outline-dark">Edit</a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="9" class="text-center py-4">No payslip records found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

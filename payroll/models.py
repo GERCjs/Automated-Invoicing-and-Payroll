@@ -11,6 +11,34 @@ class Employee(models.Model):
         (STATUS_ACTIVE, "Active"),
         (STATUS_INACTIVE, "Inactive"),
     ]
+    LEGAL_STATUS_CITIZEN = "citizen"
+    LEGAL_STATUS_PR = "pr"
+    LEGAL_STATUS_WP = "work_permit"
+    LEGAL_STATUS_EP = "employment_pass"
+    LEGAL_STATUS_SP = "s_pass"
+    LEGAL_STATUS_CHOICES = [
+        (LEGAL_STATUS_CITIZEN, "Singapore Citizen"),
+        (LEGAL_STATUS_PR, "Permanent Resident"),
+        (LEGAL_STATUS_WP, "Work Permit"),
+        (LEGAL_STATUS_EP, "Employment Pass"),
+        (LEGAL_STATUS_SP, "S Pass"),
+    ]
+    GENDER_MALE = "male"
+    GENDER_FEMALE = "female"
+    GENDER_OTHER = "other"
+    GENDER_CHOICES = [
+        (GENDER_MALE, "Male"),
+        (GENDER_FEMALE, "Female"),
+        (GENDER_OTHER, "Other"),
+    ]
+    PAYMENT_METHOD_CASH = "cash"
+    PAYMENT_METHOD_CHEQUE = "cheque"
+    PAYMENT_METHOD_GIRO = "giro"
+    PAYMENT_METHOD_CHOICES = [
+        (PAYMENT_METHOD_CASH, "Cash"),
+        (PAYMENT_METHOD_CHEQUE, "Cheque"),
+        (PAYMENT_METHOD_GIRO, "GIRO"),
+    ]
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -20,8 +48,22 @@ class Employee(models.Model):
         related_name="employee_profile",
     )
     employee_code = models.CharField(max_length=50, unique=True)
+    nric = models.CharField(max_length=20, blank=True)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
+    date_of_birth = models.DateField(null=True, blank=True)
+    date_of_appointment = models.DateField(null=True, blank=True)
+    legal_status = models.CharField(max_length=30, choices=LEGAL_STATUS_CHOICES, blank=True)
+    gender = models.CharField(max_length=20, choices=GENDER_CHOICES, blank=True)
+    race = models.CharField(max_length=60, blank=True)
+    religion = models.CharField(max_length=60, blank=True)
+    sdl_exempt = models.BooleanField(default=False)
+    cpf_exempt = models.BooleanField(default=False)
+    job_title = models.CharField(max_length=150, blank=True)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True)
+    bank_name = models.CharField(max_length=120, blank=True)
+    bank_account_number = models.CharField(max_length=50, blank=True)
+    bank_branch_code = models.CharField(max_length=30, blank=True)
     email = models.EmailField(unique=True)
     department = models.CharField(max_length=100, blank=True)
     position = models.CharField(max_length=100, blank=True)
@@ -191,7 +233,7 @@ class PayslipRecord(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "payslip_record"
+        db_table = "legacy_payslip_record"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["payslip_number"]),
@@ -200,3 +242,60 @@ class PayslipRecord(models.Model):
 
     def __str__(self) -> str:
         return self.payslip_number
+
+
+class PayrollRecord(models.Model):
+    employee_name = models.CharField(max_length=200)
+    employee_id = models.CharField(max_length=50, db_index=True)
+    basic_salary = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+    allowances = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    deductions = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    cpf_contribution = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    net_salary = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+    payment_date = models.DateField()
+    nric = models.CharField(max_length=9, blank=True, db_column="NRIC")
+    cpf_exempted = models.BooleanField(null=True, blank=True, db_column="cpf_exempted")
+    sdl_exempted = models.BooleanField(null=True, blank=True, db_column="sdl_exempted")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payroll_records_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "payslip_record"
+        ordering = ["-payment_date", "-created_at"]
+        indexes = [
+            models.Index(fields=["payment_date"]),
+            models.Index(fields=["employee_id", "payment_date"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.employee_id} - {self.employee_name}"
