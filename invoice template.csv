@@ -1,0 +1,6 @@
+seller_id,shop_title,OrderID,partner_type_name,paymentMethod,productType,customerId,status,orderStatus,email,customerName,contactNo,qty,serviceName,bookedDate,service_duration,staffId,staffName,Total_Revenue,credit_Card,shippingAmount,reward_point,vanidayCommission,vanidayShare,cashbackFee,cashbackDiscount,cashbackDate,salonshare
+1064,sgoptes,539751,Web,stripe_payments,Booking,110653,complete,Completed,r.sonoda1107@gmail.com,Riho Sonoda,80536703,,Oriental Body Massage,9/1/2025 19:15,60,,,65,65,,,20,13,,0,,52
+,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,

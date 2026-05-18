@@ -55,7 +55,7 @@ def _build_checkout_session(
         mode="payment",
         success_url=success_url,
         cancel_url=cancel_url,
-        payment_method_types=["card"],
+        payment_method_types=["card" , "paynow"],
         line_items=[
             {
                 "quantity": 1,
@@ -123,6 +123,73 @@ def retrieve_checkout_session(session_id: str) -> Any:
     return stripe.checkout.Session.retrieve(session_id)
 
 
+def finalize_checkout_success_from_redirect(
+    *,
+    session_id: str,
+    payment_status: str | None,
+    payment_intent: str | None,
+    metadata: dict[str, Any] | None,
+) -> tuple[PaymentRecord | None, bool]:
+    """
+    Temporary fallback for sandbox flow without webhooks.
+    Finalizes invoice/payment when user returns from Stripe success_url.
+    """
+    # Normalize the payload shape so we can reuse existing row-lock lookup logic.
+    session_object = {
+        "id": session_id,
+        "payment_status": payment_status,
+        "payment_intent": payment_intent,
+        "metadata": metadata or {},
+    }
+
+    with transaction.atomic():
+        payment_record = _lock_payment_record(session_object)
+        if payment_record is None:
+            return None, False
+
+        if payment_status != "paid":
+            return payment_record, False
+
+        changed = False
+        invoice = payment_record.invoice
+        update_fields = ["updated_at"]
+
+        # Idempotent update: set succeeded state only when not already finalized.
+        if payment_record.status != PaymentRecord.STATUS_SUCCEEDED or payment_record.paid_at is None:
+            payment_record.status = PaymentRecord.STATUS_SUCCEEDED
+            payment_record.paid_at = timezone.now()
+            update_fields.extend(["status", "paid_at"])
+            changed = True
+
+        if payment_intent and payment_record.external_transaction_id != payment_intent:
+            payment_record.external_transaction_id = payment_intent
+            update_fields.append("external_transaction_id")
+            changed = True
+
+        if changed:
+            payment_record.save(update_fields=update_fields)
+
+        if invoice.status != Invoice.STATUS_PAID:
+            invoice.status = Invoice.STATUS_PAID
+            invoice.save(update_fields=["status", "updated_at"])
+            changed = True
+
+        if changed:
+            log_event(
+                action="payment.stripe.redirect_confirmed",
+                user=payment_record.created_by,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "payment_reference": payment_record.payment_reference,
+                    "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+                },
+            )
+
+        return payment_record, changed
+
+
 def construct_webhook_event(payload: bytes, stripe_signature: str):
     stripe = _import_stripe()
     stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -138,6 +205,12 @@ def construct_webhook_event(payload: bytes, stripe_signature: str):
 def _lock_payment_record(session_object: dict[str, Any]) -> PaymentRecord | None:
     session_id = session_object.get("id")
     metadata = session_object.get("metadata") or {}
+    # Defensive guard: metadata can come from Stripe objects, not only plain dict payloads.
+    if not hasattr(metadata, "get"):
+        try:
+            metadata = dict(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
     payment_record_id = metadata.get("payment_record_id")
 
     queryset = PaymentRecord.objects.select_related("invoice").select_for_update()

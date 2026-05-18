@@ -18,6 +18,7 @@ from .models import PaymentRecord
 from .services import (
     construct_webhook_event,
     create_checkout_for_invoice,
+    finalize_checkout_success_from_redirect,
     process_webhook_event,
     retrieve_checkout_session,
 )
@@ -135,9 +136,25 @@ def checkout_success(request):
             session = None
         if session is not None:
             payment_status = session.payment_status
-            payment_record = PaymentRecord.objects.select_related("invoice").filter(
-                stripe_checkout_session_id=session_id
-            ).first()
+            raw_metadata = getattr(session, "metadata", None)
+            if hasattr(raw_metadata, "to_dict_recursive"):
+                # StripeObject metadata needs explicit conversion instead of dict(...).
+                metadata = raw_metadata.to_dict_recursive()
+            elif isinstance(raw_metadata, dict):
+                metadata = raw_metadata
+            else:
+                metadata = {}
+            # Sandbox fallback: finalize status from redirect return when webhook is disabled.
+            payment_record, _ = finalize_checkout_success_from_redirect(
+                session_id=session_id,
+                payment_status=getattr(session, "payment_status", None),
+                payment_intent=getattr(session, "payment_intent", None),
+                metadata=metadata,
+            )
+            if payment_record is None:
+                payment_record = PaymentRecord.objects.select_related("invoice").filter(
+                    stripe_checkout_session_id=session_id
+                ).first()
             if payment_record is not None:
                 invoice = payment_record.invoice
 
