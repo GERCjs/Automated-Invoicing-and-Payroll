@@ -219,6 +219,22 @@ class AccountsPhaseOneTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_django_admin_user_change_hides_password_hash_details(self):
+        superadmin = User.objects.create_user(username="django_admin_password_viewer", password="TempPass123!")
+        superadmin.role_profile.role = SUPERADMIN
+        superadmin.role_profile.save()
+        target_user = User.objects.create_user(username="password_hash_target", password="TempPass123!")
+
+        self.client.login(username="django_admin_password_viewer", password="TempPass123!")
+        response = self.client.get(reverse("admin:auth_user_change", args=[target_user.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reset password")
+        self.assertNotContains(response, "algorithm:")
+        self.assertNotContains(response, "iterations:")
+        self.assertNotContains(response, "salt:")
+        self.assertNotContains(response, "hash:")
+
     def test_customer_role_cannot_be_changed_from_admin_dashboard(self):
         admin = User.objects.create_user(username="customer_guard_admin", password="TempPass123!")
         admin.role_profile.role = ADMIN
