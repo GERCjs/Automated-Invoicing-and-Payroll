@@ -42,6 +42,16 @@ def _to_minor_units(amount: Decimal) -> int:
     return int((normalized * 100).to_integral_value(rounding=ROUND_HALF_UP))
 
 
+def _normalize_external_id(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, Decimal, uuid.UUID)):
+        return str(value)
+    return ""
+
+
 def _build_checkout_session(
     *,
     invoice: Invoice,
@@ -106,7 +116,9 @@ def create_checkout_for_invoice(
         cancel_url=cancel_url,
     )
     payment_record.stripe_checkout_session_id = session.id
-    payment_record.external_transaction_id = session.payment_intent or ""
+    payment_record.external_transaction_id = _normalize_external_id(
+        getattr(session, "payment_intent", None)
+    )
     payment_record.save(
         update_fields=[
             "stripe_checkout_session_id",
@@ -161,8 +173,12 @@ def finalize_checkout_success_from_redirect(
             update_fields.extend(["status", "paid_at"])
             changed = True
 
-        if payment_intent and payment_record.external_transaction_id != payment_intent:
-            payment_record.external_transaction_id = payment_intent
+        normalized_payment_intent = _normalize_external_id(payment_intent)
+        if (
+            normalized_payment_intent
+            and payment_record.external_transaction_id != normalized_payment_intent
+        ):
+            payment_record.external_transaction_id = normalized_payment_intent
             update_fields.append("external_transaction_id")
             changed = True
 
@@ -249,7 +265,7 @@ def _mark_success_from_session(
             return
 
         invoice = payment_record.invoice
-        payment_intent_id = session_object.get("payment_intent") or ""
+        payment_intent_id = _normalize_external_id(session_object.get("payment_intent"))
         update_fields = ["status", "paid_at", "updated_at"]
         payment_record.status = PaymentRecord.STATUS_SUCCEEDED
         payment_record.paid_at = timezone.now()

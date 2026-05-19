@@ -78,7 +78,10 @@
                     </td>
                     <td class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</td>
                     <td class="text-end">
-                        <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Details</a>
+                        <div class="d-flex justify-content-end gap-1 flex-wrap">
+                            <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Details</a>
+                            <a href="{% url 'customer-invoice-download-pdf' invoice.pk %}" class="btn btn-sm btn-outline-secondary">Download PDF</a>
+                        </div>
                     </td>
                 </tr>
                 {% empty %}
@@ -114,7 +117,10 @@
                     <td><span class="badge text-bg-success">{{ invoice.get_status_display }}</span></td>
                     <td class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</td>
                     <td class="text-end">
-                        <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Details</a>
+                        <div class="d-flex justify-content-end gap-1 flex-wrap">
+                            <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Details</a>
+                            <a href="{% url 'customer-invoice-download-pdf' invoice.pk %}" class="btn btn-sm btn-outline-secondary">Download PDF</a>
+                        </div>
                     </td>
                 </tr>
                 {% empty %}

@@ -10,7 +10,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from openpyxl import Workbook
 
 from accounts.permissions import role_required
-from accounts.roles import ADMIN, FINANCE, HR, SUPERADMIN
+from accounts.roles import ADMIN, HR, STAFF, SUPERADMIN
+from core.audit import get_client_ip, log_event
 
 from .forms import EmployeeForm, PayrollRecordForm, PayrollUploadForm
 from .models import Employee, PayrollRecord
@@ -37,7 +38,7 @@ def _generate_next_employee_code():
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_cpf_preview(request):
     employee_id = (request.GET.get("employee_id") or "").strip()
     basic_salary_raw = (request.GET.get("basic_salary") or "").strip()
@@ -73,11 +74,17 @@ def payroll_cpf_preview(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_dashboard(request):
     total_records = PayrollRecord.objects.count()
     total_net_salary = sum(record.net_salary for record in PayrollRecord.objects.only("net_salary"))
     recent_payslip_records = PayrollRecord.objects.all()[:8]
+    log_event(
+        action="payroll.dashboard.viewed",
+        user=request.user,
+        metadata={"path": request.path},
+        ip_address=get_client_ip(request),
+    )
     return render(
         request,
         "payroll/payroll_dashboard.html",
@@ -90,7 +97,7 @@ def payroll_dashboard(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_list(request):
     search_query = request.GET.get("q", "").strip()
     payslip_records = PayrollRecord.objects.all()
@@ -100,6 +107,12 @@ def payroll_list(request):
             | Q(employee_id__icontains=search_query)
         )
 
+    log_event(
+        action="payroll.list.viewed",
+        user=request.user,
+        metadata={"path": request.path, "search_query": search_query},
+        ip_address=get_client_ip(request),
+    )
     return render(
         request,
         "payroll/payroll_list.html",
@@ -112,7 +125,7 @@ def payroll_list(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_create(request):
     if request.method == "POST":
         form = PayrollRecordForm(request.POST)
@@ -149,6 +162,14 @@ def payroll_create(request):
             )
             payslip_record.created_by = request.user
             payslip_record.save()
+            log_event(
+                action="payroll.record.created",
+                user=request.user,
+                target_type="payroll_record",
+                target_id=str(payslip_record.id),
+                metadata={"employee_id": payslip_record.employee_id},
+                ip_address=get_client_ip(request),
+            )
             messages.success(request, "Payslip record created.")
             return redirect("payroll-detail", pk=payslip_record.pk)
     else:
@@ -162,7 +183,7 @@ def payroll_create(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_edit(request, pk):
     payslip_record = get_object_or_404(PayrollRecord, pk=pk)
     if request.method == "POST":
@@ -199,6 +220,14 @@ def payroll_edit(request, pk):
                 - payslip_record.cpf_contribution
             )
             payslip_record.save()
+            log_event(
+                action="payroll.record.updated",
+                user=request.user,
+                target_type="payroll_record",
+                target_id=str(payslip_record.id),
+                metadata={"employee_id": payslip_record.employee_id},
+                ip_address=get_client_ip(request),
+            )
             messages.success(request, "Payslip record updated.")
             return redirect("payroll-detail", pk=payslip_record.pk)
     else:
@@ -212,9 +241,17 @@ def payroll_edit(request, pk):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_detail(request, pk):
     payslip_record = get_object_or_404(PayrollRecord, pk=pk)
+    log_event(
+        action="payroll.record.viewed",
+        user=request.user,
+        target_type="payroll_record",
+        target_id=str(payslip_record.id),
+        metadata={"employee_id": payslip_record.employee_id},
+        ip_address=get_client_ip(request),
+    )
     return render(
         request,
         "payroll/payroll_detail.html",
@@ -223,7 +260,7 @@ def payroll_detail(request, pk):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_upload_preview(request):
     form = PayrollUploadForm(request.POST or None, request.FILES or None)
     preview_rows = []
@@ -233,7 +270,23 @@ def payroll_upload_preview(request):
             preview_rows = parse_payroll_excel(form.cleaned_data["payroll_file"])
             if not preview_rows:
                 messages.warning(request, "No data rows were found in the uploaded file.")
+            log_event(
+                action="payroll.upload.previewed",
+                user=request.user,
+                metadata={
+                    "path": request.path,
+                    "row_count": len(preview_rows),
+                    "source_file_name": form.cleaned_data["payroll_file"].name,
+                },
+                ip_address=get_client_ip(request),
+            )
         except Exception as exc:
+            log_event(
+                action="payroll.upload.failed",
+                user=request.user,
+                metadata={"path": request.path, "error_message": str(exc)},
+                ip_address=get_client_ip(request),
+            )
             messages.error(request, f"Unable to process file: {exc}")
             return redirect("payroll-upload-preview")
 
@@ -245,7 +298,7 @@ def payroll_upload_preview(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_template_download(request):
     workbook = Workbook()
     sheet = workbook.active
@@ -266,7 +319,7 @@ def payroll_template_download(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def employee_list(request):
     search_query = request.GET.get("q", "").strip()
     employees = Employee.objects.all()
@@ -285,7 +338,7 @@ def employee_list(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def employee_create(request):
     if request.method == "POST":
         post_data = request.POST.copy()
@@ -298,6 +351,14 @@ def employee_create(request):
             employee.status = Employee.STATUS_ACTIVE
             employee.created_by = request.user
             employee.save()
+            log_event(
+                action="payroll.employee.created",
+                user=request.user,
+                target_type="employee",
+                target_id=str(employee.id),
+                metadata={"employee_code": employee.employee_code},
+                ip_address=get_client_ip(request),
+            )
             messages.success(request, "Employee saved successfully.")
             return redirect("employee-list")
     else:
@@ -306,7 +367,7 @@ def employee_create(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
+@role_required(SUPERADMIN, ADMIN, HR)
 def employee_edit(request, pk):
     employee = get_object_or_404(Employee, pk=pk)
     if request.method == "POST":
@@ -315,6 +376,14 @@ def employee_edit(request, pk):
             employee = form.save(commit=False)
             employee.hire_date = employee.date_of_appointment or employee.hire_date
             employee.save()
+            log_event(
+                action="payroll.employee.updated",
+                user=request.user,
+                target_type="employee",
+                target_id=str(employee.id),
+                metadata={"employee_code": employee.employee_code},
+                ip_address=get_client_ip(request),
+            )
             messages.success(request, "Employee updated successfully.")
             return redirect("employee-list")
     else:
@@ -323,6 +392,7 @@ def employee_edit(request, pk):
 
 
 @login_required
+@role_required(STAFF)
 def my_payslips(request):
     employee = getattr(request.user, "employee_profile", None)
     if employee is None:

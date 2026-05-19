@@ -7,6 +7,7 @@ from django.http import Http404, HttpResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from datetime import date
 import uuid
 
 from accounts.permissions import role_required
@@ -174,6 +175,18 @@ def invoice_csv_upload(request):
             }
             request.session[session_key] = preview_payload
             log_event(
+                action="invoice.uploaded",
+                user=request.user,
+                metadata={
+                    "path": request.path,
+                    "source_file_name": csv_file.name,
+                    "total_rows": parsed["total_rows"],
+                    "valid_rows": len(parsed["valid_rows"]),
+                    "invalid_rows": len(parsed["invalid_rows"]),
+                },
+                ip_address=get_client_ip(request),
+            )
+            log_event(
                 action="invoice.csv_import.previewed",
                 user=request.user,
                 metadata={
@@ -297,21 +310,47 @@ def customer_invoice_download_pdf(request, pk):
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_list(request):
+    def _parse_iso_date(raw_value: str) -> date | None:
+        value = (raw_value or "").strip()
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+
     updated_count = refresh_overdue_invoices()
     selected_filter = request.GET.get("status", "").strip().lower()
     search_query = request.GET.get("q", "").strip()
+    issue_date_from_raw = request.GET.get("issue_date_from", "").strip()
+    issue_date_to_raw = request.GET.get("issue_date_to", "").strip()
+    issue_date_from = _parse_iso_date(issue_date_from_raw)
+    issue_date_to = _parse_iso_date(issue_date_to_raw)
     invoices = Invoice.objects.select_related("customer").all()
 
     filter_map = {
         "draft": [Invoice.STATUS_DRAFT],
+        "unsent": [Invoice.STATUS_DRAFT],
         "sent": [Invoice.STATUS_SENT],
+        "pending_payment": [Invoice.STATUS_SENT],
         "viewed": [Invoice.STATUS_VIEWED],
         "paid": [Invoice.STATUS_PAID],
         "overdue": [Invoice.STATUS_OVERDUE],
+        "outstanding": [
+            Invoice.STATUS_DRAFT,
+            Invoice.STATUS_SENT,
+            Invoice.STATUS_VIEWED,
+            Invoice.STATUS_OVERDUE,
+        ],
     }
     active_statuses = filter_map.get(selected_filter)
     if active_statuses:
         invoices = invoices.filter(status__in=active_statuses)
+
+    if issue_date_from:
+        invoices = invoices.filter(issue_date__gte=issue_date_from)
+    if issue_date_to:
+        invoices = invoices.filter(issue_date__lte=issue_date_to)
 
     if search_query:
         invoices = invoices.filter(
@@ -331,10 +370,13 @@ def invoice_list(request):
 
     filter_label_map = {
         "draft": "Draft invoices",
-        "sent": "Sent invoices",
+        "unsent": "Draft invoices",
+        "sent": "Pending payment invoices",
+        "pending_payment": "Pending payment invoices",
         "viewed": "Viewed invoices",
         "paid": "Paid invoices",
         "overdue": "Overdue invoices",
+        "outstanding": "Outstanding invoices",
     }
     active_filter_label = filter_label_map.get(selected_filter, "All invoices")
 
@@ -346,6 +388,8 @@ def invoice_list(request):
             "overdue_updates": updated_count,
             "filter": selected_filter or "all",
             "search_query": search_query,
+            "issue_date_from": issue_date_from.isoformat() if issue_date_from else "",
+            "issue_date_to": issue_date_to.isoformat() if issue_date_to else "",
         },
         ip_address=get_client_ip(request),
     )
@@ -359,6 +403,8 @@ def invoice_list(request):
             "active_filter_label": active_filter_label,
             "status_summary": status_summary,
             "result_count": invoices.count(),
+            "issue_date_from": issue_date_from.isoformat() if issue_date_from else "",
+            "issue_date_to": issue_date_to.isoformat() if issue_date_to else "",
         },
     )
 
@@ -367,6 +413,9 @@ def invoice_list(request):
 @role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_dashboard(request):
     updated_count = refresh_overdue_invoices()
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    year_start = today.replace(month=1, day=1)
 
     status_counts = Invoice.objects.values("status").annotate(total_count=Count("id"))
     counts_by_status = {
@@ -376,6 +425,7 @@ def invoice_dashboard(request):
     total_invoices = sum(counts_by_status.values())
     draft_count = counts_by_status.get(Invoice.STATUS_DRAFT, 0)
     sent_count = counts_by_status.get(Invoice.STATUS_SENT, 0)
+    pending_payment_count = sent_count
     viewed_count = counts_by_status.get(Invoice.STATUS_VIEWED, 0)
     paid_count = counts_by_status.get(Invoice.STATUS_PAID, 0)
     overdue_count = counts_by_status.get(Invoice.STATUS_OVERDUE, 0)
@@ -393,12 +443,55 @@ def invoice_dashboard(request):
         or 0
     )
 
-    recent_invoices = Invoice.objects.select_related("customer").order_by("-issue_date", "-created_at")[:8]
+    collected_month = (
+        Invoice.objects.filter(
+            status=Invoice.STATUS_PAID,
+            updated_at__date__gte=month_start,
+            updated_at__date__lte=today,
+        ).aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
+    collected_year = (
+        Invoice.objects.filter(
+            status=Invoice.STATUS_PAID,
+            updated_at__date__gte=year_start,
+            updated_at__date__lte=today,
+        ).aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
+
+    month_to_date_invoice_count = Invoice.objects.filter(
+        issue_date__gte=month_start,
+        issue_date__lte=today,
+    ).count()
+    year_to_date_invoice_count = Invoice.objects.filter(
+        issue_date__gte=year_start,
+        issue_date__lte=today,
+    ).count()
+
+    recent_action_invoices = (
+        Invoice.objects.select_related("customer")
+        .filter(
+            status__in=[
+                Invoice.STATUS_DRAFT,
+                Invoice.STATUS_SENT,
+                Invoice.STATUS_VIEWED,
+                Invoice.STATUS_OVERDUE,
+            ]
+        )
+        .order_by("due_date", "-issue_date", "-created_at")[:10]
+    )
 
     log_event(
         action="invoice.dashboard.viewed",
         user=request.user,
-        metadata={"path": request.path, "overdue_updates": updated_count},
+        metadata={
+            "path": request.path,
+            "overdue_updates": updated_count,
+            "overdue_count": overdue_count,
+            "draft_count": draft_count,
+            "pending_payment_count": pending_payment_count,
+        },
         ip_address=get_client_ip(request),
     )
     return render(
@@ -406,14 +499,19 @@ def invoice_dashboard(request):
         "invoicing/invoice_dashboard.html",
         {
             "total_invoices": total_invoices,
+            "month_to_date_invoice_count": month_to_date_invoice_count,
+            "year_to_date_invoice_count": year_to_date_invoice_count,
             "draft_count": draft_count,
             "sent_count": sent_count,
+            "pending_payment_count": pending_payment_count,
             "viewed_count": viewed_count,
             "paid_count": paid_count,
             "overdue_count": overdue_count,
             "unsent_count": unsent_count,
             "outstanding_amount": outstanding_amount,
-            "recent_invoices": recent_invoices,
+            "collected_month": collected_month,
+            "collected_year": collected_year,
+            "recent_action_invoices": recent_action_invoices,
         },
     )
 

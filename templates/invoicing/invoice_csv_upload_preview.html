@@ -96,29 +96,29 @@
 {% if invalid_preview_rows %}
 <div class="card shadow-sm mb-3 border-danger">
     <div class="card-header bg-danger-subtle text-danger-emphasis">
-        Validation Issues (First 20 Invalid Rows)
+        Validation Issues (Invalid Rows - First 20)
     </div>
     <div class="table-responsive">
         <table class="table table-sm mb-0">
             <thead>
                 <tr>
-                    <th>CSV Row</th>
+                    <th>Row #</th>
+                    <th>Reason</th>
                     <th>Merchant</th>
-                    <th>OrderID</th>
-                    <th>Error(s)</th>
+                    <th>Order ID</th>
                 </tr>
             </thead>
             <tbody>
                 {% for row in invalid_preview_rows %}
                 <tr>
                     <td>{{ row.row_number }}</td>
-                    <td>{{ row.customer_name|default:"-" }}</td>
-                    <td>{{ row.source.order_id|default:"-" }}</td>
                     <td>
                         {% for err in row.errors %}
-                        <div class="text-danger small">{{ err }}</div>
+                        <div class="text-danger small">- {{ err }}</div>
                         {% endfor %}
                     </td>
+                    <td>{{ row.customer_name|default:"-" }}</td>
+                    <td>{{ row.source.order_id|default:"-" }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
