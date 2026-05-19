@@ -7,15 +7,15 @@ from django.urls import reverse
 from openpyxl import Workbook
 
 from accounts.models import UserRole
-from accounts.roles import FINANCE
+from accounts.roles import HR
 
 
 class PayrollUploadPreviewTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
-        self.user = user_model.objects.create_user(username="finance1", password="pass12345")
-        UserRole.objects.filter(user=self.user).update(role=FINANCE)
-        self.client.login(username="finance1", password="pass12345")
+        self.user = user_model.objects.create_user(username="hr1", password="pass12345")
+        UserRole.objects.filter(user=self.user).update(role=HR)
+        self.client.login(username="hr1", password="pass12345")
 
     def _build_upload_file(self):
         workbook = Workbook()

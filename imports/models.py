@@ -44,6 +44,7 @@ class ImportJob(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = "import_job"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["module"]),
@@ -98,6 +99,7 @@ class ImportRowError(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "import_error"
         ordering = ["row_number", "id"]
         indexes = [
             models.Index(fields=["import_job", "row_number"]),

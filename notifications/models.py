@@ -31,6 +31,7 @@ class EmailDeliveryLog(models.Model):
     )
 
     class Meta:
+        db_table = "email_log"
         ordering = ["-attempted_at"]
         indexes = [
             models.Index(fields=["status"]),

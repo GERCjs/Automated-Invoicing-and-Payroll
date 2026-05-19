@@ -52,7 +52,7 @@ class PaymentRecord(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "paymentrecord"
+        db_table = "payment"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["payment_reference"]),

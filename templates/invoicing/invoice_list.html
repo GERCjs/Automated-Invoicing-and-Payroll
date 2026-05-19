@@ -7,7 +7,7 @@
     <h1 class="h3 mb-0">Invoices</h1>
     <div class="d-flex gap-2">
         <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary">Upload CSV</a>
-        <a href="{% url 'invoice-dashboard' %}" class="btn btn-outline-dark">Invoice Officer Dashboard</a>
+        <a href="{% url 'invoice-dashboard' %}" class="btn btn-outline-dark">Finance Officer Dashboard</a>
         <a href="{% url 'invoice-create' %}" class="btn btn-primary">Create Invoice</a>
     </div>
 </div>
@@ -19,7 +19,7 @@
             <a href="{% url 'invoice-list' %}" class="btn btn-sm {% if not selected_filter %}btn-dark{% else %}btn-outline-dark{% endif %}">All ({{ status_summary.total }})</a>
             <a href="{% url 'invoice-list' %}?status=overdue" class="btn btn-sm {% if selected_filter == 'overdue' %}btn-danger{% else %}btn-outline-danger{% endif %}">Overdue ({{ status_summary.overdue }})</a>
             <a href="{% url 'invoice-list' %}?status=draft" class="btn btn-sm {% if selected_filter == 'draft' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Draft ({{ status_summary.draft }})</a>
-            <a href="{% url 'invoice-list' %}?status=sent" class="btn btn-sm {% if selected_filter == 'sent' %}btn-info{% else %}btn-outline-info{% endif %}">Sent ({{ status_summary.sent }})</a>
+            <a href="{% url 'invoice-list' %}?status=sent" class="btn btn-sm {% if selected_filter == 'sent' or selected_filter == 'pending_payment' %}btn-info{% else %}btn-outline-info{% endif %}">Pending Payment ({{ status_summary.sent }})</a>
             <a href="{% url 'invoice-list' %}?status=viewed" class="btn btn-sm {% if selected_filter == 'viewed' %}btn-primary{% else %}btn-outline-primary{% endif %}">Viewed ({{ status_summary.viewed }})</a>
             <a href="{% url 'invoice-list' %}?status=paid" class="btn btn-sm {% if selected_filter == 'paid' %}btn-success{% else %}btn-outline-success{% endif %}">Paid ({{ status_summary.paid }})</a>
         </div>
@@ -34,6 +34,24 @@
                     name="q"
                     value="{{ search_query }}"
                     placeholder="Search invoice #, customer name, or customer email"
+                >
+            </div>
+            <div class="col-md-3 col-lg-2">
+                <input
+                    type="date"
+                    class="form-control"
+                    name="issue_date_from"
+                    value="{{ issue_date_from }}"
+                    aria-label="Issue date from"
+                >
+            </div>
+            <div class="col-md-3 col-lg-2">
+                <input
+                    type="date"
+                    class="form-control"
+                    name="issue_date_to"
+                    value="{{ issue_date_to }}"
+                    aria-label="Issue date to"
                 >
             </div>
             <div class="col-auto">

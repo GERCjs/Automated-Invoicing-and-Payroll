@@ -54,7 +54,7 @@ class Invoice(models.Model):
     STATUS_OVERDUE = "overdue"
     STATUS_CHOICES = [
         (STATUS_DRAFT, "Draft"),
-        (STATUS_SENT, "Sent"),
+        (STATUS_SENT, "Pending Payment"),
         (STATUS_VIEWED, "Viewed"),
         (STATUS_PAID, "Paid"),
         (STATUS_OVERDUE, "Overdue"),
@@ -191,7 +191,7 @@ class InvoiceSourceRow(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "invoice_full_details"
+        db_table = "invoice_source_row"
         ordering = ["-created_at", "-id"]
         indexes = [
             models.Index(fields=["order_id"]),
