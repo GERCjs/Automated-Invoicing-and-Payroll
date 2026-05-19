@@ -25,7 +25,7 @@ from .forms import (
     RegistrationForm,
 )
 from .permissions import get_user_role, role_required
-from .roles import ADMIN, ROLE_CHOICES, STAFF, SUPERADMIN
+from .roles import ADMIN, CUSTOMER, ROLE_CHOICES, STAFF, SUPERADMIN
 
 User = get_user_model()
 
@@ -77,6 +77,8 @@ def _can_manage_target(actor, target_user):
     if actor == target_user:
         return False
     target_role = get_user_role(target_user)
+    if target_role == CUSTOMER:
+        return False
     if target_role == SUPERADMIN:
         return False
     if get_user_role(actor) == ADMIN and target_role == ADMIN:

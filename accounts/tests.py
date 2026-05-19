@@ -5,7 +5,7 @@ from django.urls import reverse
 from core.models import AuditLog
 
 from .signals import ADMIN_CONSOLE_GROUP_NAME
-from .roles import ADMIN, FINANCE, HR, STAFF, SUPERADMIN
+from .roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 
 User = get_user_model()
 
@@ -186,3 +186,22 @@ class AccountsPhaseOneTests(TestCase):
         self.assertTrue(user.is_staff)
         self.assertTrue(user.is_superuser)
         self.assertFalse(user.groups.filter(name=ADMIN_CONSOLE_GROUP_NAME).exists())
+
+    def test_customer_role_cannot_be_changed_from_admin_dashboard(self):
+        admin = User.objects.create_user(username="customer_guard_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save()
+
+        customer = User.objects.create_user(username="protected_customer", password="TempPass123!")
+        customer.role_profile.role = CUSTOMER
+        customer.role_profile.save()
+
+        self.client.login(username="customer_guard_admin", password="TempPass123!")
+        response = self.client.post(
+            reverse("managed-account-role-update", args=[customer.id]),
+            data={"role": ADMIN},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        customer.role_profile.refresh_from_db()
+        self.assertEqual(customer.role_profile.role, CUSTOMER)
