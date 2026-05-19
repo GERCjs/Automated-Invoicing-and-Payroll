@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Mass Email | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header">Mass Email</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Recipients by role</label>
+                        <div class="row">
+                            {% for checkbox in form.recipients %}
+                            <div class="col-sm-6">
+                                <div class="form-check">{{ checkbox.tag }} <label class="form-check-label">{{ checkbox.choice_label }}</label></div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% for error in form.recipients.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Subject</label>
+                        {{ form.subject }}
+                        {% for error in form.subject.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Message</label>
+                        {{ form.message }}
+                        {% for error in form.message.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">Send Email</button>
+                        <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

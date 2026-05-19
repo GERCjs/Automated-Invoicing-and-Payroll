@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Validation Errors | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h1 class="h3 mb-1">Validation Errors</h1>
+        <p class="text-muted mb-0">Rows rejected during invoice or payroll imports before they were saved.</p>
+    </div>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Back</a>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small">Module</label>
+                <select name="module" class="form-select form-select-sm">
+                    <option value="">All modules</option>
+                    {% for module, label in module_choices %}
+                    <option value="{{ module }}" {% if selected_module == module %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small">Search</label>
+                <input type="search" name="q" value="{{ search_query }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-sm btn-primary w-100">Filter</button>
+            </div>
+        </form>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Module</th>
+                    <th>Source</th>
+                    <th>Row</th>
+                    <th>Field</th>
+                    <th>Error</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for error in errors %}
+                <tr>
+                    <td>{{ error.import_job.get_module_display }}</td>
+                    <td>{{ error.import_job.source_file_name }}</td>
+                    <td>{{ error.row_number }}</td>
+                    <td>{{ error.field_name|default:"-" }}</td>
+                    <td>{{ error.error_message }}</td>
+                    <td>{{ error.created_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-center py-4">No validation errors match the filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

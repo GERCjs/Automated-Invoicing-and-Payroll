@@ -3,43 +3,177 @@
 {% block title %}Dashboard | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="p-4 mb-4 bg-white rounded shadow-sm border">
-    <h1 class="h3 mb-2">Foundation Dashboard</h1>
-    <p class="mb-1">You are logged in and authenticated access is active.</p>
-    <p class="text-muted mb-0">This Phase 1 dashboard is intentionally minimal and protected.</p>
-    {% if current_user_role == "superadmin" or current_user_role == "admin" %}
-    <div class="mt-3">
-        <a href="{% url 'create-admin-account' %}" class="btn btn-primary btn-sm">Create Admin Account</a>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h1 class="h3 mb-1">Operations Dashboard</h1>
+        <p class="text-muted mb-0">System overview for audit activity, invoicing, payroll, validation, and email delivery.</p>
     </div>
-    {% endif %}
 </div>
 
-{% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
-<div class="p-4 bg-white rounded shadow-sm border">
-    <h2 class="h5 mb-2">Invoice Officer Workspace</h2>
-    <p class="mb-3 text-muted">Open the action-based invoicing dashboard for draft, overdue, and outstanding follow-up.</p>
-    <div class="d-flex gap-2 flex-wrap">
-        <a href="{% url 'invoice-dashboard' %}" class="btn btn-primary btn-sm">Open Invoice Dashboard</a>
-        <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark btn-sm">Open Invoice List</a>
+{% if can_view_admin_stats %}
+<div class="row g-3 mb-3">
+    <div class="col-md-3 col-sm-6">
+        <a href="{% url 'dashboard-audit-logs' %}" class="text-decoration-none text-reset">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body">
+                <div class="text-muted small">Audit Events</div>
+                <div class="display-6 fw-semibold">{{ total_audit_logs }}</div>
+            </div>
+        </div>
+        </a>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <a href="{% url 'dashboard-validation-errors' %}" class="text-decoration-none text-reset">
+        <div class="card shadow-sm border-warning h-100">
+            <div class="card-body">
+                <div class="text-muted small">Validation Errors</div>
+                <div class="display-6 fw-semibold text-warning">{{ import_error_total }}</div>
+            </div>
+        </div>
+        </a>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-danger h-100">
+            <div class="card-body">
+                <div class="text-muted small">Failed Imports</div>
+                <div class="display-6 fw-semibold text-danger">{{ import_failed_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow-sm border-info h-100">
+            <div class="card-body">
+                <div class="text-muted small">Email Failures</div>
+                <div class="display-6 fw-semibold text-info">{{ email_failed_count }}</div>
+            </div>
+        </div>
     </div>
 </div>
 {% endif %}
 
-{% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" or current_user_role == "hr" %}
-<div class="p-4 bg-white rounded shadow-sm border mt-4">
-    <h2 class="h5 mb-2">Payroll Workspace</h2>
-    <p class="mb-3 text-muted">Manage employee payroll records, deductions, CPF, and net salary payouts.</p>
-    <div class="d-flex gap-2 flex-wrap">
-        <a href="{% url 'payroll-dashboard' %}" class="btn btn-primary btn-sm">Open Payroll Dashboard</a>
-        <a href="{% url 'payroll-list' %}" class="btn btn-outline-dark btn-sm">Open Payroll List</a>
+<div class="row g-3 mb-3">
+    {% if can_view_invoice_stats %}
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Invoicing Summary</span>
+                <a href="{% url 'invoice-dashboard' %}" class="btn btn-sm btn-outline-primary">Open</a>
+            </div>
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Invoices</div>
+                            <div class="h4 mb-0">{{ invoice_total }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Customers</div>
+                            <div class="h4 mb-0">{{ invoice_customer_total }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Overdue</div>
+                            <div class="h4 mb-0 text-danger">{{ invoice_overdue_count }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Outstanding</div>
+                            <div class="h4 mb-0">SGD {{ invoice_outstanding|floatformat:2 }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if can_view_payroll_stats %}
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Payroll Summary</span>
+                <a href="{% url 'payroll-dashboard' %}" class="btn btn-sm btn-outline-primary">Open</a>
+            </div>
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Active Employees</div>
+                            <div class="h4 mb-0">{{ active_employee_total }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Payroll Batches</div>
+                            <div class="h4 mb-0">{{ payroll_batch_total }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Pending Entries</div>
+                            <div class="h4 mb-0 text-warning">{{ payroll_pending_entries }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="border rounded p-2">
+                            <div class="text-muted small">Net Salary Recorded</div>
+                            <div class="h4 mb-0">SGD {{ payroll_total_net|floatformat:2 }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% if can_view_admin_stats %}
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Validation And Error Reporting</span>
+                <a href="{% url 'dashboard-validation-errors' %}" class="btn btn-sm btn-outline-warning">View List</a>
+            </div>
+            <div class="card-body">
+                <div class="text-muted small">Validation errors are imported file rows that failed checks before saving.</div>
+                <div class="display-6 fw-semibold text-warning">{{ import_error_total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <a href="{% url 'dashboard-audit-logs' %}" class="text-decoration-none text-reset">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Audit Action Statistics</div>
+            <div class="card-body">
+                {% for row in audit_action_chart %}
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between small mb-1">
+                        <span>{{ row.action }}</span>
+                        <span>{{ row.total }}</span>
+                    </div>
+                    <div class="progress" style="height: 10px;">
+                        <div class="progress-bar" style="width: {{ row.percent }}%;"></div>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="text-center text-muted py-3">No audit events recorded.</div>
+                {% endfor %}
+            </div>
+        </div>
+        </a>
     </div>
 </div>
 {% endif %}
 
 {% if current_user_role == "customer" %}
-<div class="p-4 bg-white rounded shadow-sm border mt-4">
+<div class="p-4 bg-white rounded shadow-sm border">
     <h2 class="h5 mb-2">Customer Invoice Access</h2>
-    <p class="mb-3 text-muted">View your pending, overdue, and paid invoices.</p>
+    <p class="mb-3 text-muted">View pending, overdue, and paid invoices linked to your payment email.</p>
     <a href="{% url 'customer-invoice-dashboard' %}" class="btn btn-primary btn-sm">Open My Invoices</a>
 </div>
 {% endif %}

@@ -1,6 +1,41 @@
 from django.db import migrations, models
 
 
+def ensure_employee_profile_columns(apps, schema_editor):
+    table_names = schema_editor.connection.introspection.table_names()
+    if "employee" not in table_names and "payroll_employee" in table_names:
+        schema_editor.execute("ALTER TABLE payroll_employee RENAME TO employee")
+
+    if "employee" not in schema_editor.connection.introspection.table_names():
+        return
+
+    existing_columns = {
+        column.name
+        for column in schema_editor.connection.introspection.get_table_description(
+            schema_editor.connection.cursor(),
+            "employee",
+        )
+    }
+    columns = [
+        ("date_of_birth", "date NULL"),
+        ("date_of_appointment", "date NULL"),
+        ("legal_status", "varchar(30) NOT NULL DEFAULT ''"),
+        ("gender", "varchar(20) NOT NULL DEFAULT ''"),
+        ("race", "varchar(60) NOT NULL DEFAULT ''"),
+        ("religion", "varchar(60) NOT NULL DEFAULT ''"),
+        ("sdl_exempt", "bool NOT NULL DEFAULT 0"),
+        ("cpf_exempt", "bool NOT NULL DEFAULT 0"),
+        ("job_title", "varchar(150) NOT NULL DEFAULT ''"),
+        ("payment_method", "varchar(20) NOT NULL DEFAULT ''"),
+        ("bank_name", "varchar(120) NOT NULL DEFAULT ''"),
+        ("bank_account_number", "varchar(50) NOT NULL DEFAULT ''"),
+        ("bank_branch_code", "varchar(30) NOT NULL DEFAULT ''"),
+    ]
+    for column_name, column_definition in columns:
+        if column_name not in existing_columns:
+            schema_editor.execute(f"ALTER TABLE employee ADD COLUMN {column_name} {column_definition}")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -10,42 +45,13 @@ class Migration(migrations.Migration):
     operations = [
         migrations.SeparateDatabaseAndState(
             database_operations=[
-                migrations.RunSQL(
-                    """
-                    ALTER TABLE employee
-                    ADD COLUMN date_of_birth date NULL,
-                    ADD COLUMN date_of_appointment date NULL,
-                    ADD COLUMN legal_status varchar(30) NOT NULL DEFAULT '',
-                    ADD COLUMN gender varchar(20) NOT NULL DEFAULT '',
-                    ADD COLUMN race varchar(60) NOT NULL DEFAULT '',
-                    ADD COLUMN religion varchar(60) NOT NULL DEFAULT '',
-                    ADD COLUMN sdl_exempt bool NOT NULL DEFAULT 0,
-                    ADD COLUMN cpf_exempt bool NOT NULL DEFAULT 0,
-                    ADD COLUMN job_title varchar(150) NOT NULL DEFAULT '',
-                    ADD COLUMN payment_method varchar(20) NOT NULL DEFAULT '',
-                    ADD COLUMN bank_name varchar(120) NOT NULL DEFAULT '',
-                    ADD COLUMN bank_account_number varchar(50) NOT NULL DEFAULT '',
-                    ADD COLUMN bank_branch_code varchar(30) NOT NULL DEFAULT '';
-                    """,
-                    reverse_sql="""
-                    ALTER TABLE employee
-                    DROP COLUMN bank_branch_code,
-                    DROP COLUMN bank_account_number,
-                    DROP COLUMN bank_name,
-                    DROP COLUMN payment_method,
-                    DROP COLUMN job_title,
-                    DROP COLUMN cpf_exempt,
-                    DROP COLUMN sdl_exempt,
-                    DROP COLUMN religion,
-                    DROP COLUMN race,
-                    DROP COLUMN gender,
-                    DROP COLUMN legal_status,
-                    DROP COLUMN date_of_appointment,
-                    DROP COLUMN date_of_birth;
-                    """,
-                ),
+                migrations.RunPython(ensure_employee_profile_columns, migrations.RunPython.noop),
             ],
             state_operations=[
+                migrations.AlterModelTable(
+                    name="employee",
+                    table="employee",
+                ),
                 migrations.AddField(
                     model_name="employee",
                     name="bank_account_number",

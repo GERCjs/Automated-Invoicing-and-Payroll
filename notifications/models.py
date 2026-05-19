@@ -40,3 +40,30 @@ class EmailDeliveryLog(models.Model):
 
     def __str__(self) -> str:
         return f"{self.recipient_email} - {self.status}"
+
+
+class PaymentReminderSettings(models.Model):
+    reminder_days_before_due = models.PositiveSmallIntegerField(default=7)
+    overdue_reminders_enabled = models.BooleanField(default=True)
+    overdue_repeat_days = models.PositiveSmallIntegerField(default=7)
+    mass_email_enabled = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payment_reminder_settings_updates",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Payment reminder settings"
+        verbose_name_plural = "Payment reminder settings"
+
+    def __str__(self) -> str:
+        return "Payment reminder settings"
+
+    @classmethod
+    def load(cls):
+        settings_obj, _ = cls.objects.get_or_create(pk=1)
+        return settings_obj

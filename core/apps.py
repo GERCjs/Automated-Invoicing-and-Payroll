@@ -65,8 +65,12 @@ class CoreConfig(AppConfig):
             if env_override in {"0", "false", "no", "off"}:
                 return False
 
+            engine = str(db_connection.settings_dict.get("ENGINE") or "")
+            if engine.endswith("sqlite3"):
+                return False
+
             db_name = str(db_connection.settings_dict.get("NAME") or "")
-            return not db_name.startswith("test_")
+            return "test" not in db_name.lower()
 
         def configure_tables(sender, connection, **kwargs):
             apply_table_mapping(should_use_renamed_tables(connection))

@@ -1,0 +1,126 @@
+[15/May/2026 17:11:37] "GET /accounts/login/ HTTP/1.1" 200 2840
+[15/May/2026 17:11:37,164] - Broken pipe from ('127.0.0.1', 55536)
+[15/May/2026 17:36:47] "GET /accounts/login/ HTTP/1.1" 200 2840
+[15/May/2026 17:36:48] "GET /static/css/app.css HTTP/1.1" 200 35
+Not Found: /favicon.ico
+[15/May/2026 17:36:48] "GET /favicon.ico HTTP/1.1" 404 3595
+[15/May/2026 17:37:16] "POST /accounts/login/ HTTP/1.1" 302 0
+[15/May/2026 17:37:16] "GET /dashboard/ HTTP/1.1" 200 3471
+[15/May/2026 17:37:23] "GET /admin/ HTTP/1.1" 200 19763
+[15/May/2026 17:37:23] "GET /static/admin/css/dark_mode.css HTTP/1.1" 200 3538
+[15/May/2026 17:37:23] "GET /static/admin/css/base.css HTTP/1.1" 200 23100
+[15/May/2026 17:37:23] "GET /static/admin/css/dashboard.css HTTP/1.1" 200 441
+[15/May/2026 17:37:23] "GET /static/admin/css/nav_sidebar.css HTTP/1.1" 200 2810
+[15/May/2026 17:37:23] "GET /static/admin/css/responsive.css HTTP/1.1" 200 16273
+[15/May/2026 17:37:23] "GET /static/admin/js/theme.js HTTP/1.1" 200 1653
+[15/May/2026 17:37:24] "GET /static/admin/js/nav_sidebar.js HTTP/1.1" 200 3063
+[15/May/2026 17:37:24] "GET /static/admin/img/icon-changelink.svg HTTP/1.1" 200 978
+[15/May/2026 17:37:24] "GET /static/admin/img/icon-addlink.svg HTTP/1.1" 200 593
+[15/May/2026 17:37:32] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31062
+[15/May/2026 17:38:55] "GET /accounts/admin-dashboard/?role=finance&action= HTTP/1.1" 200 19512
+[15/May/2026 17:39:03] "GET /accounts/admin-dashboard/?role=customer&action= HTTP/1.1" 200 19512
+[17/May/2026 03:29:51] "GET /finance-console/ HTTP/1.1" 200 2835
+[17/May/2026 03:29:51] "GET /static/css/app.css HTTP/1.1" 304 0
+[17/May/2026 03:29:53] "GET /invoices/dashboard/ HTTP/1.1" 200 7445
+[17/May/2026 03:29:59] "GET /dashboard/ HTTP/1.1" 200 3471
+[17/May/2026 03:30:04] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31401
+[17/May/2026 03:30:05] "GET /admin/ HTTP/1.1" 200 19763
+[17/May/2026 03:30:05] "GET /static/admin/css/base.css HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/js/theme.js HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/css/dark_mode.css HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/css/nav_sidebar.css HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/css/dashboard.css HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/css/responsive.css HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/js/nav_sidebar.js HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/img/icon-changelink.svg HTTP/1.1" 304 0
+[17/May/2026 03:30:05] "GET /static/admin/img/icon-addlink.svg HTTP/1.1" 304 0
+[17/May/2026 03:49:54] "GET /accounts/admin-dashboard/accounts/2/password/ HTTP/1.1" 200 4198
+[17/May/2026 03:50:01] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31426
+[17/May/2026 03:50:15] "GET /accounts/admin-dashboard/accounts/2/password/ HTTP/1.1" 200 4198
+[18/May/2026 12:12:41] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31431
+[18/May/2026 12:12:41] "GET /static/css/app.css HTTP/1.1" 304 0
+[18/May/2026 12:12:44] "GET /dashboard/ HTTP/1.1" 200 3471
+[18/May/2026 12:12:48] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31455
+[18/May/2026 12:13:04] "POST /accounts/admin-dashboard/accounts/1/role/ HTTP/1.1" 302 0
+[18/May/2026 12:13:05] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31718
+[18/May/2026 12:13:11] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:13:11] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:13:32] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:13:32] "GET /dashboard/ HTTP/1.1" 200 3465
+[18/May/2026 12:13:36] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 27901
+[18/May/2026 12:14:25] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:14:25] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:14:32] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:14:32] "GET /dashboard/ HTTP/1.1" 200 3471
+[18/May/2026 12:14:34] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31509
+[18/May/2026 12:14:47] "POST /accounts/admin-dashboard/accounts/1/role/ HTTP/1.1" 302 0
+[18/May/2026 12:14:47] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31691
+[18/May/2026 12:14:52] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:14:52] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:14:59] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:14:59] "GET /dashboard/ HTTP/1.1" 200 2883
+[18/May/2026 12:15:04] "GET /invoices/dashboard/ HTTP/1.1" 200 6994
+[18/May/2026 12:15:10] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:15:10] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:15:18] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:15:18] "GET /dashboard/ HTTP/1.1" 200 3471
+[18/May/2026 12:15:51] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31552
+[18/May/2026 12:16:49] "POST /accounts/admin-dashboard/accounts/1/role/ HTTP/1.1" 302 0
+[18/May/2026 12:16:49] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31694
+[18/May/2026 12:16:51] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:16:51] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:16:58] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:16:58] "GET /dashboard/ HTTP/1.1" 200 2404
+[18/May/2026 12:17:02] "GET /finance-console/ HTTP/1.1" 200 2380
+Forbidden (Permission denied): /payroll/upload-preview/
+Traceback (most recent call last):
+  File "C:\Users\24045986\Documents\GitHub\Automated-Invoicing-and-Payroll\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\24045986\Documents\GitHub\Automated-Invoicing-and-Payroll\.venv\Lib\site-packages\django\core\handlers\base.py", line 198, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\24045986\Documents\GitHub\Automated-Invoicing-and-Payroll\.venv\Lib\site-packages\django\contrib\auth\decorators.py", line 59, in _view_wrapper
+    return view_func(request, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\24045986\Documents\GitHub\Automated-Invoicing-and-Payroll\accounts\permissions.py", line 44, in wrapped_view
+    raise PermissionDenied("You do not have permission to access this page.")
+django.core.exceptions.PermissionDenied: You do not have permission to access this page.
+[18/May/2026 12:17:05] "GET /payroll/upload-preview/ HTTP/1.1" 403 2224
+[18/May/2026 12:17:10] "GET /dashboard/ HTTP/1.1" 200 2404
+[18/May/2026 12:17:13] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:17:13] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:17:19] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:17:19] "GET /dashboard/ HTTP/1.1" 200 3471
+[18/May/2026 12:17:22] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31883
+[18/May/2026 12:17:25] "GET /dashboard/ HTTP/1.1" 200 3471
+[18/May/2026 12:17:34] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31873
+[18/May/2026 12:19:37] "POST /accounts/admin-dashboard/accounts/1/role/ HTTP/1.1" 302 0
+[18/May/2026 12:19:38] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31973
+[18/May/2026 12:19:41] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:19:41] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:19:48] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:19:48] "GET /dashboard/ HTTP/1.1" 200 2240
+[18/May/2026 12:19:51] "GET /dashboard/ HTTP/1.1" 200 2240
+[18/May/2026 12:19:56] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:19:56] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:20:03] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:20:03] "GET /dashboard/ HTTP/1.1" 200 3471
+[18/May/2026 12:20:06] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31794
+[18/May/2026 12:20:11] "POST /accounts/admin-dashboard/accounts/1/role/ HTTP/1.1" 302 0
+[18/May/2026 12:20:11] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31951
+[18/May/2026 12:20:14] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:20:14] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:20:21] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:20:21] "GET /dashboard/ HTTP/1.1" 200 2697
+[18/May/2026 12:20:24] "GET /invoices/my/dashboard/ HTTP/1.1" 200 2492
+[18/May/2026 12:20:25] "GET /dashboard/ HTTP/1.1" 200 2697
+[18/May/2026 12:20:30] "POST /accounts/logout/ HTTP/1.1" 302 0
+[18/May/2026 12:20:30] "GET /accounts/login/ HTTP/1.1" 200 2840
+[18/May/2026 12:20:42] "POST /accounts/login/ HTTP/1.1" 302 0
+[18/May/2026 12:20:42] "GET /dashboard/ HTTP/1.1" 200 3471
+[18/May/2026 12:20:45] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 31818
+Not Found: /favicon.ico
+[19/May/2026 12:05:59] "GET /favicon.ico HTTP/1.1" 404 3595
+[19/May/2026 12:49:33,025] - Broken pipe from ('127.0.0.1', 58531)
+[19/May/2026 12:49:33,040] - Broken pipe from ('127.0.0.1', 57686)

@@ -8,8 +8,8 @@ CUSTOMER = "customer"
 ROLE_CHOICES = [
     (SUPERADMIN, "SuperAdmin"),
     (ADMIN, "Admin"),
-    (FINANCE, "Finance"),
-    (HR, "HR"),
+    (FINANCE, "Finance Officer"),
+    (HR, "Payroll Officer"),
     (STAFF, "Staff"),
     (CUSTOMER, "Customer"),
 ]

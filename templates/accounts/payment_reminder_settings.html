@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Reminder Settings | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="card shadow-sm">
+            <div class="card-header">Payment Reminder Settings</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Days before due date</label>
+                            {{ form.reminder_days_before_due }}
+                            {% for error in form.reminder_days_before_due.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Repeat overdue every days</label>
+                            {{ form.overdue_repeat_days }}
+                            {% for error in form.overdue_repeat_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                        </div>
+                    </div>
+                    <div class="form-check mt-3">
+                        {{ form.overdue_reminders_enabled }}
+                        <label class="form-check-label">Enable overdue reminders</label>
+                    </div>
+                    <div class="form-check mt-2">
+                        {{ form.mass_email_enabled }}
+                        <label class="form-check-label">Enable mass email sending</label>
+                    </div>
+                    <div class="d-flex gap-2 mt-3">
+                        <button type="submit" class="btn btn-primary">Save Settings</button>
+                        <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

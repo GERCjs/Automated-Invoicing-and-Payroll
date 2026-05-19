@@ -5,7 +5,7 @@ from django.urls import reverse
 from core.models import AuditLog
 
 from .signals import ADMIN_CONSOLE_GROUP_NAME
-from .roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
+from .roles import ADMIN, FINANCE, HR, STAFF, SUPERADMIN
 
 User = get_user_model()
 
@@ -56,12 +56,12 @@ class AccountsPhaseOneTests(TestCase):
             ).exists()
         )
 
-    def test_public_user_can_register_and_gets_customer_role(self):
+    def test_public_user_can_register_and_gets_staff_role(self):
         response = self.client.post(
             reverse("register"),
             data={
                 "username": "newstaff",
-                "email": "newstaff@example.com",
+                "email": "newstaff@vaniday.com",
                 "password1": "StrongPass123!",
                 "password2": "StrongPass123!",
             },
@@ -70,7 +70,7 @@ class AccountsPhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers["Location"], reverse("dashboard"))
         user = User.objects.get(username="newstaff")
-        self.assertEqual(user.role_profile.role, CUSTOMER)
+        self.assertEqual(user.role_profile.role, STAFF)
         self.assertTrue(
             AuditLog.objects.filter(
                 action="auth.registered",
@@ -100,7 +100,7 @@ class AccountsPhaseOneTests(TestCase):
             reverse("create-admin-account"),
             data={
                 "username": "admin_created",
-                "email": "admin_created@example.com",
+                "email": "admin_created@vaniday.com",
                 "password1": "StrongPass123!",
                 "password2": "StrongPass123!",
             },
