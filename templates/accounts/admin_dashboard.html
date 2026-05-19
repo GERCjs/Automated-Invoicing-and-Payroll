@@ -96,6 +96,7 @@
             <thead>
                 <tr>
                     <th>User</th>
+                    <th>Code ID</th>
                     <th>Role</th>
                     <th>Last Activity</th>
                     <th class="text-end">Actions</th>
@@ -107,6 +108,9 @@
                     <td>
                         <div class="fw-semibold">{{ managed_user.username }}</div>
                         <div class="text-muted small">{{ managed_user.email|default:"No email" }}</div>
+                    </td>
+                    <td>
+                        <span class="badge text-bg-light border">{{ managed_user.role_profile.code_id|default:"-" }}</span>
                     </td>
                     <td>
                         {% if managed_user.can_be_managed %}
@@ -141,7 +145,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="4" class="text-center py-4">No accounts match the filter.</td></tr>
+                <tr><td colspan="5" class="text-center py-4">No accounts match the filter.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

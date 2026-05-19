@@ -14,6 +14,7 @@ class AccountsPhaseOneTests(TestCase):
     def test_user_role_profile_is_created_automatically(self):
         user = User.objects.create_user(username="rolecheck", password="TempPass123!")
         self.assertTrue(hasattr(user, "role_profile"))
+        self.assertTrue(user.role_profile.code_id.startswith("STF-"))
 
     def test_hr_user_can_open_finance_console(self):
         user = User.objects.create_user(username="hr1", password="TempPass123!")
@@ -142,7 +143,7 @@ class AccountsPhaseOneTests(TestCase):
         response = self.client.get(reverse("dashboard"))
 
         self.assertContains(response, "Admin Console")
-        self.assertContains(response, reverse("admin:index"))
+        self.assertNotContains(response, reverse("admin:index"))
 
     def test_admin_role_auto_sets_staff_and_shows_admin_console_link(self):
         user = User.objects.create_user(username="notstaff", password="TempPass123!")
@@ -187,6 +188,37 @@ class AccountsPhaseOneTests(TestCase):
         self.assertTrue(user.is_superuser)
         self.assertFalse(user.groups.filter(name=ADMIN_CONSOLE_GROUP_NAME).exists())
 
+    def test_django_admin_is_only_visible_to_superadmin(self):
+        superadmin = User.objects.create_user(username="django_admin_super", password="TempPass123!")
+        superadmin.role_profile.role = SUPERADMIN
+        superadmin.role_profile.save()
+
+        self.client.login(username="django_admin_super", password="TempPass123!")
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Admin Console")
+        self.assertContains(response, reverse("admin:index"))
+
+    def test_django_admin_rejects_regular_admin(self):
+        admin = User.objects.create_user(username="django_admin_regular", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save()
+
+        self.client.login(username="django_admin_regular", password="TempPass123!")
+        response = self.client.get(reverse("admin:index"))
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_django_admin_allows_superadmin(self):
+        superadmin = User.objects.create_user(username="django_admin_allowed", password="TempPass123!")
+        superadmin.role_profile.role = SUPERADMIN
+        superadmin.role_profile.save()
+
+        self.client.login(username="django_admin_allowed", password="TempPass123!")
+        response = self.client.get(reverse("admin:index"))
+
+        self.assertEqual(response.status_code, 200)
+
     def test_customer_role_cannot_be_changed_from_admin_dashboard(self):
         admin = User.objects.create_user(username="customer_guard_admin", password="TempPass123!")
         admin.role_profile.role = ADMIN
@@ -205,3 +237,73 @@ class AccountsPhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 302)
         customer.role_profile.refresh_from_db()
         self.assertEqual(customer.role_profile.role, CUSTOMER)
+
+    def test_managed_account_creation_auto_generates_code_id(self):
+        superadmin = User.objects.create_user(username="code_creator", password="TempPass123!")
+        superadmin.role_profile.role = SUPERADMIN
+        superadmin.role_profile.save()
+
+        self.client.login(username="code_creator", password="TempPass123!")
+        response = self.client.post(
+            reverse("managed-account-create"),
+            data={
+                "username": "finance_code_user",
+                "email": "finance_code_user@vaniday.com",
+                "code_id": "",
+                "role": FINANCE,
+                "password1": "StrongPass123!",
+                "password2": "StrongPass123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created = User.objects.get(username="finance_code_user")
+        self.assertTrue(created.role_profile.code_id.startswith("FIN-"))
+
+    def test_managed_account_creation_accepts_manual_code_id(self):
+        superadmin = User.objects.create_user(username="manual_code_creator", password="TempPass123!")
+        superadmin.role_profile.role = SUPERADMIN
+        superadmin.role_profile.save()
+
+        self.client.login(username="manual_code_creator", password="TempPass123!")
+        response = self.client.post(
+            reverse("managed-account-create"),
+            data={
+                "username": "manual_code_user",
+                "email": "manual_code_user@vaniday.com",
+                "code_id": "hr-special-001",
+                "role": HR,
+                "password1": "StrongPass123!",
+                "password2": "StrongPass123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created = User.objects.get(username="manual_code_user")
+        self.assertEqual(created.role_profile.code_id, "HR-SPECIAL-001")
+
+    def test_managed_account_creation_rejects_duplicate_code_id(self):
+        superadmin = User.objects.create_user(username="duplicate_code_creator", password="TempPass123!")
+        superadmin.role_profile.role = SUPERADMIN
+        superadmin.role_profile.save()
+
+        existing = User.objects.create_user(username="existing_code_user", password="TempPass123!")
+        existing.role_profile.code_id = "DUP-001"
+        existing.role_profile.save(update_fields=["code_id", "updated_at"])
+
+        self.client.login(username="duplicate_code_creator", password="TempPass123!")
+        response = self.client.post(
+            reverse("managed-account-create"),
+            data={
+                "username": "duplicate_code_user",
+                "email": "duplicate_code_user@vaniday.com",
+                "code_id": "dup-001",
+                "role": STAFF,
+                "password1": "StrongPass123!",
+                "password2": "StrongPass123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(username="duplicate_code_user").exists())
+        self.assertContains(response, "This Code ID is already in use.")

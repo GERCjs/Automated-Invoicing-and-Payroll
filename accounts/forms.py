@@ -86,13 +86,19 @@ class AdminAccountCreationForm(RegistrationForm):
 
 
 class ManagedAccountCreationForm(RegistrationForm):
+    code_id = forms.CharField(
+        required=False,
+        label="Code ID",
+        help_text="Leave blank to generate automatically.",
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Auto-generated if blank"}),
+    )
     role = forms.ChoiceField(
         choices=ROLE_CHOICES,
         widget=forms.Select(attrs={"class": "form-select"}),
     )
 
     class Meta(RegistrationForm.Meta):
-        fields = ("username", "email", "role", "password1", "password2")
+        fields = ("username", "email", "code_id", "role", "password1", "password2")
 
     def __init__(self, *args, actor=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -117,13 +123,20 @@ class ManagedAccountCreationForm(RegistrationForm):
             raise forms.ValidationError("This email is already in use.")
         return email
 
+    def clean_code_id(self):
+        code_id = self.cleaned_data.get("code_id", "").strip().upper()
+        if code_id and User.objects.filter(role_profile__code_id__iexact=code_id).exists():
+            raise forms.ValidationError("This Code ID is already in use.")
+        return code_id
+
     def save(self, commit=True):
         user = UserCreationForm.save(self, commit=False)
         user.email = self.cleaned_data["email"]
         if commit:
             user.save()
             user.role_profile.role = self.cleaned_data["role"]
-            user.role_profile.save(update_fields=["role", "updated_at"])
+            user.role_profile.code_id = self.cleaned_data["code_id"]
+            user.role_profile.save(update_fields=["role", "code_id", "updated_at"])
         return user
 
 

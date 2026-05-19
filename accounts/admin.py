@@ -6,9 +6,9 @@ from .roles import CUSTOMER
 
 @admin.register(UserRole)
 class UserRoleAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "updated_at")
+    list_display = ("user", "code_id", "role", "updated_at")
     list_filter = ("role",)
-    search_fields = ("user__username", "user__email")
+    search_fields = ("user__username", "user__email", "code_id")
 
     def get_readonly_fields(self, request, obj=None):
         readonly_fields = list(super().get_readonly_fields(request, obj))
