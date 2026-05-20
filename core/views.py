@@ -15,6 +15,64 @@ from .audit import get_client_ip, log_event
 from .models import AuditLog
 
 
+AUDIT_ACTION_LABELS = {
+    "auth.login": "User logged in",
+    "auth.logout": "User logged out",
+    "auth.registered": "User registered",
+    "auth.permission_denied": "Access denied",
+    "core.dashboard.viewed": "Dashboard viewed",
+    "core.finance_console.viewed": "Payroll area opened",
+    "invoice.dashboard.viewed": "Invoice dashboard viewed",
+    "invoice.list.viewed": "Invoice list viewed",
+    "invoice.detail.viewed": "Invoice details viewed",
+    "invoice.created": "Invoice created",
+    "invoice.edited": "Invoice updated",
+    "invoice.status.changed": "Invoice status changed",
+    "invoice.email.sent": "Invoice email sent",
+    "invoice.email.failed": "Invoice email failed",
+    "admin.dashboard.viewed": "Admin dashboard viewed",
+    "admin.account.created": "Account created",
+    "admin.account.role_changed": "User role changed",
+    "admin.account.password_updated": "Password updated",
+    "admin.account.deleted": "Account deleted",
+    "admin.payment_reminders.updated": "Reminder settings updated",
+    "admin.mass_email.sent": "Mass email sent",
+}
+
+
+def describe_audit_action(action):
+    if action in AUDIT_ACTION_LABELS:
+        return AUDIT_ACTION_LABELS[action]
+    return action.replace(".", " ").replace("_", " ").title()
+
+
+def explain_audit_action(action):
+    descriptions = {
+        "auth.login": "A user signed in successfully.",
+        "auth.logout": "A user signed out.",
+        "auth.registered": "A new staff account was registered.",
+        "auth.permission_denied": "A user tried to open a page without the required role.",
+        "core.dashboard.viewed": "A user opened the operations dashboard.",
+        "core.finance_console.viewed": "A user opened the payroll workspace.",
+        "invoice.dashboard.viewed": "A user opened the invoice dashboard.",
+        "invoice.list.viewed": "A user viewed the invoice list.",
+        "invoice.detail.viewed": "A user opened an invoice record.",
+        "invoice.created": "A new invoice was created.",
+        "invoice.edited": "An invoice was updated.",
+        "invoice.status.changed": "An invoice status was changed.",
+        "invoice.email.sent": "An invoice email was sent successfully.",
+        "invoice.email.failed": "An invoice email failed to send.",
+        "admin.dashboard.viewed": "An admin opened the admin dashboard.",
+        "admin.account.created": "An admin created a user account.",
+        "admin.account.role_changed": "An admin changed a user's role.",
+        "admin.account.password_updated": "An admin reset a user's password.",
+        "admin.account.deleted": "An admin deleted a user account.",
+        "admin.payment_reminders.updated": "An admin updated reminder settings.",
+        "admin.mass_email.sent": "An admin sent a mass email.",
+    }
+    return descriptions.get(action, describe_audit_action(action))
+
+
 def _safe_count(queryset):
     try:
         return queryset.count()
@@ -68,6 +126,7 @@ def dashboard(request):
     audit_action_chart = [
         {
             "action": row["action"],
+            "label": describe_audit_action(row["action"]),
             "total": row["total"],
             "percent": int((row["total"] / max_audit_action_count) * 100),
         }
@@ -159,7 +218,18 @@ def audit_log_list(request):
         request,
         "core/audit_log_list.html",
         {
-            "logs": _safe_list(logs[:200]),
+            "logs": [
+                {
+                    "created_at": log.created_at,
+                    "user": log.user,
+                    "action": log.action,
+                    "description": explain_audit_action(log.action),
+                    "target_type": log.target_type,
+                    "target_id": log.target_id,
+                    "ip_address": log.ip_address,
+                }
+                for log in _safe_list(logs[:200])
+            ],
             "role_choices": ROLE_CHOICES,
             "selected_role": selected_role,
             "selected_action": selected_action,

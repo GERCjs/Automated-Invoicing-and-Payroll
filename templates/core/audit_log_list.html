@@ -43,7 +43,8 @@
                     <th>Time</th>
                     <th>User</th>
                     <th>Role</th>
-                    <th>Action</th>
+                    <th>Description</th>
+                    <th>Action Code</th>
                     <th>Target</th>
                     <th>IP</th>
                 </tr>
@@ -54,7 +55,8 @@
                     <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
                     <td>{{ log.user.username|default:"System" }}</td>
                     <td>{% if log.user and log.user.role_profile %}{{ log.user.role_profile.get_role_display }}{% else %}-{% endif %}</td>
-                    <td>{{ log.action }}</td>
+                    <td>{{ log.description }}</td>
+                    <td><span class="text-muted small">{{ log.action }}</span></td>
                     <td>{{ log.target_type }} {{ log.target_id }}</td>
                     <td>{{ log.ip_address|default:"-" }}</td>
                 </tr>
