@@ -6,7 +6,7 @@
 <div class="card shadow-sm">
     <div class="card-body">
         <h1 class="h4">Payment processing</h1>
-        <p class="mb-2">Stripe has returned to this page.</p>
+        <p class="mb-2">Stripe has returned to this page after your Card or PayNow checkout.</p>
         {% if invoice %}
         <p class="mb-1"><strong>Invoice:</strong> {{ invoice.invoice_number }}</p>
         {% endif %}
@@ -18,7 +18,7 @@
         <p class="mb-3"><strong>Stripe Session Status:</strong> {{ payment_status }}</p>
         {% endif %}
         <p class="mb-0 text-muted">
-            Sandbox mode: final invoice status is confirmed on this page after Stripe redirect.
+            Payment confirmation is recorded automatically once Stripe confirms the result.
         </p>
     </div>
 </div>
