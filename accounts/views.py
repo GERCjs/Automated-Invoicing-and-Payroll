@@ -5,6 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView, LogoutView
 from django.core.mail import send_mail
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Count, Max, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
@@ -16,6 +17,7 @@ from notifications.models import EmailDeliveryLog, PaymentReminderSettings
 
 from .forms import (
     AdminAccountCreationForm,
+    LoginSecurityPolicyForm,
     LoginForm,
     ManagedAccountCreationForm,
     ManagedPasswordUpdateForm,
@@ -24,6 +26,7 @@ from .forms import (
     PaymentReminderSettingsForm,
     RegistrationForm,
 )
+from .models import LoginSecurityPolicy
 from .permissions import get_user_role, role_required
 from .roles import ADMIN, CUSTOMER, ROLE_CHOICES, STAFF, SUPERADMIN
 
@@ -86,13 +89,26 @@ def _can_manage_target(actor, target_user):
     return True
 
 
+def _can_suspend_target(actor, target_user):
+    if actor == target_user:
+        return False
+    target_role = get_user_role(target_user)
+    if target_role == SUPERADMIN:
+        return False
+    if get_user_role(actor) == ADMIN and target_role == ADMIN:
+        return False
+    return True
+
+
 def _dashboard_context(request, account_form=None, reminder_form=None, mass_email_form=None):
     selected_role = request.GET.get("role", "").strip()
     selected_action = request.GET.get("action", "").strip()
     search_query = request.GET.get("q", "").strip()
 
     users = User.objects.select_related("role_profile").order_by("username")
-    if selected_role:
+    if selected_role == "suspended":
+        users = users.filter(role_profile__suspended_at__isnull=False)
+    elif selected_role:
         users = users.filter(role_profile__role=selected_role)
     if search_query:
         users = users.filter(
@@ -103,7 +119,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         )
 
     audit_logs = AuditLog.objects.select_related("user", "user__role_profile")
-    if selected_role:
+    if selected_role and selected_role != "suspended":
         audit_logs = audit_logs.filter(user__role_profile__role=selected_role)
     if selected_action:
         audit_logs = audit_logs.filter(action__icontains=selected_action)
@@ -113,6 +129,8 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         {"role": role, "label": label, "count": role_counts.get(role, 0)}
         for role, label in ROLE_CHOICES
     ]
+    suspended_count = User.objects.filter(role_profile__suspended_at__isnull=False).count()
+    role_count_cards.append({"role": "suspended", "label": "Suspended", "count": suspended_count})
     last_seen = {
         row["user_id"]: row["last_activity"]
         for row in AuditLog.objects.exclude(user_id=None)
@@ -128,7 +146,23 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
             initial={"role": get_user_role(managed_user)},
         )
         managed_user.can_be_managed = _can_manage_target(request.user, managed_user)
+        managed_user.can_be_suspended = _can_suspend_target(request.user, managed_user)
+        managed_user.is_suspended = managed_user.role_profile.is_suspended
         users_with_activity.append(managed_user)
+
+    policy_rows = []
+    for role, label in ROLE_CHOICES:
+        if role == SUPERADMIN:
+            continue
+        policy = LoginSecurityPolicy.objects.filter(role=role).first() or LoginSecurityPolicy(role=role)
+        policy_rows.append(
+            {
+                "role": role,
+                "label": label,
+                "policy": policy,
+                "form": LoginSecurityPolicyForm(instance=policy, prefix=f"policy_{role}"),
+            }
+        )
 
     suspicious_since = timezone.now() - timezone.timedelta(days=7)
     suspicious_users = (
@@ -161,6 +195,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         "reminder_form": reminder_form or PaymentReminderSettingsForm(instance=reminder_settings),
         "mass_email_form": mass_email_form or MassEmailForm(role_counts=role_counts),
         "reminder_settings": reminder_settings,
+        "login_security_policies": policy_rows,
     }
 
 
@@ -284,6 +319,110 @@ def managed_account_delete(request, user_id):
         ip_address=get_client_ip(request),
     )
     messages.success(request, f"Deleted account {username}.")
+    return redirect("admin-dashboard")
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def managed_account_suspend(request, user_id):
+    if request.method != "POST":
+        return redirect("admin-dashboard")
+    target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
+    if not _can_suspend_target(request.user, target_user):
+        messages.error(request, "You cannot suspend this account.")
+        return redirect("admin-dashboard")
+    if target_user.role_profile.is_suspended:
+        messages.info(request, f"{target_user.username} is already suspended.")
+        return redirect("admin-dashboard")
+
+    reason = request.POST.get("reason", "")
+    target_user.role_profile.suspend(by=request.user, reason=reason)
+    log_event(
+        action="admin.account.suspended",
+        user=request.user,
+        target_type="user",
+        target_id=str(target_user.id),
+        metadata={
+            "username": target_user.username,
+            "role": get_user_role(target_user),
+            "reason": reason.strip()[:255],
+        },
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, f"Suspended account {target_user.username}.")
+    return redirect("admin-dashboard")
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def managed_account_unsuspend(request, user_id):
+    if request.method != "POST":
+        return redirect("admin-dashboard")
+    target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
+    if not _can_suspend_target(request.user, target_user):
+        messages.error(request, "You cannot unsuspend this account.")
+        return redirect("admin-dashboard")
+    if not target_user.role_profile.is_suspended:
+        messages.info(request, f"{target_user.username} is not suspended.")
+        return redirect("admin-dashboard")
+
+    target_user.role_profile.unsuspend()
+    log_event(
+        action="admin.account.unsuspended",
+        user=request.user,
+        target_type="user",
+        target_id=str(target_user.id),
+        metadata={"username": target_user.username, "role": get_user_role(target_user)},
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, f"Unsuspended account {target_user.username}.")
+    return redirect("admin-dashboard")
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def login_security_policy_update(request, role=None):
+    if request.method != "POST":
+        return redirect("admin-dashboard")
+
+    policy_forms = []
+    invalid_roles = []
+    for role, label in ROLE_CHOICES:
+        if role == SUPERADMIN:
+            continue
+        policy = LoginSecurityPolicy.get_for_role(role)
+        form = LoginSecurityPolicyForm(request.POST, instance=policy, prefix=f"policy_{role}")
+        policy_forms.append((role, form))
+        if not form.is_valid():
+            invalid_roles.append(label)
+
+    if invalid_roles:
+        messages.error(request, f"Failed to update policy for: {', '.join(invalid_roles)}.")
+        return redirect("admin-dashboard")
+
+    updated = []
+    with transaction.atomic():
+        for role, form in policy_forms:
+            policy = form.save(commit=False)
+            policy.updated_by = request.user
+            policy.save()
+            updated.append(
+                {
+                    "role": role,
+                    "label": policy.get_role_display(),
+                    "max_failed_login_attempts": policy.max_failed_login_attempts,
+                    "policy_id": str(policy.id),
+                }
+            )
+
+    log_event(
+        action="admin.login_security_policy.updated.bulk",
+        user=request.user,
+        target_type="login_security_policy",
+        metadata={"updated_policies": updated},
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, "Login security policy updated.")
     return redirect("admin-dashboard")
 
 

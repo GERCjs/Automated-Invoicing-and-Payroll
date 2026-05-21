@@ -6,6 +6,7 @@ from django.contrib.auth.forms import UserCreationForm
 
 from notifications.models import PaymentReminderSettings
 
+from .models import LoginSecurityPolicy
 from .roles import ADMIN, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
 
 User = get_user_model()
@@ -31,6 +32,24 @@ class LoginForm(AuthenticationForm):
             }
         )
     )
+
+    def clean(self):
+        try:
+            return super().clean()
+        except forms.ValidationError:
+            username = str(self.data.get("username", "")).strip()
+            if username:
+                user = (
+                    User.objects.select_related("role_profile")
+                    .filter(username__iexact=username)
+                    .first()
+                )
+                if user and getattr(user.role_profile, "is_suspended", False):
+                    raise forms.ValidationError(
+                        "Your account is suspended. Please contact an administrator.",
+                        code="account_suspended",
+                    )
+            raise
 
 
 class RegistrationForm(UserCreationForm):
@@ -203,3 +222,21 @@ class MassEmailForm(forms.Form):
             for role, label in ROLE_CHOICES
             if role != SUPERADMIN
         ]
+
+
+class LoginSecurityPolicyForm(forms.ModelForm):
+    class Meta:
+        model = LoginSecurityPolicy
+        fields = ("role", "max_failed_login_attempts")
+        widgets = {
+            "role": forms.HiddenInput(),
+            "max_failed_login_attempts": forms.NumberInput(
+                attrs={"class": "form-control form-control-sm", "min": "1", "max": "20"}
+            ),
+        }
+
+    def clean_max_failed_login_attempts(self):
+        value = self.cleaned_data["max_failed_login_attempts"]
+        if value < 1 or value > 20:
+            raise forms.ValidationError("Allowed range is 1 to 20 attempts.")
+        return value

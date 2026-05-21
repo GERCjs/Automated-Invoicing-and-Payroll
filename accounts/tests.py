@@ -4,6 +4,7 @@ from django.urls import reverse
 
 from core.models import AuditLog
 
+from .models import LoginSecurityPolicy
 from .signals import ADMIN_CONSOLE_GROUP_NAME
 from .roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 
@@ -323,3 +324,162 @@ class AccountsPhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(User.objects.filter(username="duplicate_code_user").exists())
         self.assertContains(response, "This Code ID is already in use.")
+
+    def test_admin_can_suspend_and_unsuspend_staff_account(self):
+        admin = User.objects.create_user(username="suspend_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save()
+
+        target = User.objects.create_user(username="suspend_target", password="TempPass123!")
+        target.role_profile.role = STAFF
+        target.role_profile.save()
+
+        self.client.login(username="suspend_admin", password="TempPass123!")
+        suspend_response = self.client.post(reverse("managed-account-suspend", args=[target.id]))
+        self.assertEqual(suspend_response.status_code, 302)
+
+        target.refresh_from_db()
+        target.role_profile.refresh_from_db()
+        self.assertFalse(target.is_active)
+        self.assertTrue(target.role_profile.is_suspended)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="admin.account.suspended",
+                user=admin,
+                target_type="user",
+                target_id=str(target.id),
+            ).exists()
+        )
+
+        unsuspend_response = self.client.post(reverse("managed-account-unsuspend", args=[target.id]))
+        self.assertEqual(unsuspend_response.status_code, 302)
+        target.refresh_from_db()
+        target.role_profile.refresh_from_db()
+        self.assertTrue(target.is_active)
+        self.assertFalse(target.role_profile.is_suspended)
+        self.assertEqual(target.role_profile.failed_login_attempts, 0)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="admin.account.unsuspended",
+                user=admin,
+                target_type="user",
+                target_id=str(target.id),
+            ).exists()
+        )
+
+    def test_admin_can_suspend_customer_account(self):
+        admin = User.objects.create_user(username="customer_suspend_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save()
+
+        customer = User.objects.create_user(username="customer_suspend_target", password="TempPass123!")
+        customer.role_profile.role = CUSTOMER
+        customer.role_profile.save()
+
+        self.client.login(username="customer_suspend_admin", password="TempPass123!")
+        response = self.client.post(reverse("managed-account-suspend", args=[customer.id]))
+        self.assertEqual(response.status_code, 302)
+
+        customer.refresh_from_db()
+        customer.role_profile.refresh_from_db()
+        self.assertFalse(customer.is_active)
+        self.assertTrue(customer.role_profile.is_suspended)
+
+    def test_admin_can_update_login_security_policy(self):
+        admin = User.objects.create_user(username="policy_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save()
+
+        self.client.login(username="policy_admin", password="TempPass123!")
+        response = self.client.post(
+            reverse("login-security-policy-update"),
+            data={
+                "policy_admin-role": ADMIN,
+                "policy_admin-max_failed_login_attempts": 5,
+                "policy_finance-role": FINANCE,
+                "policy_finance-max_failed_login_attempts": 5,
+                "policy_hr-role": HR,
+                "policy_hr-max_failed_login_attempts": 5,
+                "policy_staff-role": STAFF,
+                "policy_staff-max_failed_login_attempts": 7,
+                "policy_customer-role": CUSTOMER,
+                "policy_customer-max_failed_login_attempts": 5,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        policy = LoginSecurityPolicy.objects.get(role=STAFF)
+        self.assertEqual(policy.max_failed_login_attempts, 7)
+        self.assertEqual(policy.updated_by, admin)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="admin.login_security_policy.updated.bulk",
+                user=admin,
+                target_type="login_security_policy",
+            ).exists()
+        )
+
+    def test_failed_login_attempts_auto_suspend_at_role_threshold(self):
+        user = User.objects.create_user(username="lock_me", password="TempPass123!")
+        user.role_profile.role = STAFF
+        user.role_profile.save(update_fields=["role", "updated_at"])
+        LoginSecurityPolicy.objects.create(role=STAFF, max_failed_login_attempts=2)
+
+        first_attempt = self.client.post(
+            reverse("login"),
+            data={"username": "lock_me", "password": "WrongPass123!"},
+        )
+        self.assertEqual(first_attempt.status_code, 200)
+        user.refresh_from_db()
+        user.role_profile.refresh_from_db()
+        self.assertEqual(user.role_profile.failed_login_attempts, 1)
+        self.assertTrue(user.is_active)
+        self.assertFalse(user.role_profile.is_suspended)
+
+        second_attempt = self.client.post(
+            reverse("login"),
+            data={"username": "lock_me", "password": "WrongPass123!"},
+        )
+        self.assertEqual(second_attempt.status_code, 200)
+        user.refresh_from_db()
+        user.role_profile.refresh_from_db()
+        self.assertEqual(user.role_profile.failed_login_attempts, 2)
+        self.assertFalse(user.is_active)
+        self.assertTrue(user.role_profile.is_suspended)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="auth.login.auto_suspended",
+                user=user,
+                target_type="user",
+                target_id=str(user.id),
+            ).exists()
+        )
+
+    def test_successful_login_resets_failed_attempt_counter(self):
+        user = User.objects.create_user(username="reset_counter_u", password="TempPass123!")
+        user.role_profile.role = STAFF
+        user.role_profile.failed_login_attempts = 3
+        user.role_profile.save(update_fields=["role", "failed_login_attempts", "updated_at"])
+
+        response = self.client.post(
+            reverse("login"),
+            data={"username": "reset_counter_u", "password": "TempPass123!"},
+        )
+        self.assertEqual(response.status_code, 302)
+        user.role_profile.refresh_from_db()
+        self.assertEqual(user.role_profile.failed_login_attempts, 0)
+
+    def test_suspended_user_login_shows_suspended_message(self):
+        user = User.objects.create_user(username="already_suspended", password="TempPass123!")
+        user.role_profile.role = STAFF
+        user.role_profile.save(update_fields=["role", "updated_at"])
+        user.role_profile.suspend(reason="Manual suspension for test")
+
+        response = self.client.post(
+            reverse("login"),
+            data={"username": "already_suspended", "password": "TempPass123!"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Your account is suspended. Please contact an administrator.")
+        self.assertNotIn("_auth_user_id", self.client.session)
