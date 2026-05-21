@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}Payment & Stripe Report{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+        <h1 class="h3 mb-1">Payment & Stripe Report</h1>
+        <p class="text-muted mb-0">Snapshot as of {{ today }} for payment monitoring and diploma-level reporting.</p>
+    </div>
+</div>
+
+{% if is_stripe_only_prototype %}
+<div class="alert alert-info">
+    Stripe is the current prototype payment method in this build.
+</div>
+{% endif %}
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Collected This Month</div>
+                <div class="h4 mb-0">SGD {{ successful_month_amount|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Collected This Year</div>
+                <div class="h4 mb-0">SGD {{ successful_year_amount|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Successful Payments</div>
+                <div class="display-6 mb-0 text-success">{{ successful_payment_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Failed / Cancelled</div>
+                <div class="display-6 mb-0 text-danger">{{ failed_cancelled_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Refunded</div>
+                <div class="display-6 mb-0 text-warning">{{ refunded_count }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Outstanding Invoice Amount</div>
+                <div class="h4 mb-0">SGD {{ outstanding_amount|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Stripe Payments</div>
+                <div class="display-6 mb-0">{{ stripe_total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Reporting Window</div>
+                <div class="mb-0">Month start: {{ month_start }}</div>
+                <div class="mb-0">Year start: {{ year_start }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Stripe Status Summary</div>
+            <div class="table-responsive">
+                <table class="table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th class="text-end">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in stripe_status_summary %}
+                        <tr>
+                            <td>{{ row.status|title }}</td>
+                            <td class="text-end">{{ row.total }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="2" class="text-center py-3">No Stripe payments yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Payment Method Summary</div>
+            <div class="table-responsive">
+                <table class="table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Available</th>
+                            <th class="text-end">Count</th>
+                            <th>Note</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for method in payment_method_summary %}
+                        <tr>
+                            <td>{{ method.method }}</td>
+                            <td>
+                                {% if method.available %}
+                                <span class="badge text-bg-success">Yes</span>
+                                {% else %}
+                                <span class="badge text-bg-secondary">No</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{% if method.has_count %}{{ method.count }}{% else %}-{% endif %}</td>
+                            <td>{{ method.note }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header">Recent Stripe Transactions</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Invoice</th>
+                    <th>Customer</th>
+                    <th class="text-end">Amount</th>
+                    <th>Status</th>
+                    <th>Payment Reference</th>
+                    <th>Session ID</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payment in recent_stripe_transactions %}
+                <tr>
+                    <td>{{ payment.paid_at|default:payment.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ payment.invoice.invoice_number }}</td>
+                    <td>{{ payment.invoice.customer.name }}</td>
+                    <td class="text-end">{{ payment.currency }} {{ payment.amount|floatformat:2 }}</td>
+                    <td>{{ payment.get_status_display }}</td>
+                    <td>{{ payment.payment_reference }}</td>
+                    <td><span class="small text-muted">{{ payment.stripe_checkout_session_id|default:"-" }}</span></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center py-3">No Stripe transactions found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">Recent Payments</div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Payment Date</th>
+                    <th>Invoice Number</th>
+                    <th>Customer</th>
+                    <th class="text-end">Amount</th>
+                    <th>Method</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payment in recent_payments %}
+                <tr>
+                    <td>{{ payment.paid_at|default:payment.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ payment.invoice.invoice_number }}</td>
+                    <td>{{ payment.invoice.customer.name }}</td>
+                    <td class="text-end">{{ payment.currency }} {{ payment.amount|floatformat:2 }}</td>
+                    <td>{{ payment.get_provider_display }}</td>
+                    <td>{{ payment.get_status_display }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-center py-3">No payments found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

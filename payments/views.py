@@ -199,10 +199,59 @@ def checkout_success(request):
 
 def checkout_cancel(request):
     next_url = request.GET.get("next", "").strip()
+    session_id = request.GET.get("session_id", "").strip()
+    payment_reference = request.GET.get("payment_reference", "").strip()
+
+    payment_record = None
+    if session_id:
+        payment_record = PaymentRecord.objects.select_related("invoice").filter(
+            stripe_checkout_session_id=session_id
+        ).first()
+    if payment_record is None and payment_reference:
+        payment_record = PaymentRecord.objects.select_related("invoice").filter(
+            payment_reference=payment_reference
+        ).first()
+
+    if (
+        payment_record is not None
+        and payment_record.status
+        not in {PaymentRecord.STATUS_SUCCEEDED, PaymentRecord.STATUS_CANCELLED}
+    ):
+        payment_record.status = PaymentRecord.STATUS_CANCELLED
+        payment_record.save(update_fields=["status", "updated_at"])
+
+    if payment_record is not None:
+        log_event(
+            action="payment.checkout.cancelled",
+            user=request.user if request.user.is_authenticated else payment_record.created_by,
+            target_type="invoice",
+            target_id=str(payment_record.invoice_id),
+            metadata={
+                "invoice_number": payment_record.invoice.invoice_number,
+                "payment_reference": payment_record.payment_reference,
+                "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+                "path": request.path,
+                "next_url": next_url,
+            },
+            ip_address=get_client_ip(request),
+        )
+    else:
+        log_event(
+            action="payment.checkout.cancelled",
+            user=request.user if request.user.is_authenticated else None,
+            metadata={
+                "path": request.path,
+                "next_url": next_url,
+                "session_id": session_id,
+                "payment_reference": payment_reference,
+            },
+            ip_address=get_client_ip(request),
+        )
+
     return render(
         request,
         "payments/checkout_cancel.html",
-        {"next_url": next_url},
+        {"next_url": next_url, "payment_record": payment_record},
     )
 
 

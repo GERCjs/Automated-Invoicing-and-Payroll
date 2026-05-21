@@ -59,6 +59,11 @@ class CoreConfig(AppConfig):
         def should_use_renamed_tables(db_connection):
             import os
 
+            db_name = str(db_connection.settings_dict.get("NAME") or "")
+            if "test" in db_name.lower():
+                # Django test databases are created from migrations that still use auth_* table names.
+                return False
+
             env_override = os.getenv("USE_RENAMED_TABLES", "").strip().lower()
             if env_override in {"1", "true", "yes", "on"}:
                 return True
@@ -68,8 +73,6 @@ class CoreConfig(AppConfig):
             engine = str(db_connection.settings_dict.get("ENGINE") or "")
             if engine.endswith("sqlite3"):
                 return False
-
-            db_name = str(db_connection.settings_dict.get("NAME") or "")
             return "test" not in db_name.lower()
 
         def configure_tables(sender, connection, **kwargs):

@@ -10,6 +10,7 @@ The goal is to keep work safe, focused, and sequential (foundation first, then m
 - `TASK.md`: Task requirements for the implementation.
 - `PROMPTS.md`: Prompt library and dispatcher pattern you send to the agent.
 - `QA_GATE.md`: Phase-based quality gate to review the current completed phase before moving forward.
+- `DATABASE_SETUP_NOTES.md`: Shared database setup, migration commands, and ERD table mapping notes.
 
 ## How to use (exact steps)
 1. Open `PROMPTS.md`.

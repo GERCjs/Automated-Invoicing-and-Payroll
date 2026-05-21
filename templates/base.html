@@ -33,6 +33,9 @@
                 <li class="nav-item">
                     <a class="nav-link" href="{% url 'invoice-dashboard' %}">Invoices</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'payment-stripe-report' %}">Payment Report</a>
+                </li>
                 {% endif %}
                 {% if current_user_role == "customer" %}
                 <li class="nav-item">

@@ -222,6 +222,7 @@ def finalize_checkout_success_from_redirect(
         if changed:
             payment_record.save(update_fields=update_fields)
 
+        invoice_status_before = invoice.status
         if invoice.status != Invoice.STATUS_PAID:
             invoice.status = Invoice.STATUS_PAID
             invoice.save(update_fields=["status", "updated_at"])
@@ -237,6 +238,21 @@ def finalize_checkout_success_from_redirect(
                     "invoice_number": invoice.invoice_number,
                     "payment_reference": payment_record.payment_reference,
                     "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+                },
+            )
+        if invoice_status_before != Invoice.STATUS_PAID:
+            log_event(
+                action="payment.invoice.marked_paid",
+                user=payment_record.created_by,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "previous_status": invoice_status_before,
+                    "new_status": Invoice.STATUS_PAID,
+                    "payment_reference": payment_record.payment_reference,
+                    "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+                    "source": "success_redirect",
                 },
             )
 
@@ -310,6 +326,7 @@ def _mark_success_from_session(
             update_fields.append("external_transaction_id")
         payment_record.save(update_fields=update_fields)
 
+        invoice_status_before = invoice.status
         if invoice.status != Invoice.STATUS_PAID:
             invoice.status = Invoice.STATUS_PAID
             invoice.save(update_fields=["status", "updated_at"])
@@ -342,6 +359,46 @@ def _mark_success_from_session(
                 "event_type": event_type,
             },
         )
+        if invoice_status_before != Invoice.STATUS_PAID:
+            log_event(
+                action="payment.invoice.marked_paid",
+                user=None,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "previous_status": invoice_status_before,
+                    "new_status": Invoice.STATUS_PAID,
+                    "payment_reference": payment_record.payment_reference,
+                    "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+                },
+            )
+
+
+def _log_non_success_event(
+    *,
+    event_type: str,
+    payment_record: PaymentRecord,
+    final_status: str,
+) -> None:
+    action = (
+        "payment.stripe.cancelled"
+        if final_status == PaymentRecord.STATUS_CANCELLED
+        else "payment.stripe.failed"
+    )
+    log_event(
+        action=action,
+        user=payment_record.created_by,
+        target_type="invoice",
+        target_id=str(payment_record.invoice_id),
+        metadata={
+            "invoice_number": payment_record.invoice.invoice_number,
+            "payment_reference": payment_record.payment_reference,
+            "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+            "event_type": event_type,
+            "payment_status": final_status,
+        },
+    )
 
 
 def _mark_non_success_from_session(
@@ -378,6 +435,11 @@ def _mark_non_success_from_session(
                 "error_message",
                 "updated_at",
             ]
+        )
+        _log_non_success_event(
+            event_type=event_type,
+            payment_record=payment_record,
+            final_status=final_status,
         )
 
 

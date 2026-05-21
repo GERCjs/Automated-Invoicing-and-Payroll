@@ -10,6 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.roles import CUSTOMER
+from core.models import AuditLog
 from invoicing.models import Customer, Invoice
 
 from .models import PaymentRecord, StripeWebhookEvent
@@ -221,6 +222,96 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(StripeWebhookEvent.objects.filter(event_id="evt_test_duplicate_1").count(), 1)
 
     @patch("payments.views.construct_webhook_event")
+    def test_webhook_async_failed_marks_payment_failed_and_invoice_not_paid(self, construct_event_mock):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-WEBHOOK-FAILED-1",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_failed_1",
+        )
+        construct_event_mock.return_value = {
+            "id": "evt_test_failed_1",
+            "type": "checkout.session.async_payment_failed",
+            "data": {
+                "object": {
+                    "id": "cs_test_failed_1",
+                    "payment_status": "unpaid",
+                    "metadata": {
+                        "payment_record_id": str(payment_record.id),
+                    },
+                }
+            },
+        }
+
+        response = self.client.post(
+            reverse("payment-stripe-webhook"),
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="t=123,v1=abc",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_FAILED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.stripe.failed",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
+
+    @patch("payments.views.construct_webhook_event")
+    def test_webhook_expired_marks_payment_cancelled_and_invoice_not_paid(self, construct_event_mock):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-WEBHOOK-EXPIRED-1",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_expired_1",
+        )
+        construct_event_mock.return_value = {
+            "id": "evt_test_expired_1",
+            "type": "checkout.session.expired",
+            "data": {
+                "object": {
+                    "id": "cs_test_expired_1",
+                    "payment_status": "unpaid",
+                    "metadata": {
+                        "payment_record_id": str(payment_record.id),
+                    },
+                }
+            },
+        }
+
+        response = self.client.post(
+            reverse("payment-stripe-webhook"),
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="t=123,v1=abc",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_CANCELLED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.stripe.cancelled",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
+
+    @patch("payments.views.construct_webhook_event")
     def test_webhook_retries_failed_event_and_allows_reprocessing(self, construct_event_mock):
         payment_record = PaymentRecord.objects.create(
             invoice=self.invoice,
@@ -312,6 +403,38 @@ class StripePaymentsPhaseTests(TestCase):
         response = self.client.get(reverse("payment-checkout-cancel"), data={"next": "/invoices/"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Payment cancelled")
+
+    def test_cancel_page_marks_payment_cancelled_when_reference_is_present(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-CANCEL-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_cancel_1",
+        )
+
+        response = self.client.get(
+            reverse("payment-checkout-cancel"),
+            data={
+                "next": "/invoices/",
+                "payment_reference": payment_record.payment_reference,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payment_record.refresh_from_db()
+        self.invoice.refresh_from_db()
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_CANCELLED)
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.checkout.cancelled",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
 
     @override_settings(STRIPE_SECRET_KEY="")
     def test_create_checkout_requires_stripe_secret_key(self):
