@@ -3,7 +3,9 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -11,6 +13,7 @@ from accounts.roles import CUSTOMER
 from invoicing.models import Customer, Invoice
 
 from .models import PaymentRecord, StripeWebhookEvent
+from .services import create_checkout_for_invoice
 
 User = get_user_model()
 
@@ -105,6 +108,31 @@ class StripePaymentsPhaseTests(TestCase):
         response = self.client.post(reverse("payment-checkout-customer", args=[other_invoice.pk]))
 
         self.assertEqual(response.status_code, 404)
+
+    @patch("payments.views.create_checkout_for_invoice")
+    def test_public_checkout_rejects_draft_invoice(self, create_checkout_mock):
+        self.invoice.status = Invoice.STATUS_DRAFT
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        response = self.client.post(
+            reverse("payment-checkout-public", args=[self.invoice.public_view_token])
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("invoice-public-view", args=[self.invoice.public_view_token]))
+        create_checkout_mock.assert_not_called()
+
+    @patch("payments.views.create_checkout_for_invoice")
+    def test_customer_checkout_rejects_draft_invoice(self, create_checkout_mock):
+        self.invoice.status = Invoice.STATUS_DRAFT
+        self.invoice.save(update_fields=["status", "updated_at"])
+        self.client.login(username="customer_stripe", password="TempPass123!")
+
+        response = self.client.post(reverse("payment-checkout-customer", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("customer-invoice-detail", args=[self.invoice.pk]))
+        create_checkout_mock.assert_not_called()
 
     @patch("payments.views.construct_webhook_event")
     def test_webhook_completed_marks_invoice_paid(self, construct_event_mock):
@@ -284,3 +312,49 @@ class StripePaymentsPhaseTests(TestCase):
         response = self.client.get(reverse("payment-checkout-cancel"), data={"next": "/invoices/"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Payment cancelled")
+
+    @override_settings(STRIPE_SECRET_KEY="")
+    def test_create_checkout_requires_stripe_secret_key(self):
+        with self.assertRaises(ImproperlyConfigured):
+            create_checkout_for_invoice(
+                invoice=self.invoice,
+                success_url="https://example.com/success",
+                cancel_url="https://example.com/cancel",
+                initiated_by=self.customer_user,
+            )
+        self.assertEqual(PaymentRecord.objects.count(), 0)
+
+    @override_settings(STRIPE_SECRET_KEY="sk_test_guardrails")
+    @patch("payments.services._import_stripe")
+    def test_create_checkout_uses_card_only_for_non_sgd_currency(self, import_stripe_mock):
+        usd_invoice = Invoice.objects.create(
+            invoice_number="INV-STRIPE-USD-1001",
+            customer=self.customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=7),
+            currency="USD",
+            subtotal=Decimal("80.00"),
+            tax_amount=Decimal("0.00"),
+            total_amount=Decimal("80.00"),
+        )
+        stripe_mock = Mock()
+        stripe_mock.checkout.Session.create.return_value = Mock(
+            id="cs_test_usd_1",
+            payment_intent="pi_test_usd_1",
+        )
+        import_stripe_mock.return_value = stripe_mock
+
+        payment_record = create_checkout_for_invoice(
+            invoice=usd_invoice,
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            initiated_by=self.customer_user,
+        )
+
+        self.assertEqual(payment_record.currency, "USD")
+        self.assertEqual(payment_record.provider, PaymentRecord.PROVIDER_STRIPE)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        stripe_mock.checkout.Session.create.assert_called_once()
+        create_kwargs = stripe_mock.checkout.Session.create.call_args.kwargs
+        self.assertEqual(create_kwargs["payment_method_types"], ["card"])

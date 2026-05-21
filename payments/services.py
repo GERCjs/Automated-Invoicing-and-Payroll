@@ -18,6 +18,7 @@ WEBHOOK_EVENT_COMPLETED = "checkout.session.completed"
 WEBHOOK_EVENT_ASYNC_SUCCEEDED = "checkout.session.async_payment_succeeded"
 WEBHOOK_EVENT_ASYNC_FAILED = "checkout.session.async_payment_failed"
 WEBHOOK_EVENT_EXPIRED = "checkout.session.expired"
+PAYNOW_ENABLED_CURRENCY = "SGD"
 
 SUPPORTED_WEBHOOK_EVENTS = {
     WEBHOOK_EVENT_COMPLETED,
@@ -42,6 +43,38 @@ def _to_minor_units(amount: Decimal) -> int:
     return int((normalized * 100).to_integral_value(rounding=ROUND_HALF_UP))
 
 
+def _require_stripe_secret_key() -> str:
+    secret_key = (settings.STRIPE_SECRET_KEY or "").strip()
+    if not secret_key:
+        raise ImproperlyConfigured(
+            "STRIPE_SECRET_KEY is missing. Configure Stripe checkout before accepting payments."
+        )
+    return secret_key
+
+
+def _require_stripe_webhook_secret() -> str:
+    webhook_secret = (settings.STRIPE_WEBHOOK_SECRET or "").strip()
+    if not webhook_secret:
+        raise ImproperlyConfigured(
+            "STRIPE_WEBHOOK_SECRET is missing. Configure Stripe webhooks before processing events."
+        )
+    return webhook_secret
+
+
+def _normalize_currency_code(raw_currency: str | None) -> str:
+    currency_code = (raw_currency or PAYNOW_ENABLED_CURRENCY).strip().upper()
+    if len(currency_code) != 3 or not currency_code.isalpha():
+        raise ValueError("Invoice currency is invalid for Stripe checkout.")
+    return currency_code
+
+
+def _resolve_checkout_payment_method_types(currency_code: str) -> list[str]:
+    payment_method_types = ["card"]
+    if currency_code == PAYNOW_ENABLED_CURRENCY:
+        payment_method_types.append("paynow")
+    return payment_method_types
+
+
 def _normalize_external_id(value: Any) -> str:
     if value is None:
         return ""
@@ -60,17 +93,19 @@ def _build_checkout_session(
     cancel_url: str,
 ) -> Any:
     stripe = _import_stripe()
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    stripe.api_key = _require_stripe_secret_key()
+    currency_code = _normalize_currency_code(invoice.currency)
+    payment_method_types = _resolve_checkout_payment_method_types(currency_code)
     return stripe.checkout.Session.create(
         mode="payment",
         success_url=success_url,
         cancel_url=cancel_url,
-        payment_method_types=["card" , "paynow"],
+        payment_method_types=payment_method_types,
         line_items=[
             {
                 "quantity": 1,
                 "price_data": {
-                    "currency": (invoice.currency or "SGD").lower(),
+                    "currency": currency_code.lower(),
                     "unit_amount": _to_minor_units(invoice.total_amount),
                     "product_data": {
                         "name": f"Invoice {invoice.invoice_number}",
@@ -98,6 +133,8 @@ def create_checkout_for_invoice(
 ) -> PaymentRecord:
     if invoice.status == Invoice.STATUS_PAID:
         raise ValueError("Invoice is already paid.")
+    _require_stripe_secret_key()
+    normalized_currency = _normalize_currency_code(invoice.currency)
 
     payment_record = PaymentRecord.objects.create(
         invoice=invoice,
@@ -105,7 +142,7 @@ def create_checkout_for_invoice(
         provider=PaymentRecord.PROVIDER_STRIPE,
         status=PaymentRecord.STATUS_PENDING,
         amount=invoice.total_amount,
-        currency=(invoice.currency or "SGD").upper(),
+        currency=normalized_currency,
         created_by=initiated_by,
     )
 
@@ -131,7 +168,7 @@ def create_checkout_for_invoice(
 
 def retrieve_checkout_session(session_id: str) -> Any:
     stripe = _import_stripe()
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+    stripe.api_key = _require_stripe_secret_key()
     return stripe.checkout.Session.retrieve(session_id)
 
 
@@ -208,13 +245,12 @@ def finalize_checkout_success_from_redirect(
 
 def construct_webhook_event(payload: bytes, stripe_signature: str):
     stripe = _import_stripe()
-    stripe.api_key = settings.STRIPE_SECRET_KEY
-    if not settings.STRIPE_WEBHOOK_SECRET:
-        raise ImproperlyConfigured("STRIPE_WEBHOOK_SECRET is missing.")
+    stripe.api_key = _require_stripe_secret_key()
+    webhook_secret = _require_stripe_webhook_secret()
     return stripe.Webhook.construct_event(
         payload=payload,
         sig_header=stripe_signature,
-        secret=settings.STRIPE_WEBHOOK_SECRET,
+        secret=webhook_secret,
     )
 
 

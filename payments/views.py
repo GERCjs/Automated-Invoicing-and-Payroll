@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ImproperlyConfigured
 from django.http import Http404, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -22,6 +23,12 @@ from .services import (
     process_webhook_event,
     retrieve_checkout_session,
 )
+
+PAYABLE_INVOICE_STATUSES = {
+    Invoice.STATUS_SENT,
+    Invoice.STATUS_VIEWED,
+    Invoice.STATUS_OVERDUE,
+}
 
 
 def _checkout_success_url(request) -> str:
@@ -44,6 +51,12 @@ def _start_checkout(request, *, invoice: Invoice, cancel_url: str, fallback_url:
     if invoice.status == Invoice.STATUS_PAID:
         messages.info(request, f"Invoice {invoice.invoice_number} is already paid.")
         return redirect(fallback_url)
+    if invoice.status not in PAYABLE_INVOICE_STATUSES:
+        messages.error(
+            request,
+            f"Invoice {invoice.invoice_number} is not ready for payment yet.",
+        )
+        return redirect(fallback_url)
 
     try:
         payment_record = create_checkout_for_invoice(
@@ -52,6 +65,17 @@ def _start_checkout(request, *, invoice: Invoice, cancel_url: str, fallback_url:
             cancel_url=cancel_url,
             initiated_by=request.user if request.user.is_authenticated else None,
         )
+    except ImproperlyConfigured as exc:
+        log_event(
+            action="payment.checkout.configuration_error",
+            user=request.user if request.user.is_authenticated else None,
+            target_type="invoice",
+            target_id=str(invoice.id),
+            metadata={"invoice_number": invoice.invoice_number, "reason": str(exc)},
+            ip_address=get_client_ip(request),
+        )
+        messages.error(request, str(exc))
+        return redirect(fallback_url)
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect(fallback_url)
@@ -132,6 +156,9 @@ def checkout_success(request):
     if session_id:
         try:
             session = retrieve_checkout_session(session_id)
+        except ImproperlyConfigured as exc:
+            messages.error(request, str(exc))
+            session = None
         except Exception:
             session = None
         if session is not None:
@@ -191,6 +218,14 @@ def stripe_webhook(request):
         event = construct_webhook_event(payload=payload, stripe_signature=signature)
     except ValueError:
         return HttpResponseBadRequest("Invalid payload.")
+    except ImproperlyConfigured as exc:
+        log_event(
+            action="payment.webhook.configuration_error",
+            user=None,
+            metadata={"reason": str(exc), "path": request.path},
+            ip_address=get_client_ip(request),
+        )
+        return HttpResponse("Stripe webhook is not configured.", status=500)
     except Exception:
         return HttpResponseBadRequest("Invalid webhook signature.")
 
