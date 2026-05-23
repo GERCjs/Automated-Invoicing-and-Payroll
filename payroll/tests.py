@@ -8,7 +8,7 @@ from django.urls import reverse
 from openpyxl import Workbook
 
 from accounts.models import UserRole
-from accounts.roles import HR
+from accounts.roles import HR, STAFF
 from payroll.models import Employee, PayrollRecord
 
 
@@ -138,3 +138,99 @@ class PayrollUploadPreviewTests(TestCase):
         response = self.client.get(reverse("payroll-template-download"))
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment; filename=", response["Content-Disposition"])
+
+    def test_payroll_list_supports_month_filter(self):
+        PayrollRecord.objects.create(
+            employee_name="Alex Tan",
+            employee_id="EMP001",
+            basic_salary=3000,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=600,
+            net_salary=2450,
+            payment_date=date(2026, 5, 24),
+        )
+        PayrollRecord.objects.create(
+            employee_name="Jamie Lim",
+            employee_id="EMP002",
+            basic_salary=3200,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=640,
+            net_salary=2610,
+            payment_date=date(2026, 4, 24),
+        )
+        response = self.client.get(reverse("payroll-list"), {"month": "2026-05"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "EMP001")
+        self.assertNotContains(response, "EMP002")
+
+
+class PayslipPdfAccessTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.staff_user = user_model.objects.create_user(
+            username="staff1", password="pass12345", email="staff1@example.com"
+        )
+        UserRole.objects.filter(user=self.staff_user).update(role=STAFF)
+        self.other_staff_user = user_model.objects.create_user(
+            username="staff2", password="pass12345", email="staff2@example.com"
+        )
+        UserRole.objects.filter(user=self.other_staff_user).update(role=STAFF)
+        self.hr_user = user_model.objects.create_user(username="hr2", password="pass12345")
+        UserRole.objects.filter(user=self.hr_user).update(role=HR)
+
+        self.staff_employee = Employee.objects.create(
+            user=self.staff_user,
+            employee_code="EMP100",
+            first_name="Staff",
+            last_name="One",
+            email="staff1@example.com",
+            hire_date=date(2024, 1, 1),
+            base_salary=2000,
+        )
+        self.other_employee = Employee.objects.create(
+            user=self.other_staff_user,
+            employee_code="EMP200",
+            first_name="Staff",
+            last_name="Two",
+            email="staff2@example.com",
+            hire_date=date(2024, 1, 1),
+            base_salary=2200,
+        )
+
+        self.staff_record = PayrollRecord.objects.create(
+            employee_name="Staff One",
+            employee_id=self.staff_employee.employee_code,
+            basic_salary=2000,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=400,
+            net_salary=1650,
+            payment_date=date(2026, 5, 24),
+        )
+        self.other_record = PayrollRecord.objects.create(
+            employee_name="Staff Two",
+            employee_id=self.other_employee.employee_code,
+            basic_salary=2200,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=440,
+            net_salary=1810,
+            payment_date=date(2026, 5, 24),
+        )
+
+    def test_hr_can_download_any_payslip_pdf(self):
+        self.client.login(username="hr2", password="pass12345")
+        response = self.client.get(reverse("payslip-pdf-download", args=[self.other_record.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+
+    def test_staff_can_download_own_payslip_pdf_only(self):
+        self.client.login(username="staff1", password="pass12345")
+        own_response = self.client.get(reverse("payslip-pdf-download", args=[self.staff_record.pk]))
+        self.assertEqual(own_response.status_code, 200)
+        self.assertEqual(own_response["Content-Type"], "application/pdf")
+
+        denied_response = self.client.get(reverse("payslip-pdf-download", args=[self.other_record.pk]))
+        self.assertEqual(denied_response.status_code, 403)

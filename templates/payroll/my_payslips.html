@@ -23,6 +23,7 @@
                     <th class="text-end">CPF Contribution</th>
                     <th class="text-end">Net Salary</th>
                     <th>Payment Date</th>
+                    <th class="text-end">Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -36,9 +37,12 @@
                     <td class="text-end">SGD {{ payslip_record.cpf_contribution }}</td>
                     <td class="text-end">SGD {{ payslip_record.net_salary }}</td>
                     <td>{{ payslip_record.payment_date }}</td>
+                    <td class="text-end">
+                        <a href="{% url 'payslip-pdf-download' payslip_record.pk %}" class="btn btn-sm btn-outline-success">Download PDF</a>
+                    </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="8" class="text-center py-4">No payslips available yet.</td></tr>
+                <tr><td colspan="9" class="text-center py-4">No payslips available yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

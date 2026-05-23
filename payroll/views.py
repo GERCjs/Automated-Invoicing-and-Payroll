@@ -1,15 +1,20 @@
+from io import BytesIO
 from decimal import Decimal, InvalidOperation
 from datetime import date
 from pathlib import Path
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q
-from django.http import FileResponse, JsonResponse
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
 
-from accounts.permissions import role_required
+from accounts.permissions import get_user_role, role_required
 from accounts.roles import ADMIN, HR, STAFF, SUPERADMIN
 from core.audit import get_client_ip, log_event
 
@@ -98,17 +103,28 @@ def payroll_dashboard(request):
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_list(request):
     search_query = request.GET.get("q", "").strip()
+    payroll_month = request.GET.get("month", "").strip()
     payslip_records = PayrollRecord.objects.all()
     if search_query:
         payslip_records = payslip_records.filter(
             Q(employee_name__icontains=search_query)
             | Q(employee_id__icontains=search_query)
         )
+    if payroll_month:
+        try:
+            selected_month = date.fromisoformat(f"{payroll_month}-01")
+            payslip_records = payslip_records.filter(
+                payment_date__year=selected_month.year,
+                payment_date__month=selected_month.month,
+            )
+        except ValueError:
+            messages.warning(request, "Invalid month filter. Please use YYYY-MM format.")
+            payroll_month = ""
 
     log_event(
         action="payroll.list.viewed",
         user=request.user,
-        metadata={"path": request.path, "search_query": search_query},
+        metadata={"path": request.path, "search_query": search_query, "payroll_month": payroll_month},
         ip_address=get_client_ip(request),
     )
     return render(
@@ -117,6 +133,7 @@ def payroll_list(request):
         {
             "payslip_records": payslip_records,
             "search_query": search_query,
+            "payroll_month": payroll_month,
             "result_count": payslip_records.count(),
         },
     )
@@ -492,15 +509,7 @@ def employee_edit(request, pk):
 @login_required
 @role_required(STAFF)
 def my_payslips(request):
-    employee = getattr(request.user, "employee_profile", None)
-    if employee is None:
-        user_email = (request.user.email or "").strip()
-        if user_email:
-            email_matches = Employee.objects.filter(email__iexact=user_email)
-            if email_matches.count() == 1:
-                employee = email_matches.first()
-                employee.user = request.user
-                employee.save(update_fields=["user", "updated_at"])
+    employee = _resolve_staff_employee(request.user)
 
     if employee is None:
         messages.error(
@@ -518,3 +527,98 @@ def my_payslips(request):
             "payslip_records": payslip_records,
         },
     )
+
+
+def _resolve_staff_employee(user):
+    employee = getattr(user, "employee_profile", None)
+    if employee is not None:
+        return employee
+    user_email = (user.email or "").strip()
+    if not user_email:
+        return None
+    email_matches = Employee.objects.filter(email__iexact=user_email)
+    if email_matches.count() != 1:
+        return None
+    employee = email_matches.first()
+    employee.user = user
+    employee.save(update_fields=["user", "updated_at"])
+    return employee
+
+
+def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+
+    pdf.setTitle(f"Payslip-{payslip_record.employee_id}-{payslip_record.payment_date}")
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(20 * mm, page_height - 20 * mm, "Payslip")
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(20 * mm, page_height - 26 * mm, "Automated Invoicing and Payroll System")
+
+    y = page_height - 40 * mm
+    line_gap = 8 * mm
+
+    rows = [
+        ("Employee Name", payslip_record.employee_name),
+        ("Employee ID", payslip_record.employee_id),
+        ("Payment Date", payslip_record.payment_date.isoformat()),
+        ("NRIC", payslip_record.nric or "-"),
+        ("Basic Salary", f"SGD {payslip_record.basic_salary:.2f}"),
+        ("Allowances", f"SGD {payslip_record.allowances:.2f}"),
+        ("Deductions", f"SGD {payslip_record.deductions:.2f}"),
+        ("CPF Contribution", f"SGD {payslip_record.cpf_contribution:.2f}"),
+        ("Net Salary", f"SGD {payslip_record.net_salary:.2f}"),
+    ]
+
+    for label, value in rows:
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(20 * mm, y, f"{label}:")
+        pdf.setFont("Helvetica", 11)
+        pdf.drawString(65 * mm, y, str(value))
+        y -= line_gap
+
+    pdf.line(20 * mm, y - 2 * mm, page_width - 20 * mm, y - 2 * mm)
+    y -= 12 * mm
+    pdf.setFont("Helvetica-Oblique", 9)
+    pdf.drawString(20 * mm, y, "This is a computer-generated payslip.")
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR, STAFF)
+def payslip_pdf_download(request, pk):
+    payslip_record = get_object_or_404(PayrollRecord, pk=pk)
+    role = get_user_role(request.user)
+
+    if role == STAFF:
+        employee = _resolve_staff_employee(request.user)
+        if employee is None or payslip_record.employee_id != employee.employee_code:
+            log_event(
+                action="payroll.pdf.permission_denied",
+                user=request.user,
+                target_type="payroll_record",
+                target_id=str(payslip_record.id),
+                metadata={"employee_id": payslip_record.employee_id},
+                ip_address=get_client_ip(request),
+            )
+            raise PermissionDenied("You can only download your own payslips.")
+
+    pdf_bytes = _build_payslip_pdf(payslip_record)
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = (
+        f'attachment; filename="payslip_{payslip_record.employee_id}_{payslip_record.payment_date}.pdf"'
+    )
+    log_event(
+        action="payroll.pdf.downloaded",
+        user=request.user,
+        target_type="payroll_record",
+        target_id=str(payslip_record.id),
+        metadata={"employee_id": payslip_record.employee_id, "role": role},
+        ip_address=get_client_ip(request),
+    )
+    return response
