@@ -6,10 +6,13 @@ from pathlib import Path
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.mail import EmailMultiAlternatives
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
@@ -17,11 +20,12 @@ from reportlab.pdfgen import canvas
 from accounts.permissions import get_user_role, role_required
 from accounts.roles import ADMIN, HR, STAFF, SUPERADMIN
 from core.audit import get_client_ip, log_event
+from notifications.models import EmailDeliveryLog
 
 from .forms import EmployeeForm, PayrollRecordForm, PayrollUploadForm
 from .models import Employee, PayrollRecord
 from .services import (
-    employee_cpf_contribution_2026_from_basic_salary,
+    cpf_for_2026,
     parse_and_validate_payroll_excel,
 )
 
@@ -45,35 +49,90 @@ def _generate_next_employee_code():
 def payroll_cpf_preview(request):
     employee_id = (request.GET.get("employee_id") or "").strip()
     basic_salary_raw = (request.GET.get("basic_salary") or "").strip()
+    physical_products_commission_raw = (request.GET.get("physical_products_commission") or "").strip()
+    credit_commission_raw = (request.GET.get("credit_commission") or "").strip()
+    services_commission_raw = (request.GET.get("services_commission") or "").strip()
     payment_date_raw = (request.GET.get("payment_date") or "").strip()
 
     if not employee_id or not basic_salary_raw or not payment_date_raw:
-        return JsonResponse({"ok": False, "cpf_contribution": "", "reason": "missing_inputs"})
+        return JsonResponse(
+            {
+                "ok": False,
+                "cpf_contribution": "",
+                "employer_cpf_contribution": "",
+                "reason": "missing_inputs",
+            }
+        )
 
     try:
         basic_salary = Decimal(basic_salary_raw)
+        physical_products_commission = Decimal(physical_products_commission_raw or "0")
+        credit_commission = Decimal(credit_commission_raw or "0")
+        services_commission = Decimal(services_commission_raw or "0")
     except (InvalidOperation, ValueError):
-        return JsonResponse({"ok": False, "cpf_contribution": "", "reason": "invalid_salary"})
+        return JsonResponse(
+            {
+                "ok": False,
+                "cpf_contribution": "",
+                "employer_cpf_contribution": "",
+                "reason": "invalid_salary",
+            }
+        )
 
     try:
         payment_date = date.fromisoformat(payment_date_raw)
     except ValueError:
-        return JsonResponse({"ok": False, "cpf_contribution": "", "reason": "invalid_payment_date"})
+        return JsonResponse(
+            {
+                "ok": False,
+                "cpf_contribution": "",
+                "employer_cpf_contribution": "",
+                "reason": "invalid_payment_date",
+            }
+        )
 
     employee = Employee.objects.filter(employee_code=employee_id).first()
     if employee is None:
-        return JsonResponse({"ok": False, "cpf_contribution": "", "reason": "employee_not_found"})
+        return JsonResponse(
+            {
+                "ok": False,
+                "cpf_contribution": "",
+                "employer_cpf_contribution": "",
+                "reason": "employee_not_found",
+            }
+        )
     if employee.cpf_exempt:
-        return JsonResponse({"ok": True, "cpf_contribution": "0.00", "reason": "cpf_exempt"})
+        return JsonResponse(
+            {
+                "ok": True,
+                "cpf_contribution": "0.00",
+                "employer_cpf_contribution": "0.00",
+                "reason": "cpf_exempt",
+            }
+        )
     if not employee.date_of_birth:
-        return JsonResponse({"ok": False, "cpf_contribution": "", "reason": "missing_dob"})
+        return JsonResponse(
+            {
+                "ok": False,
+                "cpf_contribution": "",
+                "employer_cpf_contribution": "",
+                "reason": "missing_dob",
+            }
+        )
 
-    cpf_amount = employee_cpf_contribution_2026_from_basic_salary(
-        basic_salary=basic_salary,
-        dob=employee.date_of_birth,
-        payment_date=payment_date,
+    total_earnings = basic_salary + physical_products_commission + credit_commission + services_commission
+    age = payment_date.year - employee.date_of_birth.year - (
+        (payment_date.month, payment_date.day) < (employee.date_of_birth.month, employee.date_of_birth.day)
     )
-    return JsonResponse({"ok": True, "cpf_contribution": str(cpf_amount), "reason": "calculated"})
+    cpf = cpf_for_2026(total_earnings, age)
+    return JsonResponse(
+        {
+            "ok": True,
+            "cpf_contribution": str(cpf.employee_amount),
+            "employer_cpf_contribution": str(cpf.employer_amount),
+            "reason": "calculated",
+        }
+    )
 
 
 @login_required
@@ -161,19 +220,29 @@ def payroll_create(request):
             payslip_record.nric = (employee.nric or "")[:9]
             payslip_record.cpf_exempted = employee.cpf_exempt
             payslip_record.sdl_exempted = employee.sdl_exempt
+            payslip_record.allowances = (
+                (form.cleaned_data.get("physical_products_commission") or Decimal("0"))
+                + (form.cleaned_data.get("credit_commission") or Decimal("0"))
+                + (form.cleaned_data.get("services_commission") or Decimal("0"))
+            )
+            payslip_record.deductions = (
+                (form.cleaned_data.get("loan_deduction") or Decimal("0"))
+                + (form.cleaned_data.get("other_deductions") or Decimal("0"))
+            )
+            total_earnings = payslip_record.basic_salary + payslip_record.allowances
             if employee.cpf_exempt:
-                payslip_record.cpf_contribution = 0
+                employee_cpf = Decimal("0")
             else:
-                payslip_record.cpf_contribution = employee_cpf_contribution_2026_from_basic_salary(
-                    basic_salary=payslip_record.basic_salary,
-                    dob=employee.date_of_birth,
-                    payment_date=payslip_record.payment_date,
+                age = payslip_record.payment_date.year - employee.date_of_birth.year - (
+                    (payslip_record.payment_date.month, payslip_record.payment_date.day)
+                    < (employee.date_of_birth.month, employee.date_of_birth.day)
                 )
+                employee_cpf = cpf_for_2026(total_earnings, age).employee_amount
+            payslip_record.cpf_contribution = employee_cpf
             payslip_record.net_salary = (
-                payslip_record.basic_salary
-                + payslip_record.allowances
+                total_earnings
                 - payslip_record.deductions
-                - payslip_record.cpf_contribution
+                - employee_cpf
             )
             payslip_record.created_by = request.user
             payslip_record.save()
@@ -220,19 +289,29 @@ def payroll_edit(request, pk):
             payslip_record.nric = (employee.nric or "")[:9]
             payslip_record.cpf_exempted = employee.cpf_exempt
             payslip_record.sdl_exempted = employee.sdl_exempt
+            payslip_record.allowances = (
+                (form.cleaned_data.get("physical_products_commission") or Decimal("0"))
+                + (form.cleaned_data.get("credit_commission") or Decimal("0"))
+                + (form.cleaned_data.get("services_commission") or Decimal("0"))
+            )
+            payslip_record.deductions = (
+                (form.cleaned_data.get("loan_deduction") or Decimal("0"))
+                + (form.cleaned_data.get("other_deductions") or Decimal("0"))
+            )
+            total_earnings = payslip_record.basic_salary + payslip_record.allowances
             if employee.cpf_exempt:
-                payslip_record.cpf_contribution = 0
+                employee_cpf = Decimal("0")
             else:
-                payslip_record.cpf_contribution = employee_cpf_contribution_2026_from_basic_salary(
-                    basic_salary=payslip_record.basic_salary,
-                    dob=employee.date_of_birth,
-                    payment_date=payslip_record.payment_date,
+                age = payslip_record.payment_date.year - employee.date_of_birth.year - (
+                    (payslip_record.payment_date.month, payslip_record.payment_date.day)
+                    < (employee.date_of_birth.month, employee.date_of_birth.day)
                 )
+                employee_cpf = cpf_for_2026(total_earnings, age).employee_amount
+            payslip_record.cpf_contribution = employee_cpf
             payslip_record.net_salary = (
-                payslip_record.basic_salary
-                + payslip_record.allowances
+                total_earnings
                 - payslip_record.deductions
-                - payslip_record.cpf_contribution
+                - employee_cpf
             )
             payslip_record.save()
             log_event(
@@ -259,6 +338,7 @@ def payroll_edit(request, pk):
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_detail(request, pk):
     payslip_record = get_object_or_404(PayrollRecord, pk=pk)
+    employer_cpf_contribution = _calculate_employer_cpf_for_record(payslip_record)
     log_event(
         action="payroll.record.viewed",
         user=request.user,
@@ -270,7 +350,10 @@ def payroll_detail(request, pk):
     return render(
         request,
         "payroll/payroll_detail.html",
-        {"payslip_record": payslip_record},
+        {
+            "payslip_record": payslip_record,
+            "employer_cpf_contribution": employer_cpf_contribution,
+        },
     )
 
 
@@ -559,6 +642,7 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     y = page_height - 40 * mm
     line_gap = 8 * mm
 
+    employer_cpf_contribution = _calculate_employer_cpf_for_record(payslip_record)
     rows = [
         ("Employee Name", payslip_record.employee_name),
         ("Employee ID", payslip_record.employee_id),
@@ -568,6 +652,7 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
         ("Allowances", f"SGD {payslip_record.allowances:.2f}"),
         ("Deductions", f"SGD {payslip_record.deductions:.2f}"),
         ("CPF Contribution", f"SGD {payslip_record.cpf_contribution:.2f}"),
+        ("Employer CPF (separate)", f"SGD {employer_cpf_contribution:.2f}"),
         ("Net Salary", f"SGD {payslip_record.net_salary:.2f}"),
     ]
 
@@ -622,3 +707,106 @@ def payslip_pdf_download(request, pk):
         ip_address=get_client_ip(request),
     )
     return response
+
+
+def _calculate_employer_cpf_for_record(payslip_record: PayrollRecord) -> Decimal:
+    employee = Employee.objects.filter(employee_code=payslip_record.employee_id).first()
+    if not employee or employee.cpf_exempt or not employee.date_of_birth:
+        return Decimal("0.00")
+    total_earnings = payslip_record.basic_salary + payslip_record.allowances
+    age = payslip_record.payment_date.year - employee.date_of_birth.year - (
+        (payslip_record.payment_date.month, payslip_record.payment_date.day)
+        < (employee.date_of_birth.month, employee.date_of_birth.day)
+    )
+    return cpf_for_2026(total_earnings, age).employer_amount
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def payslip_email_send(request, pk):
+    if request.method != "POST":
+        return redirect("payroll-detail", pk=pk)
+
+    payslip_record = get_object_or_404(PayrollRecord, pk=pk)
+    employee = Employee.objects.filter(employee_code=payslip_record.employee_id).first()
+    recipient = ((employee.email if employee else "") or "").strip().lower()
+    subject = f"Payslip for {payslip_record.payment_date:%Y-%m-%d} - {payslip_record.employee_id}"
+    text_body = (
+        f"Dear {payslip_record.employee_name},\n\n"
+        f"Your payslip for {payslip_record.payment_date:%Y-%m-%d} is attached.\n"
+        f"Net salary: SGD {payslip_record.net_salary:.2f}\n\n"
+        "Regards,\nPayroll Team"
+    )
+
+    email_log = EmailDeliveryLog.objects.create(
+        recipient_email=recipient,
+        subject=subject,
+        template_key="payroll_payslip_email_v1",
+        status=EmailDeliveryLog.STATUS_PENDING,
+        related_object_type="payroll_record",
+        related_object_id=str(payslip_record.id),
+        triggered_by=request.user,
+        metadata={
+            "employee_id": payslip_record.employee_id,
+            "payment_date": payslip_record.payment_date.isoformat(),
+        },
+    )
+
+    if not recipient:
+        email_log.status = EmailDeliveryLog.STATUS_FAILED
+        email_log.error_message = "Employee email is missing."
+        email_log.save(update_fields=["status", "error_message"])
+        log_event(
+            action="payroll.email.failed",
+            user=request.user,
+            target_type="payroll_record",
+            target_id=str(payslip_record.id),
+            metadata={"reason": "missing_employee_email"},
+            ip_address=get_client_ip(request),
+        )
+        messages.error(request, "Unable to send email: employee email is missing.")
+        return redirect("payroll-detail", pk=pk)
+
+    message = EmailMultiAlternatives(
+        subject=subject,
+        body=text_body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[recipient],
+    )
+    message.attach(
+        filename=f"payslip_{payslip_record.employee_id}_{payslip_record.payment_date}.pdf",
+        content=_build_payslip_pdf(payslip_record),
+        mimetype="application/pdf",
+    )
+    try:
+        sent_count = message.send()
+        if sent_count < 1:
+            raise RuntimeError("Email backend returned zero deliveries.")
+    except Exception as exc:
+        email_log.status = EmailDeliveryLog.STATUS_FAILED
+        email_log.error_message = str(exc)
+        email_log.save(update_fields=["status", "error_message"])
+        log_event(
+            action="payroll.email.failed",
+            user=request.user,
+            target_type="payroll_record",
+            target_id=str(payslip_record.id),
+            metadata={"reason": str(exc)},
+            ip_address=get_client_ip(request),
+        )
+        messages.error(request, f"Payslip email failed: {exc}")
+        return redirect("payroll-detail", pk=pk)
+
+    email_log.status = EmailDeliveryLog.STATUS_SENT
+    email_log.sent_at = timezone.now()
+    email_log.save(update_fields=["status", "sent_at"])
+    log_event(
+        action="payroll.email.sent",
+        user=request.user,
+        target_type="payroll_record",
+        target_id=str(payslip_record.id),
+        metadata={"recipient": recipient},
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, f"Payslip email sent to {recipient}.")
+    return redirect("payroll-detail", pk=pk)

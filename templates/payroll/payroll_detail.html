@@ -6,6 +6,10 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">Payslip Record {{ payslip_record.employee_id }}</h1>
     <div class="d-flex gap-2">
+        <form method="post" action="{% url 'payslip-email-send' payslip_record.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-primary">Send Payslip Email</button>
+        </form>
         <a href="{% url 'payslip-pdf-download' payslip_record.pk %}" class="btn btn-outline-success">Download PDF</a>
         <a href="{% url 'payroll-edit' payslip_record.pk %}" class="btn btn-primary">Edit</a>
         <a href="{% url 'payroll-list' %}" class="btn btn-outline-secondary">Back to List</a>
@@ -19,7 +23,8 @@
         <p class="mb-1"><strong>Basic Salary:</strong> SGD {{ payslip_record.basic_salary }}</p>
         <p class="mb-1"><strong>Allowances:</strong> SGD {{ payslip_record.allowances }}</p>
         <p class="mb-1"><strong>Deductions:</strong> SGD {{ payslip_record.deductions }}</p>
-        <p class="mb-1"><strong>CPF Contribution:</strong> SGD {{ payslip_record.cpf_contribution }}</p>
+        <p class="mb-1"><strong>Employee CPF Contribution:</strong> SGD {{ payslip_record.cpf_contribution }}</p>
+        <p class="mb-1"><strong>Employer CPF (Separate):</strong> SGD {{ employer_cpf_contribution }}</p>
         <p class="mb-1"><strong>Net Salary:</strong> SGD {{ payslip_record.net_salary }}</p>
         <p class="mb-0"><strong>Payment Date:</strong> {{ payslip_record.payment_date }}</p>
     </div>

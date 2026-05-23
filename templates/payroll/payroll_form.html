@@ -13,13 +13,21 @@
                 <div class="col-md-6"><label class="form-label">Employee Name</label>{{ form.employee_name }}</div>
                 <div class="col-md-6"><label class="form-label">Employee ID</label>{{ form.employee_id }}</div>
                 <div class="col-md-3"><label class="form-label">Basic Salary</label>{{ form.basic_salary }}</div>
-                <div class="col-md-3"><label class="form-label">Allowances</label>{{ form.allowances }}</div>
-                <div class="col-md-3"><label class="form-label">Deductions</label>{{ form.deductions }}</div>
+                <div class="col-md-3"><label class="form-label">Physical Products Commission</label>{{ form.physical_products_commission }}</div>
+                <div class="col-md-3"><label class="form-label">Credit Commission</label>{{ form.credit_commission }}</div>
+                <div class="col-md-3"><label class="form-label">Services Commission</label>{{ form.services_commission }}</div>
+                <div class="col-md-3"><label class="form-label">Loan Deduction</label>{{ form.loan_deduction }}</div>
+                <div class="col-md-3"><label class="form-label">Other Deductions</label>{{ form.other_deductions }}</div>
                 <div class="col-md-3">
-                    <label class="form-label">CPF Contribution</label>
+                    <label class="form-label">Employee CPF Contribution</label>
                     {{ form.cpf_contribution }}
-                    <div class="form-text">Auto-calculated from basic salary and employee age (DOB) using CPF 2026 rates. Employee CPF exempt will set this to 0.</div>
+                    <div class="form-text">Auto-calculated from total earnings and DOB using CPF 2026 rates. Only employee CPF is deducted from net pay.</div>
                     <div id="cpf-calc-status" class="small text-muted mt-1"></div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Employer CPF (Separate)</label>
+                    {{ form.employer_cpf_contribution }}
+                    <div class="form-text">Employer CPF is shown for reference only and is not deducted from employee net pay.</div>
                 </div>
                 <div class="col-md-4"><label class="form-label">Payment Date</label>{{ form.payment_date }}</div>
             </div>
@@ -36,11 +44,16 @@
 (() => {
     const employeeIdInput = document.getElementById("id_employee_id");
     const basicSalaryInput = document.getElementById("id_basic_salary");
+    const physicalProductsInput = document.getElementById("id_physical_products_commission");
+    const creditCommissionInput = document.getElementById("id_credit_commission");
+    const servicesCommissionInput = document.getElementById("id_services_commission");
     const paymentDateInput = document.getElementById("id_payment_date");
     const cpfInput = document.getElementById("id_cpf_contribution");
+    const employerCpfInput = document.getElementById("id_employer_cpf_contribution");
     const statusNode = document.getElementById("cpf-calc-status");
-    if (!employeeIdInput || !basicSalaryInput || !paymentDateInput || !cpfInput) return;
+    if (!employeeIdInput || !basicSalaryInput || !paymentDateInput || !cpfInput || !employerCpfInput) return;
     cpfInput.readOnly = true;
+    employerCpfInput.readOnly = true;
 
     let debounceTimer = null;
     const previewUrl = "{% url 'payroll-cpf-preview' %}";
@@ -48,15 +61,21 @@
     const refreshCpf = () => {
         const employeeId = (employeeIdInput.value || "").trim();
         const basicSalary = (basicSalaryInput.value || "").trim();
+        const physicalProducts = (physicalProductsInput?.value || "").trim();
+        const creditCommission = (creditCommissionInput?.value || "").trim();
+        const servicesCommission = (servicesCommissionInput?.value || "").trim();
         const paymentDate = (paymentDateInput.value || "").trim();
         if (!employeeId || !basicSalary || !paymentDate) {
-            if (statusNode) statusNode.textContent = "Enter Employee ID, Basic Salary, and Payment Date to auto-calculate.";
+            if (statusNode) statusNode.textContent = "Enter Employee ID, salary/commissions, and Payment Date to auto-calculate CPF.";
             return;
         }
 
         const params = new URLSearchParams({
             employee_id: employeeId,
             basic_salary: basicSalary,
+            physical_products_commission: physicalProducts || "0",
+            credit_commission: creditCommission || "0",
+            services_commission: servicesCommission || "0",
             payment_date: paymentDate,
         });
 
@@ -65,7 +84,8 @@
             .then((data) => {
                 if (data && data.ok && data.cpf_contribution !== undefined) {
                     cpfInput.value = data.cpf_contribution;
-                    if (statusNode) statusNode.textContent = "CPF auto-calculated.";
+                    employerCpfInput.value = data.employer_cpf_contribution || "0.00";
+                    if (statusNode) statusNode.textContent = "Employee CPF and employer CPF auto-calculated.";
                 } else if (statusNode) {
                     statusNode.textContent = "Unable to auto-calculate CPF yet.";
                 }
@@ -81,6 +101,9 @@
     };
 
     basicSalaryInput.addEventListener("input", scheduleRefresh);
+    physicalProductsInput?.addEventListener("input", scheduleRefresh);
+    creditCommissionInput?.addEventListener("input", scheduleRefresh);
+    servicesCommissionInput?.addEventListener("input", scheduleRefresh);
     employeeIdInput.addEventListener("input", scheduleRefresh);
     paymentDateInput.addEventListener("input", scheduleRefresh);
     paymentDateInput.addEventListener("change", scheduleRefresh);
