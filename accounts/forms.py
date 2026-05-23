@@ -1,17 +1,35 @@
 from django import forms
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.forms import SetPasswordForm
 from django.contrib.auth.forms import UserCreationForm
+from django.db.models import Q
 
+from invoicing.models import Customer as InvoiceCustomer
 from notifications.models import PaymentReminderSettings
 
-from .models import LoginSecurityPolicy
-from .roles import ADMIN, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
+from .models import EmailVerificationToken, LoginSecurityPolicy
+from .roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
 
 User = get_user_model()
 
 MANAGED_INTERNAL_ROLES = {ADMIN, FINANCE, HR, STAFF}
+DEFAULT_COMPANY_EMAIL_DOMAINS = {"vaniday.com"}
+
+
+def _email_domain(email: str) -> str:
+    return (email or "").strip().lower().rsplit("@", 1)[-1]
+
+
+def get_company_email_domains() -> set[str]:
+    configured = (getattr(settings, "COMPANY_EMAIL_DOMAINS", "") or "").strip()
+    domains = {domain.strip().lower() for domain in configured.split(",") if domain.strip()}
+    company_email = (getattr(settings, "COMPANY_EMAIL", "") or "").strip().lower()
+    if "@" in company_email:
+        domains.add(company_email.rsplit("@", 1)[-1])
+    domains |= DEFAULT_COMPANY_EMAIL_DOMAINS
+    return domains
 
 
 class LoginForm(AuthenticationForm):
@@ -19,7 +37,7 @@ class LoginForm(AuthenticationForm):
         widget=forms.TextInput(
             attrs={
                 "class": "form-control",
-                "placeholder": "Username",
+                "placeholder": "Username or Email",
                 "autofocus": True,
             }
         )
@@ -34,14 +52,15 @@ class LoginForm(AuthenticationForm):
     )
 
     def clean(self):
+        identifier = str(self.data.get("username", "")).strip()
         try:
             return super().clean()
         except forms.ValidationError:
-            username = str(self.data.get("username", "")).strip()
-            if username:
+            if identifier:
                 user = (
                     User.objects.select_related("role_profile")
-                    .filter(username__iexact=username)
+                    .filter(Q(username__iexact=identifier) | Q(email__iexact=identifier))
+                    .order_by("id")
                     .first()
                 )
                 if user and getattr(user.role_profile, "is_suspended", False):
@@ -49,6 +68,16 @@ class LoginForm(AuthenticationForm):
                         "Your account is suspended. Please contact an administrator.",
                         code="account_suspended",
                     )
+                if user and not user.is_active:
+                    pending_verification = EmailVerificationToken.objects.filter(
+                        user=user,
+                        used_at__isnull=True,
+                    ).exists()
+                    if pending_verification:
+                        raise forms.ValidationError(
+                            "Your account is not verified. Please check your email for the verification link.",
+                            code="account_unverified",
+                        )
             raise
 
 
@@ -77,6 +106,7 @@ class RegistrationForm(UserCreationForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._resolved_role = STAFF
         self.fields["password1"].widget.attrs.update({"class": "form-control", "placeholder": "Password"})
         self.fields["password2"].widget.attrs.update(
             {"class": "form-control", "placeholder": "Confirm Password"}
@@ -84,11 +114,33 @@ class RegistrationForm(UserCreationForm):
 
     def clean_email(self):
         email = self.cleaned_data["email"].strip().lower()
-        if not email.endswith("@vaniday.com"):
-            raise forms.ValidationError("Staff registration requires a @vaniday.com email address.")
         if User.objects.filter(email__iexact=email).exists():
             raise forms.ValidationError("This email is already in use.")
+
+        company_domains = get_company_email_domains()
+        is_company_email = _email_domain(email) in company_domains
+        if is_company_email:
+            self._resolved_role = STAFF
+            return email
+
+        has_customer_invoice_profile = InvoiceCustomer.objects.filter(email__iexact=email).exists()
+        if not has_customer_invoice_profile:
+            raise forms.ValidationError(
+                "Customer registration requires an email linked to an existing invoice customer record."
+            )
+        self._resolved_role = CUSTOMER
         return email
+
+    def get_registration_role(self):
+        return getattr(self, "_resolved_role", STAFF)
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.email = self.cleaned_data["email"]
+        user.is_active = False
+        if commit:
+            user.save()
+        return user
 
 
 class AdminAccountCreationForm(RegistrationForm):
@@ -192,17 +244,35 @@ class PaymentReminderSettingsForm(forms.ModelForm):
     class Meta:
         model = PaymentReminderSettings
         fields = (
+            "before_due_reminders_enabled",
             "reminder_days_before_due",
-            "overdue_reminders_enabled",
+            "due_date_reminders_enabled",
+            "after_due_reminders_enabled",
+            "after_due_days",
+            "overdue_repeat_enabled",
             "overdue_repeat_days",
             "mass_email_enabled",
         )
         widgets = {
-            "reminder_days_before_due": forms.NumberInput(attrs={"class": "form-control", "min": "0"}),
+            "reminder_days_before_due": forms.NumberInput(attrs={"class": "form-control", "min": "1"}),
+            "after_due_days": forms.NumberInput(attrs={"class": "form-control", "min": "1"}),
             "overdue_repeat_days": forms.NumberInput(attrs={"class": "form-control", "min": "1"}),
-            "overdue_reminders_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "before_due_reminders_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "due_date_reminders_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "after_due_reminders_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "overdue_repeat_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "mass_email_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
         }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get("before_due_reminders_enabled") and not cleaned_data.get("reminder_days_before_due"):
+            self.add_error("reminder_days_before_due", "Enter number of days before due date.")
+        if cleaned_data.get("after_due_reminders_enabled") and not cleaned_data.get("after_due_days"):
+            self.add_error("after_due_days", "Enter number of days after due date.")
+        if cleaned_data.get("overdue_repeat_enabled") and not cleaned_data.get("overdue_repeat_days"):
+            self.add_error("overdue_repeat_days", "Enter repeat interval in days.")
+        return cleaned_data
 
 
 class MassEmailForm(forms.Form):

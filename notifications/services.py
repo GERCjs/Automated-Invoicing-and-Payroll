@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import timedelta
 
 from django.conf import settings
+from django.core.mail import send_mail
 from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.template.loader import render_to_string
+from django.urls import reverse
 from django.utils import timezone
 
+from invoicing.services import refresh_overdue_invoices
 from invoicing.exports import generate_invoice_pdf
 from invoicing.models import Invoice
 
-from .models import EmailDeliveryLog
+from .models import EmailDeliveryLog, PaymentReminderSettings
 
 
 def _calculate_amount_due(invoice: Invoice) -> Decimal:
@@ -112,3 +116,185 @@ def send_invoice_email(
         log.metadata = metadata
         log.save(update_fields=["status", "sent_at", "metadata"])
     return True, log
+
+
+REMINDER_TEMPLATE_KEYS = {
+    "before_due": "payment_reminder_before_due",
+    "due_date": "payment_reminder_due_date",
+    "after_due": "payment_reminder_after_due",
+    "overdue_repeat": "payment_reminder_overdue_repeat",
+}
+
+
+def get_invoice_reminder_history(invoice: Invoice):
+    return EmailDeliveryLog.objects.filter(
+        related_object_type="invoice",
+        related_object_id=str(invoice.id),
+        template_key__startswith="payment_reminder_",
+    ).order_by("-attempted_at")
+
+
+def _build_payment_reminder_message(invoice: Invoice, reminder_type: str, public_invoice_url: str) -> tuple[str, str]:
+    reminder_titles = {
+        "before_due": f"due in {max((invoice.due_date - timezone.localdate()).days, 0)} day(s)",
+        "due_date": "due today",
+        "after_due": "overdue",
+        "overdue_repeat": "still overdue",
+    }
+    reminder_label = reminder_titles.get(reminder_type, "payment reminder")
+    subject = f"Payment Reminder: {invoice.invoice_number} is {reminder_label}"
+    body = (
+        f"Dear {invoice.customer.name},\n\n"
+        f"This is a payment reminder for invoice {invoice.invoice_number}.\n"
+        f"Due date: {invoice.due_date:%Y-%m-%d}\n"
+        f"Amount due: {invoice.currency} {invoice.total_amount:.2f}\n\n"
+        f"View invoice: {public_invoice_url}\n\n"
+        f"If payment has already been made, please disregard this reminder.\n\n"
+        f"{settings.COMPANY_NAME}\n"
+        f"{settings.COMPANY_EMAIL}"
+    )
+    return subject, body
+
+
+def _send_payment_reminder(
+    invoice: Invoice,
+    reminder_type: str,
+    triggered_by=None,
+    base_url: str = "",
+    simulate: bool = True,
+) -> EmailDeliveryLog:
+    template_key = REMINDER_TEMPLATE_KEYS[reminder_type]
+    recipient = (invoice.customer.email or "").strip().lower()
+    base_url = (base_url or "").rstrip("/")
+    public_path = reverse("invoice-public-view", args=[invoice.public_view_token])
+    public_invoice_url = f"{base_url}{public_path}" if base_url else public_path
+    subject, body = _build_payment_reminder_message(invoice, reminder_type, public_invoice_url)
+
+    metadata = {
+        "invoice_number": invoice.invoice_number,
+        "invoice_status": invoice.status,
+        "customer_name": invoice.customer.name,
+        "reminder_type": reminder_type,
+        "due_date": invoice.due_date.isoformat(),
+        "days_past_due": max((timezone.localdate() - invoice.due_date).days, 0),
+        "public_invoice_url": public_invoice_url,
+        "simulate": simulate,
+    }
+    log = EmailDeliveryLog.objects.create(
+        recipient_email=recipient,
+        subject=subject,
+        template_key=template_key,
+        status=EmailDeliveryLog.STATUS_PENDING,
+        related_object_type="invoice",
+        related_object_id=str(invoice.id),
+        triggered_by=triggered_by,
+        metadata=metadata,
+    )
+
+    if not recipient:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = "Customer email is missing on invoice customer record."
+        log.save(update_fields=["status", "error_message"])
+        return log
+
+    if simulate:
+        log.metadata = {**metadata, "simulation_result": "No email sent. Dry run only."}
+        log.save(update_fields=["metadata"])
+        return log
+
+    try:
+        sent_count = send_mail(
+            subject=subject,
+            message=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[recipient],
+            fail_silently=False,
+        )
+        if sent_count < 1:
+            raise RuntimeError("Email backend returned zero deliveries.")
+    except Exception as exc:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = str(exc)
+        log.save(update_fields=["status", "error_message"])
+        return log
+
+    log.status = EmailDeliveryLog.STATUS_SENT
+    log.sent_at = timezone.now()
+    log.metadata = {**metadata, "simulation_result": "Sent"}
+    log.save(update_fields=["status", "sent_at", "metadata"])
+    return log
+
+
+def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulate: bool = True) -> dict:
+    refresh_overdue_invoices()
+    today = timezone.localdate()
+    settings_obj = PaymentReminderSettings.load()
+    invoice_scope = Invoice.objects.select_related("customer").filter(
+        status__in=[Invoice.STATUS_SENT, Invoice.STATUS_VIEWED, Invoice.STATUS_OVERDUE]
+    )
+
+    candidates: dict[int, tuple[Invoice, str]] = {}
+
+    def add_candidates(queryset, reminder_type: str):
+        for invoice in queryset:
+            if invoice.id not in candidates:
+                candidates[invoice.id] = (invoice, reminder_type)
+
+    if settings_obj.before_due_reminders_enabled and settings_obj.reminder_days_before_due > 0:
+        add_candidates(
+            invoice_scope.filter(due_date=today + timedelta(days=settings_obj.reminder_days_before_due)),
+            "before_due",
+        )
+    if settings_obj.due_date_reminders_enabled:
+        add_candidates(invoice_scope.filter(due_date=today), "due_date")
+    if settings_obj.after_due_reminders_enabled and settings_obj.after_due_days > 0:
+        add_candidates(
+            invoice_scope.filter(due_date=today - timedelta(days=settings_obj.after_due_days)),
+            "after_due",
+        )
+    if settings_obj.overdue_repeat_enabled and settings_obj.overdue_repeat_days > 0:
+        for invoice in invoice_scope.filter(status=Invoice.STATUS_OVERDUE, due_date__lt=today):
+            overdue_days = (today - invoice.due_date).days
+            if overdue_days > 0 and overdue_days % settings_obj.overdue_repeat_days == 0:
+                if invoice.id not in candidates:
+                    candidates[invoice.id] = (invoice, "overdue_repeat")
+
+    existing_today = set(
+        EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            template_key__startswith="payment_reminder_",
+            attempted_at__date=today,
+        ).values_list("related_object_id", "template_key")
+    )
+
+    reminder_logs = []
+    skipped_already_logged = 0
+    for invoice, reminder_type in candidates.values():
+        template_key = REMINDER_TEMPLATE_KEYS[reminder_type]
+        existing_key = (str(invoice.id), template_key)
+        if existing_key in existing_today:
+            skipped_already_logged += 1
+            continue
+        reminder_logs.append(
+            _send_payment_reminder(
+                invoice=invoice,
+                reminder_type=reminder_type,
+                triggered_by=triggered_by,
+                base_url=base_url,
+                simulate=simulate,
+            )
+        )
+
+    sent_count = sum(1 for log in reminder_logs if log.status == EmailDeliveryLog.STATUS_SENT)
+    failed_count = sum(1 for log in reminder_logs if log.status == EmailDeliveryLog.STATUS_FAILED)
+    simulated_count = sum(1 for log in reminder_logs if log.status == EmailDeliveryLog.STATUS_PENDING)
+    return {
+        "simulate": simulate,
+        "checked_invoices": len(candidates),
+        "processed": len(reminder_logs),
+        "sent": sent_count,
+        "failed": failed_count,
+        "simulated": simulated_count,
+        "skipped_already_logged_today": skipped_already_logged,
+        "log_ids": [log.id for log in reminder_logs],
+    }

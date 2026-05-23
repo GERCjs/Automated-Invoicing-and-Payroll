@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Admin Dashboard | Automated Invoicing & Payroll{% endblock %}
+{% block title %}Admin Console | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h1 class="h3 mb-1">Admin Dashboard</h1>
-        <p class="text-muted mb-0">Manage internal users, reminders, mass email, and suspicious activity.</p>
+        <h1 class="h3 mb-1">Admin Console</h1>
+        <p class="text-muted mb-0">Admin Console for account access control, suspicious activity review, audit logs, and reminder settings.</p>
     </div>
 </div>
 
@@ -42,7 +42,7 @@
             <div class="card-body">
                 <div class="text-muted small">Suspicious Activity</div>
                 <div class="display-6 fw-semibold text-warning">{{ suspicious_count }}</div>
-                <div class="text-muted small">Denied or failed actions</div>
+                <div class="text-muted small">Denied access or failed login attempts</div>
             </div>
         </div>
         </a>
@@ -54,9 +54,11 @@
         <h2 class="h6">Quick Actions</h2>
         <div class="d-flex flex-wrap gap-2">
             <a href="{% url 'managed-account-create' %}" class="btn btn-primary btn-sm">Create Account</a>
+            <a href="{% url 'dashboard-audit-logs' %}" class="btn btn-outline-dark btn-sm">Audit Logs</a>
             <a href="{% url 'payment-reminder-settings-update' %}" class="btn btn-outline-primary btn-sm">Reminder Settings</a>
             <a href="{% url 'mass-email-send' %}" class="btn btn-outline-secondary btn-sm">Mass Email</a>
             <a href="{% url 'suspicious-activity-list' %}" class="btn btn-outline-warning btn-sm">Suspicious Activity</a>
+            <a href="{% url 'dashboard' %}" class="btn btn-outline-info btn-sm">Management Dashboard</a>
         </div>
     </div>
 </div>
@@ -175,18 +177,11 @@
                     </td>
                     <td class="text-end">
                         <div class="d-flex justify-content-end gap-1 flex-wrap">
-                            {% if managed_user.can_be_managed %}
-                            <a href="{% url 'managed-account-password-update' managed_user.id %}" class="btn btn-sm btn-outline-secondary">Password</a>
-                            <form method="post" action="{% url 'managed-account-delete' managed_user.id %}">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                            </form>
-                            {% endif %}
                             {% if managed_user.can_be_suspended %}
                             {% if managed_user.is_suspended %}
                             <form method="post" action="{% url 'managed-account-unsuspend' managed_user.id %}">
                                 {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-outline-success">Unsuspend</button>
+                                <button type="submit" class="btn btn-sm btn-outline-success">Reactivate</button>
                             </form>
                             {% else %}
                             <form method="post" action="{% url 'managed-account-suspend' managed_user.id %}">
@@ -194,6 +189,13 @@
                                 <button type="submit" class="btn btn-sm btn-outline-warning">Suspend</button>
                             </form>
                             {% endif %}
+                            {% endif %}
+                            {% if managed_user.can_be_managed %}
+                            <a href="{% url 'managed-account-password-update' managed_user.id %}" class="btn btn-sm btn-outline-secondary">Password</a>
+                            <form method="post" action="{% url 'managed-account-delete' managed_user.id %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete (Last Resort)</button>
+                            </form>
                             {% endif %}
                             {% if not managed_user.can_be_managed and not managed_user.can_be_suspended %}
                             <span class="text-muted small">Protected</span>

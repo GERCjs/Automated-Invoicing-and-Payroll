@@ -13,15 +13,18 @@ from .views import (
     managed_account_suspend,
     managed_account_unsuspend,
     mass_email_send,
+    payment_reminder_run_check,
     payment_reminder_settings_update,
     register,
     suspicious_activity_list,
+    verify_email,
 )
 
 urlpatterns = [
     path("login/", UserLoginView.as_view(), name="login"),
     path("logout/", UserLogoutView.as_view(), name="logout"),
     path("register/", register, name="register"),
+    path("verify-email/<str:token>/", verify_email, name="verify-email"),
     path("admin-create/", create_admin_account, name="create-admin-account"),
     path("admin-dashboard/", admin_dashboard, name="admin-dashboard"),
     path("admin-dashboard/accounts/create/", managed_account_create, name="managed-account-create"),
@@ -64,6 +67,11 @@ urlpatterns = [
         "admin-dashboard/reminders/",
         payment_reminder_settings_update,
         name="payment-reminder-settings-update",
+    ),
+    path(
+        "admin-dashboard/reminders/run-check/",
+        payment_reminder_run_check,
+        name="payment-reminder-run-check",
     ),
     path("admin-dashboard/mass-email/", mass_email_send, name="mass-email-send"),
     path("admin-dashboard/suspicious-activity/", suspicious_activity_list, name="suspicious-activity-list"),

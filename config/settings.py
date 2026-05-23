@@ -112,6 +112,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
+AUTHENTICATION_BACKENDS = [
+    "accounts.auth_backends.EmailOrUsernameBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
 
 COMPANY_NAME = os.getenv("COMPANY_NAME", "Automated Invoicing and Payroll Pte Ltd")
 COMPANY_EMAIL = os.getenv("COMPANY_EMAIL", "finance@example.com")

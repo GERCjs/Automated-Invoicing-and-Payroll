@@ -44,7 +44,12 @@ class EmailDeliveryLog(models.Model):
 
 
 class PaymentReminderSettings(models.Model):
+    before_due_reminders_enabled = models.BooleanField(default=True)
     reminder_days_before_due = models.PositiveSmallIntegerField(default=7)
+    due_date_reminders_enabled = models.BooleanField(default=True)
+    after_due_reminders_enabled = models.BooleanField(default=True)
+    after_due_days = models.PositiveSmallIntegerField(default=1)
+    overdue_repeat_enabled = models.BooleanField(default=True)
     overdue_reminders_enabled = models.BooleanField(default=True)
     overdue_repeat_days = models.PositiveSmallIntegerField(default=7)
     mass_email_enabled = models.BooleanField(default=True)

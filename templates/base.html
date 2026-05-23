@@ -19,7 +19,7 @@
             <ul class="navbar-nav me-auto">
                 {% if user.is_authenticated %}
                 <li class="nav-item">
-                    <a class="nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+                    <a class="nav-link" href="{% url 'dashboard' %}">Management Dashboard</a>
                 </li>
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
                 <li class="nav-item">

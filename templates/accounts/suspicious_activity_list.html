@@ -6,7 +6,7 @@
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h1 class="h3 mb-1">Suspicious Activity</h1>
-        <p class="text-muted mb-0">Denied permissions and failed actions from the last 7 days.</p>
+        <p class="text-muted mb-0">Review repeated failed logins and denied access attempts from the last 7 days.</p>
     </div>
     <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
 </div>
@@ -28,11 +28,11 @@
                 <select name="reason" class="form-select form-select-sm">
                     <option value="">All reasons</option>
                     <option value="permission_denied" {% if selected_reason == "permission_denied" %}selected{% endif %}>Permission denied</option>
-                    <option value="failed" {% if selected_reason == "failed" %}selected{% endif %}>Failed action</option>
+                    <option value="failed" {% if selected_reason == "failed" %}selected{% endif %}>Failed login</option>
                 </select>
             </div>
             <div class="col-md-4">
-                <label class="form-label small">Search user or target</label>
+                <label class="form-label small">Search username, email, or code ID</label>
                 <input type="search" name="q" value="{{ search_query }}" class="form-control form-control-sm">
             </div>
             <div class="col-md-2">
@@ -40,6 +40,86 @@
             </div>
         </form>
     </div>
+</div>
+
+<div class="card shadow-sm mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Flagged Accounts</span>
+        <span class="text-muted small">Suspend first for containment, then investigate</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Role</th>
+                    <th>Failed Attempts</th>
+                    <th>Last Failed Attempt</th>
+                    <th>Status</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in accounts %}
+                <tr>
+                    <td>
+                        <div class="fw-semibold">{{ account.username }}</div>
+                        <div class="text-muted small">{{ account.email|default:"No email" }}</div>
+                    </td>
+                    <td>{{ account.role_profile.get_role_display }}</td>
+                    <td>
+                        <div>
+                            {{ account.failed_attempts_current }} / {{ account.max_failed_login_attempts }}
+                            <span class="text-muted small">(current streak)</span>
+                        </div>
+                        <div class="text-muted small">{{ account.failed_attempts_7d }} failed login events in 7 days</div>
+                    </td>
+                    <td>
+                        {% if account.last_failed_attempt_at %}
+                        {{ account.last_failed_attempt_at|date:"Y-m-d H:i" }}
+                        {% else %}
+                        <span class="text-muted">No failed login recorded</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if account.is_suspended %}
+                        <span class="badge text-bg-danger">Suspended</span>
+                        {% elif account.failed_attempts_current >= account.max_failed_login_attempts %}
+                        <span class="badge text-bg-warning">Threshold reached</span>
+                        {% else %}
+                        <span class="badge text-bg-success">Active</span>
+                        {% endif %}
+                        <div class="text-muted small">Denied access events: {{ account.permission_denied_7d }}</div>
+                    </td>
+                    <td class="text-end">
+                        {% if account.can_be_suspended %}
+                        {% if account.is_suspended %}
+                        <form method="post" action="{% url 'managed-account-unsuspend' account.id %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-success">Reactivate</button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{% url 'managed-account-suspend' account.id %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="reason" value="Suspicious activity review from suspicious activity page.">
+                            <button type="submit" class="btn btn-sm btn-outline-warning">Suspend for Review</button>
+                        </form>
+                        {% endif %}
+                        {% else %}
+                        <span class="text-muted small">Protected</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-center py-4">No flagged accounts match the filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card shadow-sm mt-3">
+    <div class="card-header">Recent Suspicious Events</div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
@@ -61,6 +141,8 @@
                     <td>
                         {% if event.action == "auth.permission_denied" %}
                         User tried to access a page without the required role.
+                        {% elif event.action == "auth.login.failed" %}
+                        Login failed due to wrong credentials or suspended account.
                         {% else %}
                         A system action failed and should be reviewed.
                         {% endif %}

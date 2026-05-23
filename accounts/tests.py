@@ -1,10 +1,14 @@
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.models import AuditLog
+from invoicing.models import Customer, Invoice
+from notifications.models import EmailDeliveryLog, PaymentReminderSettings
 
-from .models import LoginSecurityPolicy
+from .models import EmailVerificationToken, LoginSecurityPolicy
 from .signals import ADMIN_CONSOLE_GROUP_NAME
 from .roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 
@@ -58,7 +62,7 @@ class AccountsPhaseOneTests(TestCase):
             ).exists()
         )
 
-    def test_public_user_can_register_and_gets_staff_role(self):
+    def test_public_user_can_register_staff_with_company_email_and_requires_verification(self):
         response = self.client.post(
             reverse("register"),
             data={
@@ -70,9 +74,12 @@ class AccountsPhaseOneTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"], reverse("dashboard"))
+        self.assertEqual(response.headers["Location"], reverse("login"))
         user = User.objects.get(username="newstaff")
         self.assertEqual(user.role_profile.role, STAFF)
+        self.assertFalse(user.is_active)
+        self.assertTrue(EmailVerificationToken.objects.filter(user=user, used_at__isnull=True).exists())
+        self.assertGreaterEqual(len(mail.outbox), 1)
         self.assertTrue(
             AuditLog.objects.filter(
                 action="auth.registered",
@@ -80,6 +87,89 @@ class AccountsPhaseOneTests(TestCase):
                 target_id=str(user.id),
                 user=user,
             ).exists()
+        )
+
+    def test_public_user_can_register_customer_with_invoice_email_and_requires_verification(self):
+        Customer.objects.create(name="Cust One", email="cust1@gmail.com")
+        response = self.client.post(
+            reverse("register"),
+            data={
+                "username": "cust_user",
+                "email": "cust1@gmail.com",
+                "password1": "StrongPass123!",
+                "password2": "StrongPass123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], reverse("login"))
+        user = User.objects.get(username="cust_user")
+        self.assertEqual(user.role_profile.role, CUSTOMER)
+        self.assertFalse(user.is_active)
+
+    def test_customer_registration_rejects_email_without_invoice_link(self):
+        response = self.client.post(
+            reverse("register"),
+            data={
+                "username": "cust_missing",
+                "email": "not_linked_customer@yahoo.com",
+                "password1": "StrongPass123!",
+                "password2": "StrongPass123!",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Customer registration requires an email linked to an existing invoice customer record.",
+        )
+
+    def test_email_verification_activates_account(self):
+        user = User.objects.create_user(username="verify_me", email="verify_me@vaniday.com", password="TempPass123!")
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        token = EmailVerificationToken.issue_for_user(user)
+
+        response = self.client.get(reverse("verify-email", args=[token.token]))
+        self.assertEqual(response.status_code, 302)
+        user.refresh_from_db()
+        token.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertIsNotNone(token.used_at)
+
+    def test_login_supports_email_identifier(self):
+        user = User.objects.create_user(
+            username="email_login_user",
+            email="email_login_user@vaniday.com",
+            password="TempPass123!",
+        )
+        response = self.client.post(
+            reverse("login"),
+            data={"username": "email_login_user@vaniday.com", "password": "TempPass123!"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dashboard"), response.headers["Location"])
+        self.assertTrue(
+            AuditLog.objects.filter(action="auth.login", user=user).exists()
+        )
+
+    def test_unverified_account_login_shows_verification_message(self):
+        user = User.objects.create_user(
+            username="not_verified_user",
+            email="not_verified_user@vaniday.com",
+            password="TempPass123!",
+        )
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+        EmailVerificationToken.issue_for_user(user)
+
+        response = self.client.post(
+            reverse("login"),
+            data={"username": "not_verified_user@vaniday.com", "password": "TempPass123!"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Your account is not verified. Please check your email for the verification link.",
         )
 
     def test_staff_user_cannot_access_admin_account_creation_page(self):
@@ -483,3 +573,160 @@ class AccountsPhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Your account is suspended. Please contact an administrator.")
         self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_failed_login_auto_suspend_defaults_to_five_attempts(self):
+        user = User.objects.create_user(username="lock_at_five", password="TempPass123!")
+        user.role_profile.role = STAFF
+        user.role_profile.save(update_fields=["role", "updated_at"])
+
+        for _ in range(4):
+            response = self.client.post(
+                reverse("login"),
+                data={"username": "lock_at_five", "password": "WrongPass123!"},
+            )
+            self.assertEqual(response.status_code, 200)
+
+        user.refresh_from_db()
+        user.role_profile.refresh_from_db()
+        self.assertTrue(user.is_active)
+        self.assertFalse(user.role_profile.is_suspended)
+        self.assertEqual(user.role_profile.failed_login_attempts, 4)
+
+        fifth_response = self.client.post(
+            reverse("login"),
+            data={"username": "lock_at_five", "password": "WrongPass123!"},
+        )
+        self.assertEqual(fifth_response.status_code, 200)
+        user.refresh_from_db()
+        user.role_profile.refresh_from_db()
+        self.assertFalse(user.is_active)
+        self.assertTrue(user.role_profile.is_suspended)
+        self.assertEqual(user.role_profile.failed_login_attempts, 5)
+
+    def test_suspicious_activity_page_shows_failed_login_triage_details(self):
+        admin = User.objects.create_user(username="susp_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+
+        target = User.objects.create_user(
+            username="flagged_user",
+            email="flagged_user@vaniday.com",
+            password="TempPass123!",
+        )
+        target.role_profile.role = STAFF
+        target.role_profile.save(update_fields=["role", "updated_at"])
+
+        for _ in range(2):
+            self.client.post(
+                reverse("login"),
+                data={"username": "flagged_user", "password": "WrongPass123!"},
+            )
+
+        self.client.login(username="susp_admin", password="TempPass123!")
+        response = self.client.get(reverse("suspicious-activity-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Flagged Accounts")
+        self.assertContains(response, "flagged_user")
+        self.assertContains(response, "flagged_user@vaniday.com")
+        self.assertContains(response, "2 / 5")
+        self.assertContains(response, "Suspend for Review")
+
+    def test_admin_can_update_extended_payment_reminder_settings(self):
+        admin = User.objects.create_user(username="reminder_settings_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.client.login(username="reminder_settings_admin", password="TempPass123!")
+        response = self.client.post(
+            reverse("payment-reminder-settings-update"),
+            data={
+                "before_due_reminders_enabled": "on",
+                "reminder_days_before_due": 3,
+                "due_date_reminders_enabled": "on",
+                "after_due_reminders_enabled": "on",
+                "after_due_days": 2,
+                "overdue_repeat_enabled": "on",
+                "overdue_repeat_days": 4,
+                "mass_email_enabled": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        reminder_settings = PaymentReminderSettings.load()
+        self.assertTrue(reminder_settings.before_due_reminders_enabled)
+        self.assertEqual(reminder_settings.reminder_days_before_due, 3)
+        self.assertTrue(reminder_settings.due_date_reminders_enabled)
+        self.assertTrue(reminder_settings.after_due_reminders_enabled)
+        self.assertEqual(reminder_settings.after_due_days, 2)
+        self.assertTrue(reminder_settings.overdue_repeat_enabled)
+        self.assertEqual(reminder_settings.overdue_repeat_days, 4)
+
+    def test_run_reminder_check_simulation_creates_pending_reminder_log(self):
+        admin = User.objects.create_user(username="reminder_sim_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+
+        customer = Customer.objects.create(name="Reminder Customer", email="reminder_customer@example.com")
+        invoice = Invoice.objects.create(
+            invoice_number="INV-REM-0001",
+            customer=customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate(),
+            total_amount=100,
+        )
+
+        settings_obj = PaymentReminderSettings.load()
+        settings_obj.before_due_reminders_enabled = False
+        settings_obj.due_date_reminders_enabled = True
+        settings_obj.after_due_reminders_enabled = False
+        settings_obj.overdue_repeat_enabled = False
+        settings_obj.save()
+
+        self.client.login(username="reminder_sim_admin", password="TempPass123!")
+        response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "simulate"})
+        self.assertEqual(response.status_code, 302)
+
+        log = EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            related_object_id=str(invoice.id),
+            template_key="payment_reminder_due_date",
+        ).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_PENDING)
+        self.assertTrue(log.metadata.get("simulate"))
+
+    def test_run_reminder_check_send_marks_log_sent(self):
+        admin = User.objects.create_user(username="reminder_send_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+
+        customer = Customer.objects.create(name="Send Reminder Customer", email="send_reminder@example.com")
+        invoice = Invoice.objects.create(
+            invoice_number="INV-REM-0002",
+            customer=customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate(),
+            total_amount=200,
+        )
+
+        settings_obj = PaymentReminderSettings.load()
+        settings_obj.before_due_reminders_enabled = False
+        settings_obj.due_date_reminders_enabled = True
+        settings_obj.after_due_reminders_enabled = False
+        settings_obj.overdue_repeat_enabled = False
+        settings_obj.save()
+
+        self.client.login(username="reminder_send_admin", password="TempPass123!")
+        response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "send"})
+        self.assertEqual(response.status_code, 302)
+
+        log = EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            related_object_id=str(invoice.id),
+            template_key="payment_reminder_due_date",
+        ).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)

@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+import uuid
 
 from .roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
 
@@ -119,3 +120,38 @@ class LoginSecurityPolicy(models.Model):
     @classmethod
     def get_for_role(cls, role: str):
         return cls.objects.get_or_create(role=role)[0]
+
+
+class EmailVerificationToken(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="email_verification_tokens",
+    )
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["token"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Verification token for {self.user.username}"
+
+    @property
+    def is_valid(self) -> bool:
+        return self.used_at is None and self.expires_at > timezone.now()
+
+    @classmethod
+    def issue_for_user(cls, user, validity_hours: int = 48):
+        cls.objects.filter(user=user, used_at__isnull=True).update(used_at=timezone.now())
+        return cls.objects.create(
+            user=user,
+            token=uuid.uuid4().hex,
+            expires_at=timezone.now() + timezone.timedelta(hours=validity_hours),
+        )

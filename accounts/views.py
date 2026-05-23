@@ -8,12 +8,13 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Max, Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 
 from core.audit import get_client_ip, log_event
 from core.models import AuditLog
 from notifications.models import EmailDeliveryLog, PaymentReminderSettings
+from notifications.services import run_payment_reminder_check
 
 from .forms import (
     AdminAccountCreationForm,
@@ -26,7 +27,7 @@ from .forms import (
     PaymentReminderSettingsForm,
     RegistrationForm,
 )
-from .models import LoginSecurityPolicy
+from .models import EmailVerificationToken, LoginSecurityPolicy
 from .permissions import get_user_role, role_required
 from .roles import ADMIN, CUSTOMER, ROLE_CHOICES, STAFF, SUPERADMIN
 
@@ -51,23 +52,83 @@ def register(request):
         form = RegistrationForm(request.POST)
         if form.is_valid():
             user = form.save()
-            user.role_profile.role = STAFF
+            role = form.get_registration_role()
+            user.role_profile.role = role
             user.role_profile.save(update_fields=["role", "updated_at"])
+            verification = EmailVerificationToken.issue_for_user(user)
+            verify_url = request.build_absolute_uri(reverse("verify-email", args=[verification.token]))
+            verification_email_sent = True
+            try:
+                send_mail(
+                    subject="Verify your account",
+                    message=(
+                        "Welcome to Automated Invoicing & Payroll.\n\n"
+                        "Please verify your account by clicking this link:\n"
+                        f"{verify_url}\n\n"
+                        "This link expires in 48 hours."
+                    ),
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    fail_silently=False,
+                )
+            except Exception:
+                verification_email_sent = False
             log_event(
                 action="auth.registered",
                 user=user,
                 target_type="user",
                 target_id=str(user.id),
-                metadata={"username": user.username, "role": user.role_profile.role},
+                metadata={
+                    "username": user.username,
+                    "role": user.role_profile.role,
+                    "verification_required": True,
+                    "verification_email_sent": verification_email_sent,
+                },
                 ip_address=get_client_ip(request),
             )
-            login(request, user)
-            messages.success(request, "Registration successful.")
-            return redirect("dashboard")
+            if verification_email_sent:
+                messages.success(request, "Registration successful. Please verify your email before logging in.")
+            else:
+                messages.warning(
+                    request,
+                    "Registration saved but verification email could not be sent. Please contact an administrator.",
+                )
+            return redirect("login")
     else:
         form = RegistrationForm()
 
     return render(request, "accounts/register.html", {"form": form})
+
+
+def verify_email(request, token):
+    verification = (
+        EmailVerificationToken.objects.select_related("user", "user__role_profile")
+        .filter(token=token)
+        .first()
+    )
+    if verification is None:
+        messages.error(request, "Invalid verification link.")
+        return redirect("login")
+    if not verification.is_valid:
+        messages.error(request, "This verification link is expired or already used.")
+        return redirect("login")
+
+    user = verification.user
+    user.is_active = True
+    user.save(update_fields=["is_active"])
+    verification.used_at = timezone.now()
+    verification.save(update_fields=["used_at"])
+
+    log_event(
+        action="auth.email_verified",
+        user=user,
+        target_type="user",
+        target_id=str(user.id),
+        metadata={"username": user.username, "role": user.role_profile.role},
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, "Email verified. You can now log in.")
+    return redirect("login")
 
 
 def _get_role_counts():
@@ -447,8 +508,12 @@ def payment_reminder_settings_update(request):
             target_type="payment_reminder_settings",
             target_id=str(settings_obj.id),
             metadata={
+                "before_due_enabled": settings_obj.before_due_reminders_enabled,
                 "days_before_due": settings_obj.reminder_days_before_due,
-                "overdue_enabled": settings_obj.overdue_reminders_enabled,
+                "due_date_enabled": settings_obj.due_date_reminders_enabled,
+                "after_due_enabled": settings_obj.after_due_reminders_enabled,
+                "after_due_days": settings_obj.after_due_days,
+                "overdue_repeat_enabled": settings_obj.overdue_repeat_enabled,
                 "overdue_repeat_days": settings_obj.overdue_repeat_days,
                 "mass_email_enabled": settings_obj.mass_email_enabled,
             },
@@ -457,6 +522,47 @@ def payment_reminder_settings_update(request):
         messages.success(request, "Payment reminder settings updated.")
         return redirect("admin-dashboard")
     return render(request, "accounts/payment_reminder_settings.html", {"form": form})
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def payment_reminder_run_check(request):
+    if request.method != "POST":
+        return redirect("payment-reminder-settings-update")
+
+    mode = request.POST.get("mode", "simulate").strip().lower()
+    simulate = mode != "send"
+    summary = run_payment_reminder_check(
+        triggered_by=request.user,
+        base_url=request.build_absolute_uri("/").rstrip("/"),
+        simulate=simulate,
+    )
+    log_event(
+        action="admin.payment_reminders.run_check",
+        user=request.user,
+        target_type="payment_reminder_check",
+        metadata=summary,
+        ip_address=get_client_ip(request),
+    )
+    if simulate:
+        messages.success(
+            request,
+            (
+                f"Reminder check simulation complete. Matched: {summary['checked_invoices']}, "
+                f"simulated logs: {summary['simulated']}, failed: {summary['failed']}, "
+                f"already logged today: {summary['skipped_already_logged_today']}."
+            ),
+        )
+    else:
+        messages.success(
+            request,
+            (
+                f"Reminder check complete. Matched: {summary['checked_invoices']}, "
+                f"sent: {summary['sent']}, failed: {summary['failed']}, "
+                f"already logged today: {summary['skipped_already_logged_today']}."
+            ),
+        )
+    return redirect("payment-reminder-settings-update")
 
 
 @login_required
@@ -524,27 +630,99 @@ def suspicious_activity_list(request):
     selected_reason = request.GET.get("reason", "").strip()
     recent_since = timezone.now() - timezone.timedelta(days=7)
 
-    logs = AuditLog.objects.select_related("user", "user__role_profile").filter(
-        Q(action="auth.permission_denied") | Q(action__icontains="failed"),
+    suspicious_action_filter = Q(audit_logs__action="auth.permission_denied") | Q(
+        audit_logs__action="auth.login.failed"
+    )
+    account_rows = (
+        User.objects.select_related("role_profile")
+        .filter(suspicious_action_filter, audit_logs__created_at__gte=recent_since)
+        .annotate(
+            failed_attempts_7d=Count(
+                "audit_logs",
+                filter=Q(
+                    audit_logs__action="auth.login.failed",
+                    audit_logs__created_at__gte=recent_since,
+                ),
+                distinct=True,
+            ),
+            permission_denied_7d=Count(
+                "audit_logs",
+                filter=Q(
+                    audit_logs__action="auth.permission_denied",
+                    audit_logs__created_at__gte=recent_since,
+                ),
+                distinct=True,
+            ),
+            last_failed_attempt_at=Max(
+                "audit_logs__created_at",
+                filter=Q(
+                    audit_logs__action="auth.login.failed",
+                    audit_logs__created_at__gte=recent_since,
+                ),
+            ),
+            last_flagged_at=Max(
+                "audit_logs__created_at",
+                filter=Q(
+                    Q(audit_logs__action="auth.permission_denied")
+                    | Q(audit_logs__action="auth.login.failed"),
+                    audit_logs__created_at__gte=recent_since,
+                ),
+            ),
+        )
+        .distinct()
+    )
+    if selected_role:
+        account_rows = account_rows.filter(role_profile__role=selected_role)
+    if selected_reason == "failed":
+        account_rows = account_rows.filter(failed_attempts_7d__gt=0)
+    elif selected_reason == "permission_denied":
+        account_rows = account_rows.filter(permission_denied_7d__gt=0)
+    if search_query:
+        account_rows = account_rows.filter(
+            Q(username__icontains=search_query)
+            | Q(email__icontains=search_query)
+            | Q(role_profile__code_id__icontains=search_query)
+        )
+    account_rows = list(account_rows.order_by("-failed_attempts_7d", "-last_flagged_at", "username")[:200])
+
+    policy_by_role = {
+        policy.role: policy.max_failed_login_attempts
+        for policy in LoginSecurityPolicy.objects.filter(
+            role__in={row.role_profile.role for row in account_rows}
+        )
+    }
+    for account in account_rows:
+        account.max_failed_login_attempts = policy_by_role.get(account.role_profile.role, 5)
+        account.failed_attempts_current = account.role_profile.failed_login_attempts
+        account.is_suspended = account.role_profile.is_suspended
+        account.can_be_suspended = _can_suspend_target(request.user, account)
+        account.status_label = "Suspended" if account.is_suspended else "Active"
+        if not account.is_suspended and account.failed_attempts_current >= account.max_failed_login_attempts:
+            account.status_label = "Threshold reached"
+
+    event_logs = AuditLog.objects.select_related("user", "user__role_profile").filter(
+        Q(action="auth.permission_denied") | Q(action="auth.login.failed"),
         created_at__gte=recent_since,
     )
     if selected_role:
-        logs = logs.filter(user__role_profile__role=selected_role)
-    if selected_reason:
-        logs = logs.filter(action__icontains=selected_reason)
+        event_logs = event_logs.filter(user__role_profile__role=selected_role)
+    if selected_reason == "failed":
+        event_logs = event_logs.filter(action="auth.login.failed")
+    elif selected_reason == "permission_denied":
+        event_logs = event_logs.filter(action="auth.permission_denied")
     if search_query:
-        logs = logs.filter(
+        event_logs = event_logs.filter(
             Q(user__username__icontains=search_query)
             | Q(user__email__icontains=search_query)
             | Q(target_type__icontains=search_query)
             | Q(target_id__icontains=search_query)
         )
-
-    events = logs.order_by("-created_at")[:200]
+    events = event_logs.order_by("-created_at")[:200]
     return render(
         request,
         "accounts/suspicious_activity_list.html",
         {
+            "accounts": account_rows,
             "events": events,
             "role_choices": ROLE_CHOICES,
             "selected_role": selected_role,

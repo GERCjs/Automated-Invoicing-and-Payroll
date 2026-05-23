@@ -13,7 +13,12 @@ class EmailDeliveryLogAdmin(admin.ModelAdmin):
 @admin.register(PaymentReminderSettings)
 class PaymentReminderSettingsAdmin(admin.ModelAdmin):
     list_display = (
+        "before_due_reminders_enabled",
         "reminder_days_before_due",
+        "due_date_reminders_enabled",
+        "after_due_reminders_enabled",
+        "after_due_days",
+        "overdue_repeat_enabled",
         "overdue_reminders_enabled",
         "overdue_repeat_days",
         "mass_email_enabled",

@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
 from django.contrib.auth.models import Group, Permission
+from django.db.models import Q
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -92,8 +93,12 @@ def _resolve_user_from_failed_credentials(credentials: dict):
     username = str(username).strip()
     if not username:
         return None
-    lookup = {f"{username_field}__iexact": username}
-    return User.objects.select_related("role_profile").filter(**lookup).first()
+    return (
+        User.objects.select_related("role_profile")
+        .filter(Q(**{f"{username_field}__iexact": username}) | Q(email__iexact=username))
+        .order_by("id")
+        .first()
+    )
 
 
 @receiver(user_login_failed)
