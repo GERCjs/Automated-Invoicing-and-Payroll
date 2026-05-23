@@ -28,6 +28,9 @@
                 <li class="nav-item">
                     <a class="nav-link" href="{% url 'employee-list' %}">Employees</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'payroll-report' %}">Payroll Report</a>
+                </li>
                 {% endif %}
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
                 <li class="nav-item">

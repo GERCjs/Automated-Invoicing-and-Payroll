@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Payroll Report{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+        <h1 class="h3 mb-1">Payroll Report</h1>
+        <p class="text-muted mb-0">Payroll and payslip reporting snapshot for {{ selected_month }}.</p>
+    </div>
+    <form method="get" class="d-flex gap-2 align-items-center">
+        <input type="month" class="form-control" name="month" value="{{ selected_month }}">
+        <button type="submit" class="btn btn-outline-primary">Filter Month</button>
+    </form>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Payroll Amount This Month</div>
+                <div class="h4 mb-0">SGD {{ total_payroll_amount_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Payroll Amount This Year</div>
+                <div class="h4 mb-0">SGD {{ total_payroll_amount_year|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Employees Paid This Month</div>
+                <div class="display-6 mb-0">{{ employees_paid_month }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Net Pay This Month</div>
+                <div class="h4 mb-0">SGD {{ total_net_pay_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Allowances This Month</div>
+                <div class="h4 mb-0">SGD {{ total_allowances_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Deductions This Month</div>
+                <div class="h4 mb-0">SGD {{ total_deductions_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100 border-primary">
+            <div class="card-body">
+                <div class="text-muted small">Employee CPF Contribution</div>
+                <div class="h4 mb-0">SGD {{ employee_cpf_total_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100 border-success">
+            <div class="card-body">
+                <div class="text-muted small">Employer CPF Contribution (Separate)</div>
+                <div class="h4 mb-0">SGD {{ employer_cpf_total_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total CPF Contribution</div>
+                <div class="h4 mb-0">SGD {{ total_cpf_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Payroll Records by Month</span>
+        <span class="small text-muted">{{ month_start }} to {{ month_end }}</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Month</th>
+                    <th>Employee Name</th>
+                    <th>Employee ID</th>
+                    <th class="text-end">Gross Pay</th>
+                    <th class="text-end">Deductions</th>
+                    <th class="text-end">Net Pay</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in records_with_status %}
+                <tr>
+                    <td>{{ row.payment_date|date:"Y-m" }}</td>
+                    <td>{{ row.employee_name }}</td>
+                    <td>{{ row.employee_id }}</td>
+                    <td class="text-end">SGD {{ row.gross_pay|floatformat:2 }}</td>
+                    <td class="text-end">SGD {{ row.deductions|floatformat:2 }}</td>
+                    <td class="text-end">SGD {{ row.net_salary|floatformat:2 }}</td>
+                    <td>{{ row.status }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center py-3">No payroll records found for this month.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Recent Payslips Generated</div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Employee</th>
+                            <th>Employee ID</th>
+                            <th class="text-end">Net Pay</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in recent_payslips %}
+                        <tr>
+                            <td>{{ item.created_at|date:"Y-m-d H:i" }}</td>
+                            <td>{{ item.employee_name }}</td>
+                            <td>{{ item.employee_id }}</td>
+                            <td class="text-end">SGD {{ item.net_salary|floatformat:2 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No payslip records yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header">Payslip Summary</div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <div class="text-muted small">Pending Email / Download (selected month)</div>
+                    <div class="display-6">{{ pending_email_or_download_count }}</div>
+                </div>
+                <div>
+                    <div class="text-muted small">Staff Payslip Records (all time)</div>
+                    <div class="display-6">{{ staff_payslip_records_count }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
