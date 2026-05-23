@@ -9,6 +9,11 @@ class PayrollUploadForm(forms.Form):
         label="Payroll Excel file",
         help_text="Upload .xlsx file using the provided template.",
     )
+    payment_date = forms.DateField(
+        label="Payment Date",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+        help_text="This date will be used for all saved payroll records in this upload.",
+    )
 
 
 class PayrollRecordForm(forms.ModelForm):

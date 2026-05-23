@@ -12,10 +12,15 @@
         </div>
         <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
             {% csrf_token %}
-            <div class="col-md-8">
+            <div class="col-md-5">
                 <label class="form-label" for="id_payroll_file">{{ form.payroll_file.label }}</label>
                 {{ form.payroll_file }}
                 <div class="form-text">{{ form.payroll_file.help_text }}</div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="id_payment_date">{{ form.payment_date.label }}</label>
+                {{ form.payment_date }}
+                <div class="form-text">{{ form.payment_date.help_text }}</div>
             </div>
             <div class="col-md-4">
                 <button type="submit" class="btn btn-primary w-100">Upload & Preview</button>
@@ -24,12 +29,26 @@
     </div>
 </div>
 
-{% if preview_rows %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="h4 mb-0">Payslip Preview</h2>
-    <span class="badge text-bg-secondary">{{ preview_rows|length }} employee(s)</span>
+{% if total_rows %}
+<div class="card shadow-sm border-0 mb-3">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4"><strong>Total rows:</strong> {{ total_rows }}</div>
+            <div class="col-md-4"><strong>Valid rows:</strong> {{ valid_count }}</div>
+            <div class="col-md-4"><strong>Invalid rows:</strong> {{ invalid_count }}</div>
+        </div>
+    </div>
 </div>
+{% endif %}
 
+{% if preview_rows or invalid_rows %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h4 mb-0">Upload Preview</h2>
+    <span class="badge text-bg-secondary">{{ valid_count }} valid / {{ invalid_count }} invalid</span>
+</div>
+{% endif %}
+
+{% if preview_rows %}
 {% for row in preview_rows %}
 <div class="card mb-4 shadow-sm">
     <div class="card-header bg-light">
@@ -97,5 +116,40 @@
     </div>
 </div>
 {% endfor %}
+
+<form method="post" action="{% url 'payroll-upload-confirm-save' %}" class="mb-4">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-success">Confirm Save Valid Rows</button>
+</form>
+{% endif %}
+
+{% if invalid_rows %}
+<div class="card shadow-sm">
+    <div class="card-header bg-danger-subtle">
+        <strong>Invalid Rows</strong>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-bordered mb-0">
+            <thead>
+                <tr>
+                    <th>Row</th>
+                    <th>Employee Code</th>
+                    <th>Employee Name</th>
+                    <th>Error Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in invalid_rows %}
+                <tr>
+                    <td>{{ row.row_number }}</td>
+                    <td>{{ row.employee_code }}</td>
+                    <td>{{ row.employee_name }}</td>
+                    <td>{{ row.errors|join:", " }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 {% endif %}
 {% endblock %}

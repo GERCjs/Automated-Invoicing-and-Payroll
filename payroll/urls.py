@@ -14,5 +14,6 @@ urlpatterns = [
     path("<int:pk>/", views.payroll_detail, name="payroll-detail"),
     path("<int:pk>/edit/", views.payroll_edit, name="payroll-edit"),
     path("upload-preview/", views.payroll_upload_preview, name="payroll-upload-preview"),
+    path("upload-confirm-save/", views.payroll_upload_confirm_save, name="payroll-upload-confirm-save"),
     path("template/", views.payroll_template_download, name="payroll-template-download"),
 ]

@@ -159,6 +159,47 @@ def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:
     return parsed
 
 
+def parse_and_validate_payroll_excel(uploaded_file) -> dict[str, Any]:
+    parsed_rows = parse_payroll_excel(uploaded_file)
+    invalid_rows: list[dict[str, Any]] = []
+    valid_rows: list[dict[str, Any]] = []
+
+    for row in parsed_rows:
+        reasons: list[str] = []
+        if not str(row.get("employee_code") or "").strip():
+            reasons.append("Employee code is required.")
+        if not str(row.get("employee_name") or "").strip():
+            reasons.append("Employee name is required.")
+        if row.get("basic_salary", Decimal("0")) < 0:
+            reasons.append("Basic salary cannot be negative.")
+        if row.get("working_days", Decimal("0")) < 0:
+            reasons.append("Working days cannot be negative.")
+        if row.get("no_pay_leave_days", Decimal("0")) < 0:
+            reasons.append("No pay leave days cannot be negative.")
+        if row.get("loan_deduction", Decimal("0")) < 0:
+            reasons.append("Loan deduction cannot be negative.")
+        if row.get("other_deductions", Decimal("0")) < 0:
+            reasons.append("Other deductions cannot be negative.")
+
+        if reasons:
+            invalid_rows.append(
+                {
+                    "row_number": row.get("row_number"),
+                    "employee_code": row.get("employee_code", ""),
+                    "employee_name": row.get("employee_name", ""),
+                    "errors": reasons,
+                }
+            )
+        else:
+            valid_rows.append(row)
+
+    return {
+        "total_rows": len(parsed_rows),
+        "valid_rows": valid_rows,
+        "invalid_rows": invalid_rows,
+    }
+
+
 def default_template_row() -> list[Any]:
     return [
         "EMP001",

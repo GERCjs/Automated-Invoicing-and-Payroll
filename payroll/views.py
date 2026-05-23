@@ -1,13 +1,13 @@
-from io import BytesIO
 from decimal import Decimal, InvalidOperation
 from datetime import date
+from pathlib import Path
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Q
-from django.http import HttpResponse, JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from openpyxl import Workbook
 
 from accounts.permissions import role_required
 from accounts.roles import ADMIN, HR, STAFF, SUPERADMIN
@@ -16,10 +16,8 @@ from core.audit import get_client_ip, log_event
 from .forms import EmployeeForm, PayrollRecordForm, PayrollUploadForm
 from .models import Employee, PayrollRecord
 from .services import (
-    TEMPLATE_HEADERS,
-    default_template_row,
     employee_cpf_contribution_2026_from_basic_salary,
-    parse_payroll_excel,
+    parse_and_validate_payroll_excel,
 )
 
 
@@ -264,18 +262,50 @@ def payroll_detail(request, pk):
 def payroll_upload_preview(request):
     form = PayrollUploadForm(request.POST or None, request.FILES or None)
     preview_rows = []
+    invalid_rows = []
+    total_rows = 0
+    valid_count = 0
+    invalid_count = 0
 
     if request.method == "POST" and form.is_valid():
         try:
-            preview_rows = parse_payroll_excel(form.cleaned_data["payroll_file"])
-            if not preview_rows:
+            upload_result = parse_and_validate_payroll_excel(form.cleaned_data["payroll_file"])
+            preview_rows = upload_result["valid_rows"]
+            invalid_rows = upload_result["invalid_rows"]
+            filtered_valid_rows = []
+            for row in preview_rows:
+                employee_code = str(row.get("employee_code") or "").strip()
+                if not Employee.objects.filter(employee_code=employee_code).exists():
+                    invalid_rows.append(
+                        {
+                            "row_number": row.get("row_number"),
+                            "employee_code": employee_code,
+                            "employee_name": row.get("employee_name", ""),
+                            "errors": ["Employee code not found in employee records."],
+                        }
+                    )
+                else:
+                    filtered_valid_rows.append(row)
+            preview_rows = filtered_valid_rows
+            total_rows = upload_result["total_rows"]
+            valid_count = len(preview_rows)
+            invalid_count = len(invalid_rows)
+
+            if not preview_rows and not invalid_rows:
                 messages.warning(request, "No data rows were found in the uploaded file.")
+            else:
+                request.session["payroll_upload_preview"] = {
+                    "payment_date": form.cleaned_data["payment_date"].isoformat(),
+                    "rows": [_serialize_preview_row(r) for r in preview_rows],
+                }
             log_event(
                 action="payroll.upload.previewed",
                 user=request.user,
                 metadata={
                     "path": request.path,
-                    "row_count": len(preview_rows),
+                    "row_count": total_rows,
+                    "valid_row_count": valid_count,
+                    "invalid_row_count": invalid_count,
                     "source_file_name": form.cleaned_data["payroll_file"].name,
                 },
                 ip_address=get_client_ip(request),
@@ -293,25 +323,93 @@ def payroll_upload_preview(request):
     return render(
         request,
         "payroll/upload_preview.html",
-        {"form": form, "preview_rows": preview_rows},
+        {
+            "form": form,
+            "preview_rows": preview_rows,
+            "invalid_rows": invalid_rows,
+            "total_rows": total_rows,
+            "valid_count": valid_count,
+            "invalid_count": invalid_count,
+        },
     )
+
+
+def _serialize_preview_row(row):
+    return {
+        "employee_code": str(row["employee_code"]),
+        "employee_name": str(row["employee_name"]),
+        "basic_salary": str(row["basic_salary"]),
+        "physical_products_commission": str(row["physical_products_commission"]),
+        "credit_commission": str(row["credit_commission"]),
+        "services_commission": str(row["services_commission"]),
+        "loan_deduction": str(row["loan_deduction"]),
+        "other_deductions": str(row["other_deductions"]),
+        "cpf_employee_amount": str(row["cpf_employee_amount"]),
+        "net_pay": str(row["net_pay"]),
+    }
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def payroll_upload_confirm_save(request):
+    if request.method != "POST":
+        return redirect("payroll-upload-preview")
+
+    upload_data = request.session.get("payroll_upload_preview") or {}
+    payment_date_raw = upload_data.get("payment_date")
+    serialized_rows = upload_data.get("rows") or []
+
+    if not payment_date_raw or not serialized_rows:
+        messages.error(request, "No valid upload preview found. Please upload and preview first.")
+        return redirect("payroll-upload-preview")
+
+    payment_date = date.fromisoformat(payment_date_raw)
+    saved_count = 0
+
+    with transaction.atomic():
+        for row in serialized_rows:
+            allowances = (
+                Decimal(row["physical_products_commission"])
+                + Decimal(row["credit_commission"])
+                + Decimal(row["services_commission"])
+            )
+            deductions = Decimal(row["loan_deduction"]) + Decimal(row["other_deductions"])
+            record = PayrollRecord(
+                employee_name=row["employee_name"],
+                employee_id=row["employee_code"],
+                basic_salary=Decimal(row["basic_salary"]),
+                allowances=allowances,
+                deductions=deductions,
+                cpf_contribution=Decimal(row["cpf_employee_amount"]),
+                net_salary=Decimal(row["net_pay"]),
+                payment_date=payment_date,
+                created_by=request.user,
+            )
+            employee = Employee.objects.filter(employee_code=record.employee_id).first()
+            if employee:
+                record.nric = (employee.nric or "")[:9]
+                record.cpf_exempted = employee.cpf_exempt
+                record.sdl_exempted = employee.sdl_exempt
+            record.save()
+            saved_count += 1
+
+    request.session.pop("payroll_upload_preview", None)
+    log_event(
+        action="payroll.upload.saved",
+        user=request.user,
+        metadata={"saved_count": saved_count, "payment_date": payment_date.isoformat()},
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, f"Payroll upload saved successfully. {saved_count} record(s) created.")
+    return redirect("payroll-list")
 
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_template_download(request):
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Payroll"
-    sheet.append(TEMPLATE_HEADERS)
-    sheet.append(default_template_row())
-
-    output = BytesIO()
-    workbook.save(output)
-    output.seek(0)
-
-    response = HttpResponse(
-        output.getvalue(),
+    template_path = Path(__file__).resolve().parent / "payroll_upload_template.xlsx"
+    response = FileResponse(
+        template_path.open("rb"),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     response["Content-Disposition"] = 'attachment; filename="payroll_upload_template.xlsx"'
