@@ -3,15 +3,15 @@
 {% block title %}Suspicious Activity | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+<div class="page-header">
     <div>
-        <h1 class="h3 mb-1">Suspicious Activity</h1>
-        <p class="text-muted mb-0">Review repeated failed logins and denied access attempts from the last 7 days.</p>
+        <h1 class="page-title">Suspicious Activity</h1>
+        <p class="page-subtitle">Review repeated failed logins and denied access attempts from the last 7 days.</p>
     </div>
     <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
 </div>
 
-<div class="card shadow-sm">
+<div class="card">
     <div class="card-header">
         <form method="get" class="row g-2 align-items-end">
             <div class="col-md-3">
@@ -42,13 +42,13 @@
     </div>
 </div>
 
-<div class="card shadow-sm mt-3">
+<div class="card mt-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Flagged Accounts</span>
         <span class="text-muted small">Suspend first for containment, then investigate</span>
     </div>
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-clean table-hover mb-0">
             <thead>
                 <tr>
                     <th>User</th>
@@ -83,11 +83,11 @@
                     </td>
                     <td>
                         {% if account.is_suspended %}
-                        <span class="badge text-bg-danger">Suspended</span>
+                        <span class="badge bg-danger">Suspended</span>
                         {% elif account.failed_attempts_current >= account.max_failed_login_attempts %}
-                        <span class="badge text-bg-warning">Threshold reached</span>
+                        <span class="badge bg-warning">Threshold reached</span>
                         {% else %}
-                        <span class="badge text-bg-success">Active</span>
+                        <span class="badge bg-success">Active</span>
                         {% endif %}
                         <div class="text-muted small">Denied access events: {{ account.permission_denied_7d }}</div>
                     </td>
@@ -111,17 +111,17 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center py-4">No flagged accounts match the filters.</td></tr>
+                <tr><td colspan="6" class="text-center py-4"><div class="empty-state">No flagged accounts match the filters.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
 
-<div class="card shadow-sm mt-3">
+<div class="card mt-3">
     <div class="card-header">Recent Suspicious Events</div>
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-clean table-hover mb-0">
             <thead>
                 <tr>
                     <th>Time</th>
@@ -152,7 +152,7 @@
                     <td>{{ event.ip_address|default:"-" }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center py-4">No suspicious activity matches the filters.</td></tr>
+                <tr><td colspan="6" class="text-center py-4"><div class="empty-state">No suspicious activity matches the filters.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>

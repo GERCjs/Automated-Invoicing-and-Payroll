@@ -3,12 +3,16 @@ from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core import mail
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
 from openpyxl import Workbook
 
 from accounts.models import UserRole
-from accounts.roles import HR, STAFF
+from accounts.roles import ADMIN, CUSTOMER, HR, STAFF, SUPERADMIN
+from core.models import AuditLog
+from notifications.models import EmailDeliveryLog
 from payroll.models import Employee, PayrollRecord
 
 
@@ -96,6 +100,36 @@ class PayrollUploadPreviewTests(TestCase):
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    def _build_upload_file_with_invalid_numeric(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(
+            [
+                "employee_code",
+                "employee_name",
+                "employee_age",
+                "primary_work_location",
+                "working_days",
+                "no_pay_leave_days",
+                "basic_salary",
+                "physical_products_commission",
+                "credit_commission",
+                "services_commission",
+                "loan_deduction",
+                "other_deductions",
+                "notes",
+            ]
+        )
+        sheet.append(["EMP001", "Alex Tan", 34, "Raffles", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        return SimpleUploadedFile(
+            "payroll_invalid_numeric.xlsx",
+            output.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
     def test_payroll_preview_displays_cpf(self):
         response = self.client.post(
             reverse("payroll-upload-preview"),
@@ -133,6 +167,38 @@ class PayrollUploadPreviewTests(TestCase):
         save_response = self.client.post(reverse("payroll-upload-confirm-save"))
         self.assertEqual(save_response.status_code, 302)
         self.assertEqual(PayrollRecord.objects.count(), 2)
+
+    def test_confirm_save_skips_duplicate_employee_and_payment_date(self):
+        PayrollRecord.objects.create(
+            employee_name="Alex Tan",
+            employee_id="EMP001",
+            basic_salary=3000,
+            allowances=1040.90,
+            deductions=139.45,
+            cpf_contribution=808.18,
+            net_salary=3093.27,
+            payment_date=date(2026, 5, 24),
+        )
+        preview_response = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file(), "payment_date": "2026-05-24"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+
+        save_response = self.client.post(reverse("payroll-upload-confirm-save"), follow=True)
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(PayrollRecord.objects.count(), 1)
+        self.assertContains(save_response, "duplicate record(s) were skipped")
+
+    def test_upload_preview_invalid_numeric_cell_is_row_level_error(self):
+        response = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file_with_invalid_numeric(), "payment_date": "2026-05-24"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Invalid Rows")
+        self.assertContains(response, "Basic salary must be a valid number.")
+        self.assertContains(response, "2")
 
     def test_template_download(self):
         response = self.client.get(reverse("payroll-template-download"))
@@ -234,3 +300,164 @@ class PayslipPdfAccessTests(TestCase):
 
         denied_response = self.client.get(reverse("payslip-pdf-download", args=[self.other_record.pk]))
         self.assertEqual(denied_response.status_code, 403)
+
+
+class PayrollReportPlacementAndAccessTests(TestCase):
+    def _make_user(self, username, role):
+        user = get_user_model().objects.create_user(username=username, password="pass12345")
+        UserRole.objects.filter(user=user).update(role=role)
+        return user
+
+    def test_main_navbar_does_not_show_payroll_report_link(self):
+        user = self._make_user("hr_nav_user", HR)
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(
+            response,
+            f'<a class="nav-link" href="{reverse("payroll-report")}">Payroll Report</a>',
+            html=True,
+        )
+
+    def test_payroll_dashboard_shows_payroll_report_link_for_hr(self):
+        user = self._make_user("hr_dashboard_user", HR)
+        self.client.force_login(user)
+        response = self.client.get(reverse("payroll-dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("payroll-report"))
+
+    def test_staff_and_customer_cannot_access_overall_payroll_report(self):
+        staff_user = self._make_user("staff_no_payroll_report", STAFF)
+        self.client.force_login(staff_user)
+        staff_response = self.client.get(reverse("payroll-report"))
+        self.assertEqual(staff_response.status_code, 403)
+        self.client.logout()
+
+        customer_user = self._make_user("customer_no_payroll_report", CUSTOMER)
+        self.client.force_login(customer_user)
+        customer_response = self.client.get(reverse("payroll-report"))
+        self.assertEqual(customer_response.status_code, 403)
+
+    def test_admin_and_superadmin_can_access_payroll_report(self):
+        admin_user = self._make_user("admin_payroll_report", ADMIN)
+        self.client.force_login(admin_user)
+        admin_response = self.client.get(reverse("payroll-report"))
+        self.assertEqual(admin_response.status_code, 200)
+        self.client.logout()
+
+        superadmin_user = self._make_user("super_payroll_report", SUPERADMIN)
+        self.client.force_login(superadmin_user)
+        super_response = self.client.get(reverse("payroll-report"))
+        self.assertEqual(super_response.status_code, 200)
+
+
+class MyPayslipsViewTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.staff_user = user_model.objects.create_user(
+            username="staff_list_1", password="pass12345", email="stafflist1@example.com"
+        )
+        UserRole.objects.filter(user=self.staff_user).update(role=STAFF)
+        self.other_staff_user = user_model.objects.create_user(
+            username="staff_list_2", password="pass12345", email="stafflist2@example.com"
+        )
+        UserRole.objects.filter(user=self.other_staff_user).update(role=STAFF)
+
+        self.staff_employee = Employee.objects.create(
+            user=self.staff_user,
+            employee_code="EMP300",
+            first_name="List",
+            last_name="One",
+            email="stafflist1@example.com",
+            hire_date=date(2024, 1, 1),
+            base_salary=2100,
+        )
+        self.other_employee = Employee.objects.create(
+            user=self.other_staff_user,
+            employee_code="EMP400",
+            first_name="List",
+            last_name="Two",
+            email="stafflist2@example.com",
+            hire_date=date(2024, 1, 1),
+            base_salary=2300,
+        )
+
+        self.own_record = PayrollRecord.objects.create(
+            employee_name="List One",
+            employee_id=self.staff_employee.employee_code,
+            basic_salary=2100,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=420,
+            net_salary=1730,
+            payment_date=date(2026, 5, 24),
+        )
+        self.other_record = PayrollRecord.objects.create(
+            employee_name="List Two",
+            employee_id=self.other_employee.employee_code,
+            basic_salary=2300,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=460,
+            net_salary=1890,
+            payment_date=date(2026, 5, 24),
+        )
+
+    def test_staff_my_payslips_shows_only_own_records_and_logs_event(self):
+        self.client.login(username="staff_list_1", password="pass12345")
+        response = self.client.get(reverse("my-payslips"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.own_record.employee_id)
+        self.assertNotContains(response, self.other_record.employee_id)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                user=self.staff_user,
+                action="payroll.my_payslips.viewed",
+            ).exists()
+        )
+
+
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    DEFAULT_FROM_EMAIL="noreply@example.com",
+)
+class PayslipEmailSendTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.hr_user = user_model.objects.create_user(username="hr_email_test", password="pass12345")
+        UserRole.objects.filter(user=self.hr_user).update(role=HR)
+
+        self.employee = Employee.objects.create(
+            employee_code="EMP500",
+            first_name="Mail",
+            last_name="Tester",
+            email="mail.tester@example.com",
+            hire_date=date(2024, 1, 1),
+            base_salary=2400,
+        )
+        self.record = PayrollRecord.objects.create(
+            employee_name="Mail Tester",
+            employee_id=self.employee.employee_code,
+            basic_salary=2400,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=480,
+            net_salary=1970,
+            payment_date=date(2026, 5, 24),
+        )
+
+    def test_payslip_email_includes_pdf_attachment(self):
+        self.client.login(username="hr_email_test", password="pass12345")
+        response = self.client.post(reverse("payslip-email-send", args=[self.record.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        sent_message = mail.outbox[0]
+        self.assertTrue(sent_message.attachments)
+        self.assertTrue(any(attachment[2] == "application/pdf" for attachment in sent_message.attachments))
+        self.assertTrue(
+            EmailDeliveryLog.objects.filter(
+                related_object_type="payroll_record",
+                related_object_id=str(self.record.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).exists()
+        )

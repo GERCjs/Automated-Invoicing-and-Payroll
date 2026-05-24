@@ -3,11 +3,16 @@
 {% block title %}{% if is_edit %}Edit Payslip Record{% else %}Create Payslip Record{% endif %} | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<h1 class="h3 mb-3">{% if is_edit %}Edit Payslip Record{% else %}Create Payslip Record{% endif %}</h1>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{% if is_edit %}Edit Payslip Record{% else %}Create Payslip Record{% endif %}</h1>
+        <p class="page-subtitle">Maintain payroll earnings, deductions, and CPF calculations with audit-safe updates.</p>
+    </div>
+</div>
 
 <form method="post" novalidate>
     {% csrf_token %}
-    <div class="card shadow-sm mb-3">
+    <div class="card mb-3">
         <div class="card-body">
             <div class="row g-3">
                 <div class="col-md-6"><label class="form-label">Employee Name</label>{{ form.employee_name }}</div>
@@ -37,8 +42,10 @@
         </div>
     </div>
 
-    <button type="submit" class="btn btn-primary">{% if is_edit %}Update Payslip Record{% else %}Save Payslip Record{% endif %}</button>
-    <a href="{% url 'payroll-list' %}" class="btn btn-outline-secondary">Cancel</a>
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">{% if is_edit %}Update Payslip Record{% else %}Save Payslip Record{% endif %}</button>
+        <a href="{% url 'payroll-list' %}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
 </form>
 <script>
 (() => {

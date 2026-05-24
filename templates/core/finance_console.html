@@ -3,9 +3,9 @@
 {% block title %}Finance Console | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="p-4 bg-white rounded shadow-sm border">
-    <h1 class="h3 mb-2">Finance Console</h1>
-    <p class="mb-3">Only Super Admin, Admin, and Payroll Officer roles can view this page.</p>
+<div class="content-panel p-4">
+    <h1 class="page-title mb-2">Finance Console</h1>
+    <p class="page-subtitle mb-3">Only SuperAdmin, Admin, and HR roles can view this page.</p>
     <div class="d-flex gap-2 flex-wrap">
         <a href="{% url 'payroll-dashboard' %}" class="btn btn-primary">Open Payroll Dashboard</a>
         <a href="{% url 'payroll-list' %}" class="btn btn-outline-dark">Open Payroll List</a>

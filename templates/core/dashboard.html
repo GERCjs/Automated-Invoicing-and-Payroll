@@ -3,18 +3,33 @@
 {% block title %}Management Dashboard | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+<div class="page-header">
     <div>
-        <h1 class="h3 mb-1">Management Dashboard</h1>
-        <p class="text-muted mb-0">Company health overview across invoicing, payments, payroll, imports, and operational reporting.</p>
+        <h1 class="page-title">Management Dashboard</h1>
+        <p class="page-subtitle">Company health overview across invoicing, payments, payroll, imports, and operational reporting.</p>
     </div>
 </div>
+
+{% if current_user_role == "superadmin" or current_user_role == "admin" %}
+<div class="card mb-3">
+    <div class="card-header section-heading mb-0">Reports</div>
+    <div class="card-body">
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Invoice / Customer Report</a>
+            <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-primary btn-sm">Payment &amp; Stripe Report</a>
+            <a href="{% url 'payroll-report' %}" class="btn btn-outline-dark btn-sm">Payroll / Payslip Report</a>
+            <a href="{% url 'admin-security-report' %}" class="btn btn-outline-success btn-sm">Admin / Security Report</a>
+        </div>
+        <div class="text-muted small mt-2">Report links are shown based on role access only.</div>
+    </div>
+</div>
+{% endif %}
 
 {% if can_view_admin_stats %}
 <div class="row g-3 mb-3">
     <div class="col-md-3 col-sm-6">
         <a href="{% url 'dashboard-audit-logs' %}" class="text-decoration-none text-reset">
-        <div class="card shadow-sm border-0 h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Audit Events</div>
                 <div class="display-6 fw-semibold">{{ total_audit_logs }}</div>
@@ -24,7 +39,7 @@
     </div>
     <div class="col-md-3 col-sm-6">
         <a href="{% url 'dashboard-validation-errors' %}" class="text-decoration-none text-reset">
-        <div class="card shadow-sm border-warning h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Validation Errors</div>
                 <div class="display-6 fw-semibold text-warning">{{ import_error_total }}</div>
@@ -33,7 +48,7 @@
         </a>
     </div>
     <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm border-danger h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Failed Imports</div>
                 <div class="display-6 fw-semibold text-danger">{{ import_failed_count }}</div>
@@ -41,7 +56,7 @@
         </div>
     </div>
     <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm border-info h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Email Failures</div>
                 <div class="display-6 fw-semibold text-info">{{ email_failed_count }}</div>
@@ -52,9 +67,9 @@
 {% endif %}
 
 <div class="row g-3 mb-3">
-    {% if can_view_invoice_stats %}
+{% if can_view_invoice_stats %}
     <div class="col-lg-6">
-        <div class="card shadow-sm h-100">
+        <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span>Invoicing Summary</span>
                 <a href="{% url 'invoice-dashboard' %}" class="btn btn-sm btn-outline-primary">Open</a>
@@ -91,9 +106,9 @@
     </div>
     {% endif %}
 
-    {% if can_view_payroll_stats %}
+{% if can_view_payroll_stats %}
     <div class="col-lg-6">
-        <div class="card shadow-sm h-100">
+        <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span>Payroll Summary</span>
                 <a href="{% url 'payroll-dashboard' %}" class="btn btn-sm btn-outline-primary">Open</a>
@@ -135,7 +150,7 @@
 <div class="row g-3 mb-3">
     <div class="col-lg-12">
         <a href="{% url 'dashboard-audit-logs' %}" class="text-decoration-none text-reset">
-        <div class="card shadow-sm h-100">
+        <div class="card h-100">
             <div class="card-header">Audit Action Statistics</div>
             <div class="card-body">
                 {% for row in audit_action_chart %}
@@ -159,8 +174,8 @@
 {% endif %}
 
 {% if current_user_role == "customer" %}
-<div class="p-4 bg-white rounded shadow-sm border">
-    <h2 class="h5 mb-2">Customer Invoice Access</h2>
+<div class="content-panel p-4">
+    <h2 class="section-heading mb-2">Customer Invoice Access</h2>
     <p class="mb-3 text-muted">View pending, overdue, and paid invoices linked to your payment email.</p>
     <a href="{% url 'customer-invoice-dashboard' %}" class="btn btn-primary btn-sm">Open My Invoices</a>
 </div>

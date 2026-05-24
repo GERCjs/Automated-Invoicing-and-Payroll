@@ -3,31 +3,34 @@
 {% block title %}Invoices | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">Invoices</h1>
-    <div class="d-flex gap-2">
-        <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary">Upload CSV</a>
-        <a href="{% url 'invoice-dashboard' %}" class="btn btn-outline-dark">Finance Officer Dashboard</a>
-        <a href="{% url 'invoice-create' %}" class="btn btn-primary">Create Invoice</a>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Invoices</h1>
+        <p class="page-subtitle">Track invoice lifecycle, payment progress, and customer balances.</p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap invoice-list-actions">
+        <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary invoice-action-btn">Upload CSV</a>
+        <a href="{% url 'invoice-dashboard' %}" class="btn btn-outline-secondary invoice-action-btn">Finance Officer Dashboard</a>
+        <a href="{% url 'invoice-create' %}" class="btn btn-primary invoice-action-btn">Create Invoice</a>
     </div>
 </div>
 
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-body">
-        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-3 invoice-filter-toolbar">
             <span class="fw-semibold me-2">Filter:</span>
-            <a href="{% url 'invoice-list' %}" class="btn btn-sm {% if not selected_filter %}btn-dark{% else %}btn-outline-dark{% endif %}">All ({{ status_summary.total }})</a>
-            <a href="{% url 'invoice-list' %}?status=overdue" class="btn btn-sm {% if selected_filter == 'overdue' %}btn-danger{% else %}btn-outline-danger{% endif %}">Overdue ({{ status_summary.overdue }})</a>
-            <a href="{% url 'invoice-list' %}?status=draft" class="btn btn-sm {% if selected_filter == 'draft' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">Draft ({{ status_summary.draft }})</a>
-            <a href="{% url 'invoice-list' %}?status=sent" class="btn btn-sm {% if selected_filter == 'sent' or selected_filter == 'pending_payment' %}btn-info{% else %}btn-outline-info{% endif %}">Pending Payment ({{ status_summary.sent }})</a>
-            <a href="{% url 'invoice-list' %}?status=viewed" class="btn btn-sm {% if selected_filter == 'viewed' %}btn-primary{% else %}btn-outline-primary{% endif %}">Viewed ({{ status_summary.viewed }})</a>
-            <a href="{% url 'invoice-list' %}?status=paid" class="btn btn-sm {% if selected_filter == 'paid' %}btn-success{% else %}btn-outline-success{% endif %}">Paid ({{ status_summary.paid }})</a>
+            <a href="{% url 'invoice-list' %}" class="invoice-filter-chip {% if not selected_filter %}is-active is-all{% endif %}">All ({{ status_summary.total }})</a>
+            <a href="{% url 'invoice-list' %}?status=overdue" class="invoice-filter-chip {% if selected_filter == 'overdue' %}is-active is-overdue{% endif %}">Overdue ({{ status_summary.overdue }})</a>
+            <a href="{% url 'invoice-list' %}?status=draft" class="invoice-filter-chip {% if selected_filter == 'draft' %}is-active is-draft{% endif %}">Draft ({{ status_summary.draft }})</a>
+            <a href="{% url 'invoice-list' %}?status=sent" class="invoice-filter-chip {% if selected_filter == 'sent' or selected_filter == 'pending_payment' %}is-active is-pending{% endif %}">Pending Payment ({{ status_summary.sent }})</a>
+            <a href="{% url 'invoice-list' %}?status=viewed" class="invoice-filter-chip {% if selected_filter == 'viewed' %}is-active is-viewed{% endif %}">Viewed ({{ status_summary.viewed }})</a>
+            <a href="{% url 'invoice-list' %}?status=paid" class="invoice-filter-chip {% if selected_filter == 'paid' %}is-active is-paid{% endif %}">Paid ({{ status_summary.paid }})</a>
         </div>
-        <form method="get" class="row g-2 align-items-center">
+        <form method="get" class="row g-3 align-items-end invoice-search-form">
             {% if selected_filter %}
             <input type="hidden" name="status" value="{{ selected_filter }}">
             {% endif %}
-            <div class="col-md-6 col-lg-5">
+            <div class="col-lg-5 col-md-12">
                 <input
                     type="text"
                     class="form-control"
@@ -36,8 +39,10 @@
                     placeholder="Search invoice #, customer name, or customer email"
                 >
             </div>
-            <div class="col-md-3 col-lg-2">
+            <div class="col-lg-2 col-md-6">
+                <label for="issueDateFrom" class="form-label mb-1">Issue Date From</label>
                 <input
+                    id="issueDateFrom"
                     type="date"
                     class="form-control"
                     name="issue_date_from"
@@ -45,8 +50,10 @@
                     aria-label="Issue date from"
                 >
             </div>
-            <div class="col-md-3 col-lg-2">
+            <div class="col-lg-2 col-md-6">
+                <label for="issueDateTo" class="form-label mb-1">Issue Date To</label>
                 <input
+                    id="issueDateTo"
                     type="date"
                     class="form-control"
                     name="issue_date_to"
@@ -54,11 +61,11 @@
                     aria-label="Issue date to"
                 >
             </div>
-            <div class="col-auto">
-                <button type="submit" class="btn btn-outline-primary">Search</button>
-            </div>
-            <div class="col-auto">
-                <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Reset</a>
+            <div class="col-lg-3 col-md-12">
+                <div class="d-flex gap-2 invoice-search-actions">
+                    <button type="submit" class="btn btn-outline-primary invoice-action-btn">Search</button>
+                    <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary invoice-action-btn">Reset</a>
+                </div>
             </div>
         </form>
         <p class="text-muted mb-0 mt-2">
@@ -69,9 +76,9 @@
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card">
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-clean table-hover mb-0">
             <thead>
                 <tr>
                     <th>Invoice #</th>
@@ -93,17 +100,17 @@
                     </td>
                     <td>
                         {% if invoice.status == "overdue" %}
-                        <span class="badge text-bg-danger">{{ invoice.get_status_display }}</span>
+                        <span class="badge bg-danger">{{ invoice.get_status_display }}</span>
                         {% elif invoice.status == "draft" %}
-                        <span class="badge text-bg-warning">{{ invoice.get_status_display }}</span>
+                        <span class="badge bg-warning">{{ invoice.get_status_display }}</span>
                         {% elif invoice.status == "sent" %}
-                        <span class="badge text-bg-info">{{ invoice.get_status_display }}</span>
+                        <span class="badge bg-warning">Pending Payment</span>
                         {% elif invoice.status == "viewed" %}
-                        <span class="badge text-bg-primary">{{ invoice.get_status_display }}</span>
+                        <span class="badge bg-secondary">{{ invoice.get_status_display }}</span>
                         {% elif invoice.status == "paid" %}
-                        <span class="badge text-bg-success">{{ invoice.get_status_display }}</span>
+                        <span class="badge bg-success">{{ invoice.get_status_display }}</span>
                         {% else %}
-                        <span class="badge text-bg-secondary">{{ invoice.get_status_display }}</span>
+                        <span class="badge bg-secondary">{{ invoice.get_status_display }}</span>
                         {% endif %}
                     </td>
                     <td>{{ invoice.issue_date }}</td>
@@ -119,7 +126,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="7" class="text-center py-4">No invoices found.</td>
+                    <td colspan="7" class="text-center py-4"><div class="empty-state">No invoices found.</div></td>
                 </tr>
                 {% endfor %}
             </tbody>

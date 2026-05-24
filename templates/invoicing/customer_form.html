@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Add Customer | Vaniday Operations Portal{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Add New Customer</h1>
+        <p class="page-subtitle">Create a customer profile so invoices can be issued and the customer can register using the same email.</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="post" novalidate>
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ form.name.id_for_label }}">Customer Name</label>
+                    {{ form.name }}
+                    {% for error in form.name.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ form.email.id_for_label }}">Customer Email</label>
+                    {{ form.email }}
+                    {% for error in form.email.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ form.phone.id_for_label }}">Phone</label>
+                    {{ form.phone }}
+                    {% for error in form.phone.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ form.tax_number.id_for_label }}">Tax Number</label>
+                    {{ form.tax_number }}
+                    {% for error in form.tax_number.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-12">
+                    <label class="form-label" for="{{ form.billing_address.id_for_label }}">Billing Address</label>
+                    {{ form.billing_address }}
+                    {% for error in form.billing_address.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="{{ form.status.id_for_label }}">Status</label>
+                    {{ form.status }}
+                    {% for error in form.status.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                </div>
+            </div>
+
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger mt-3">{{ form.non_field_errors }}</div>
+            {% endif %}
+
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-primary">Save Customer</button>
+                <a href="{{ next_url }}" class="btn btn-outline-secondary">Back</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

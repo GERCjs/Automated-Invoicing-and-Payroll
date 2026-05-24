@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+
+{% block title %}Admin & Security Report{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Admin &amp; Security Report</h1>
+        <p class="page-subtitle">Operational report for account administration, security monitoring, and reminder operations.</p>
+    </div>
+    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Admin Console</a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">User Summary</div>
+    <div class="card-body">
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Total Users</div>
+                    <div class="h4 mb-0">{{ total_users }}</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">New Users This Month</div>
+                    <div class="h4 mb-0">{{ new_users_this_month }}</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Active Users</div>
+                    <div class="h4 mb-0 text-success">{{ active_users_count }}</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Suspended / Inactive</div>
+                    <div class="h4 mb-0 text-danger">{{ suspended_or_inactive_users_count }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-clean table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th>Role</th>
+                        <th class="text-end">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in users_by_role %}
+                    <tr>
+                        <td>{{ row.label }}</td>
+                        <td class="text-end">{{ row.count }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="2" class="text-center py-3">No role summary available.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">Security Summary</div>
+    <div class="card-body">
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Failed Login Attempts</div>
+                    <div class="h4 mb-0 text-warning">{{ failed_login_attempts_count }}</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Suspicious Activity Count</div>
+                    <div class="h4 mb-0 text-danger">{{ suspicious_activity_count }}</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Suspended Accounts</div>
+                    <div class="h4 mb-0">{{ suspended_accounts_count }}</div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">As Of</div>
+                    <div class="h5 mb-0">{{ today }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-lg-6">
+                <div class="card h-100">
+                    <div class="card-header bg-light">Recent Suspicious Activities</div>
+                    <div class="table-responsive">
+                        <table class="table table-clean table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>User</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for log in recent_suspicious_activities %}
+                                <tr>
+                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td>{{ log.user.username|default:"System" }}</td>
+                                    <td><span class="text-muted small">{{ log.action }}</span></td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="3" class="text-center py-3">No suspicious activity logs.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="card h-100">
+                    <div class="card-header bg-light">Recent Login-Related Audit Logs</div>
+                    <div class="table-responsive">
+                        <table class="table table-clean table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>User</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for log in recent_login_related_logs %}
+                                <tr>
+                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td>{{ log.user.username|default:"System" }}</td>
+                                    <td><span class="text-muted small">{{ log.action }}</span></td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="3" class="text-center py-3">No login-related logs available.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">Admin Activity Summary</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header bg-light">Recent Account Creations</div>
+                    <div class="table-responsive">
+                        <table class="table table-clean table-sm mb-0">
+                            <thead>
+                                <tr><th>Time</th><th>Action</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for log in recent_account_creations %}
+                                <tr>
+                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td><span class="text-muted small">{{ log.action }}</span></td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="2" class="text-center py-3">No recent account creations.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header bg-light">Recent Role Changes</div>
+                    <div class="table-responsive">
+                        <table class="table table-clean table-sm mb-0">
+                            <thead>
+                                <tr><th>Time</th><th>Action</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for log in recent_role_changes %}
+                                <tr>
+                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td><span class="text-muted small">{{ log.action }}</span></td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="2" class="text-center py-3">No recent role changes.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header bg-light">Recent Password Changes</div>
+                    <div class="table-responsive">
+                        <table class="table table-clean table-sm mb-0">
+                            <thead>
+                                <tr><th>Time</th><th>Action</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for log in recent_password_changes %}
+                                <tr>
+                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td><span class="text-muted small">{{ log.action }}</span></td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="2" class="text-center py-3">No recent password changes logged.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header bg-light">Recent Admin Actions</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Actor</th>
+                            <th>Action</th>
+                            <th>Target</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in recent_admin_actions %}
+                        <tr>
+                            <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                            <td>{{ log.user.username|default:"System" }}</td>
+                            <td><span class="text-muted small">{{ log.action }}</span></td>
+                            <td>{{ log.target_type }} {{ log.target_id }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No recent admin actions.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Reminder Summary</div>
+    <div class="card-body">
+        <div class="row g-3 mb-3">
+            <div class="col-md-4 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Reminder Before Due Date</div>
+                    <div class="fw-semibold">
+                        {% if reminder_settings.before_due_reminders_enabled %}Enabled ({{ reminder_settings.reminder_days_before_due }} day(s) before){% else %}Disabled{% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Reminder On Due Date</div>
+                    <div class="fw-semibold">{% if reminder_settings.due_date_reminders_enabled %}Enabled{% else %}Disabled{% endif %}</div>
+                </div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Reminder After Due Date</div>
+                    <div class="fw-semibold">
+                        {% if reminder_settings.after_due_reminders_enabled %}Enabled ({{ reminder_settings.after_due_days }} day(s) after){% else %}Disabled{% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Repeat Overdue Reminder</div>
+                    <div class="fw-semibold">
+                        {% if reminder_settings.overdue_repeat_enabled %}Enabled (every {{ reminder_settings.overdue_repeat_days }} day(s)){% else %}Disabled{% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Reminder Emails Sent</div>
+                    <div class="h4 mb-0">{{ reminder_emails_sent_count }}</div>
+                </div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Mass Email Setting</div>
+                    <div class="fw-semibold">{% if reminder_settings.mass_email_enabled %}Enabled{% else %}Disabled{% endif %}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-clean table-sm mb-0">
+                <thead>
+                    <tr>
+                        <th>Attempted At</th>
+                        <th>Recipient</th>
+                        <th>Template</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in recent_reminder_email_logs %}
+                    <tr>
+                        <td>{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
+                        <td>{{ log.recipient_email }}</td>
+                        <td>{{ log.template_key }}</td>
+                        <td>{{ log.get_status_display }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="4" class="text-center py-3">No reminder email logs found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

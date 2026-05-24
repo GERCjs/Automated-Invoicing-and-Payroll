@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Invoice / Customer Report{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Invoice / Customer Report</h1>
+        <p class="page-subtitle">Invoice collections and customer activity summary as of {{ today }}.</p>
+    </div>
+</div>
+
+<h2 class="section-heading mb-3">Invoice Summary</h2>
+<div class="row g-3 mb-3">
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Collected This Month</div>
+                <div class="h4 mb-0">SGD {{ total_amount_collected_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Collected This Year</div>
+                <div class="h4 mb-0">SGD {{ total_amount_collected_year|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Outstanding Amount</div>
+                <div class="h4 mb-0">SGD {{ outstanding_amount|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Reporting Window</div>
+                <div class="small">Month start: {{ month_start }}</div>
+                <div class="small">Year start: {{ year_start }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Overdue Invoices</div>
+                <div class="display-6 mb-0 text-danger">{{ overdue_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Pending Payment</div>
+                <div class="display-6 mb-0 text-warning">{{ pending_payment_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Paid Invoices</div>
+                <div class="display-6 mb-0 text-success">{{ paid_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Draft Invoices</div>
+                <div class="display-6 mb-0">{{ draft_count }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">Invoice Status Summary</div>
+            <div class="table-responsive">
+                <table class="table table-clean mb-0">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th class="text-end">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in status_summary %}
+                        <tr>
+                            <td>{{ row.label }}</td>
+                            <td class="text-end">{{ row.count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">Customer Summary</div>
+            <div class="card-body">
+                <div class="text-muted small">Total Customers With Invoices</div>
+                <div class="display-6">{{ total_customers_with_invoices }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">Top Customers by Invoice Amount</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Email</th>
+                            <th class="text-end">Invoices</th>
+                            <th class="text-end">Total Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in top_customers_by_total %}
+                        <tr>
+                            <td>{{ row.customer__name }}</td>
+                            <td>{{ row.customer__email }}</td>
+                            <td class="text-end">{{ row.invoice_count }}</td>
+                            <td class="text-end">SGD {{ row.total_amount|floatformat:2 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No customer totals available.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">Customers With Overdue Invoices</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Email</th>
+                            <th class="text-end">Overdue Invoices</th>
+                            <th class="text-end">Overdue Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in customers_with_overdue %}
+                        <tr>
+                            <td>{{ row.customer__name }}</td>
+                            <td>{{ row.customer__email }}</td>
+                            <td class="text-end">{{ row.overdue_invoice_count }}</td>
+                            <td class="text-end">SGD {{ row.overdue_amount|floatformat:2 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No overdue customers.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2 class="section-heading mb-3">Recent Invoice Activity</h2>
+<div class="row g-3">
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">Recent Invoices Created</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Created At</th>
+                            <th>Invoice #</th>
+                            <th>Customer</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for invoice in recent_invoices_created %}
+                        <tr>
+                            <td>{{ invoice.created_at|date:"Y-m-d H:i" }}</td>
+                            <td>{{ invoice.invoice_number }}</td>
+                            <td>{{ invoice.customer.name }}</td>
+                            <td>{{ invoice.get_status_display }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No invoice activity yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">Recent Invoices Paid</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Paid At</th>
+                            <th>Invoice #</th>
+                            <th>Customer</th>
+                            <th class="text-end">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for invoice in recent_invoices_paid %}
+                        <tr>
+                            <td>{{ invoice.updated_at|date:"Y-m-d H:i" }}</td>
+                            <td>{{ invoice.invoice_number }}</td>
+                            <td>{{ invoice.customer.name }}</td>
+                            <td class="text-end">SGD {{ invoice.total_amount|floatformat:2 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No paid invoices yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">Recent Invoice Emails Sent</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Recipient</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in recent_invoice_emails_sent %}
+                        <tr>
+                            <td>{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
+                            <td>{{ log.recipient_email }}</td>
+                            <td>{{ log.get_status_display }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3" class="text-center py-3">No invoice email logs yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

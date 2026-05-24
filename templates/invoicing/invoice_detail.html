@@ -3,15 +3,18 @@
 {% block title %}Invoice {{ invoice.invoice_number }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">Invoice {{ invoice.invoice_number }}</h1>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Invoice {{ invoice.invoice_number }}</h1>
+        <p class="page-subtitle">Invoice details, activity, reminders, and download actions.</p>
+    </div>
     <div class="d-flex gap-2">
         {% if invoice.status == "draft" %}
         <a href="{% url 'invoice-edit' invoice.pk %}" class="btn btn-primary">Edit</a>
         {% endif %}
         <form method="post" action="{% url 'invoice-send-email' invoice.pk %}" class="d-inline">
             {% csrf_token %}
-            <button type="submit" class="btn btn-outline-dark">Send Email</button>
+            <button type="submit" class="btn btn-outline-dark">Send / Resend Invoice Email</button>
         </form>
         <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
         <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-outline-success">Download Excel</a>
@@ -21,21 +24,22 @@
 
 <div class="row g-3 mb-3">
     <div class="col-md-8">
-        <div class="card shadow-sm">
+        <div class="card">
             <div class="card-body">
                 <p class="mb-1"><strong>Customer:</strong> {{ invoice.customer.name }}</p>
                 <p class="mb-1"><strong>Email:</strong> {{ invoice.customer.email }}</p>
-                <p class="mb-1"><strong>Status:</strong> <span class="badge text-bg-secondary">{{ invoice.get_status_display }}</span></p>
+                <p class="mb-1"><strong>Status:</strong> <span class="badge bg-secondary">{% if invoice.status == "sent" %}Pending Payment{% else %}{{ invoice.get_status_display }}{% endif %}</span></p>
                 <p class="mb-1"><strong>Issue Date:</strong> {{ invoice.issue_date }}</p>
                 <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
                 <p class="mb-1"><strong>Public Link:</strong> <a href="{% url 'invoice-public-view' invoice.public_view_token %}" target="_blank">Open Online View</a></p>
                 <p class="mb-1"><strong>Viewed At:</strong> {{ invoice.viewed_at|default:"-" }}</p>
-                <p class="mb-0"><strong>View Count:</strong> {{ invoice.view_count }}</p>
+                <p class="mb-1"><strong>View Count:</strong> {{ invoice.view_count }}</p>
+                <p class="mb-0"><strong>Last Invoice Email Sent:</strong> {{ last_invoice_email_sent_at|date:"Y-m-d H:i"|default:"No invoice email sent yet" }}</p>
             </div>
         </div>
     </div>
     <div class="col-md-4">
-        <div class="card shadow-sm">
+        <div class="card mb-3">
             <div class="card-body">
                 <h2 class="h6">Change Status</h2>
                 <form method="post" action="{% url 'invoice-status-update' invoice.pk %}">
@@ -50,13 +54,48 @@
                 </form>
             </div>
         </div>
+        <div class="card">
+            <div class="card-body">
+                <h2 class="h6">Reminder Summary</h2>
+                <p class="mb-1"><strong>Total Reminders Sent:</strong> {{ reminders_sent_count }}</p>
+                <p class="mb-0"><strong>Last Reminder Sent:</strong> {{ last_reminder_sent_at|date:"Y-m-d H:i"|default:"No reminders sent yet" }}</p>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card mb-3">
+    <div class="card-header">Reminder History</div>
+    <div class="table-responsive">
+        <table class="table table-clean table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Attempted At</th>
+                    <th>Template</th>
+                    <th>Status</th>
+                    <th>Recipient</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in reminder_history %}
+                <tr>
+                    <td>{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ log.template_key }}</td>
+                    <td>{{ log.get_status_display }}</td>
+                    <td>{{ log.recipient_email }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="text-center py-3">No reminders sent yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
     <div class="card-header">Items</div>
     <div class="table-responsive">
-        <table class="table mb-0">
+        <table class="table table-clean mb-0">
             <thead>
                 <tr>
                     <th>Description</th>

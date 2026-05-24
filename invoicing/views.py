@@ -6,18 +6,21 @@ from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from datetime import date
 import uuid
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from accounts.permissions import role_required
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, SUPERADMIN
 from core.audit import get_client_ip, log_event
 from imports.models import ImportJob, ImportRowError
-from notifications.services import send_invoice_email
+from notifications.models import EmailDeliveryLog
+from notifications.services import get_invoice_reminder_history, send_invoice_email
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
-from .forms import InvoiceCsvUploadForm, InvoiceForm, InvoiceItemFormSet
+from .forms import CustomerCreateForm, InvoiceCsvUploadForm, InvoiceForm, InvoiceItemFormSet
 from .models import Customer as InvoiceCustomer
 from .models import Invoice
 from .services import (
@@ -32,6 +35,21 @@ from .services import (
 )
 
 CSV_IMPORT_SESSION_KEY_PREFIX = "invoice_csv_import_preview_"
+
+
+def _invoice_reminder_context(invoice: Invoice) -> dict:
+    reminder_history = list(get_invoice_reminder_history(invoice))
+    sent_reminder_history = [log for log in reminder_history if log.status == EmailDeliveryLog.STATUS_SENT]
+    last_reminder_sent_log = sent_reminder_history[0] if sent_reminder_history else None
+    return {
+        "reminder_history": reminder_history,
+        "reminders_sent_count": len(sent_reminder_history),
+        "last_reminder_sent_at": (
+            last_reminder_sent_log.sent_at or last_reminder_sent_log.attempted_at
+            if last_reminder_sent_log
+            else None
+        ),
+    }
 
 
 def _get_linked_customer_for_user(user):
@@ -51,6 +69,24 @@ def _get_customer_invoice_queryset(user):
 
 def _csv_import_session_key(import_token: str) -> str:
     return f"{CSV_IMPORT_SESSION_KEY_PREFIX}{import_token}"
+
+
+def _resolve_next_url(request, next_url: str, fallback: str) -> str:
+    candidate = (next_url or "").strip()
+    if candidate and url_has_allowed_host_and_scheme(
+        url=candidate,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return candidate
+    return fallback
+
+
+def _append_customer_query(url: str, customer_id: int) -> str:
+    split = urlsplit(url)
+    query = dict(parse_qsl(split.query, keep_blank_values=True))
+    query["customer"] = str(customer_id)
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 
 
 @login_required
@@ -216,12 +252,7 @@ def customer_invoice_dashboard(request):
     refresh_overdue_invoices()
     linked_customer, scoped_invoices = _get_customer_invoice_queryset(request.user)
 
-    action_statuses = [
-        Invoice.STATUS_DRAFT,
-        Invoice.STATUS_SENT,
-        Invoice.STATUS_VIEWED,
-        Invoice.STATUS_OVERDUE,
-    ]
+    action_statuses = [Invoice.STATUS_SENT, Invoice.STATUS_VIEWED, Invoice.STATUS_OVERDUE]
     action_required_invoices = scoped_invoices.filter(status__in=action_statuses).order_by("due_date", "-issue_date")
     paid_invoices = scoped_invoices.filter(status=Invoice.STATUS_PAID).order_by("-issue_date", "-created_at")
 
@@ -229,6 +260,7 @@ def customer_invoice_dashboard(request):
         action_required_invoices.aggregate(total=Sum("total_amount"))["total"]
         or 0
     )
+    pending_payment_count = action_required_invoices.filter(status=Invoice.STATUS_SENT).count()
     overdue_count = action_required_invoices.filter(status=Invoice.STATUS_OVERDUE).count()
 
     log_event(
@@ -249,6 +281,7 @@ def customer_invoice_dashboard(request):
             "action_required_invoices": action_required_invoices,
             "paid_invoices": paid_invoices,
             "outstanding_amount": outstanding_amount,
+            "pending_payment_count": pending_payment_count,
             "overdue_count": overdue_count,
         },
     )
@@ -263,6 +296,7 @@ def customer_invoice_detail(request, pk):
     invoice = get_object_or_404(scoped_invoices, pk=pk)
     apply_overdue_status(invoice)
     invoice.refresh_from_db()
+    reminder_context = _invoice_reminder_context(invoice)
 
     log_event(
         action="invoice.customer.detail.viewed",
@@ -278,7 +312,11 @@ def customer_invoice_detail(request, pk):
     return render(
         request,
         "invoicing/customer_invoice_detail.html",
-        {"invoice": invoice, "items": invoice.items.all()},
+        {
+            "invoice": invoice,
+            "items": invoice.items.all(),
+            **reminder_context,
+        },
     )
 
 
@@ -550,7 +588,11 @@ def invoice_create(request):
             messages.success(request, "Invoice created as Draft.")
             return redirect("invoice-detail", pk=invoice.pk)
     else:
-        form = InvoiceForm()
+        initial = {}
+        selected_customer_id = request.GET.get("customer")
+        if selected_customer_id and InvoiceCustomer.objects.filter(pk=selected_customer_id).exists():
+            initial["customer"] = selected_customer_id
+        form = InvoiceForm(initial=initial)
         formset = InvoiceItemFormSet(prefix="items")
 
     return render(
@@ -561,6 +603,45 @@ def invoice_create(request):
             "formset": formset,
             "is_edit": False,
             "invoice": None,
+            "customer_create_next": request.get_full_path(),
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_customer_create(request):
+    fallback_next = reverse("invoice-create")
+    if request.method == "POST":
+        next_url = _resolve_next_url(request, request.POST.get("next", ""), fallback_next)
+        form = CustomerCreateForm(request.POST)
+        if form.is_valid():
+            customer = form.save(commit=False)
+            customer.created_by = request.user
+            customer.save()
+            log_event(
+                action="invoice.customer.created",
+                user=request.user,
+                target_type="customer",
+                target_id=str(customer.id),
+                metadata={
+                    "name": customer.name,
+                    "email": customer.email,
+                },
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Customer created. You can now create the invoice.")
+            return redirect(_append_customer_query(next_url, customer.id))
+    else:
+        next_url = _resolve_next_url(request, request.GET.get("next", ""), fallback_next)
+        form = CustomerCreateForm()
+
+    return render(
+        request,
+        "invoicing/customer_form.html",
+        {
+            "form": form,
+            "next_url": next_url,
         },
     )
 
@@ -614,6 +695,17 @@ def invoice_detail(request, pk):
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
     apply_overdue_status(invoice)
     invoice.refresh_from_db()
+    reminder_context = _invoice_reminder_context(invoice)
+    last_invoice_email_log = (
+        EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            related_object_id=str(invoice.id),
+            template_key="invoice_email_v1",
+            status=EmailDeliveryLog.STATUS_SENT,
+        )
+        .order_by("-attempted_at")
+        .first()
+    )
     log_event(
         action="invoice.detail.viewed",
         user=request.user,
@@ -629,6 +721,12 @@ def invoice_detail(request, pk):
             "invoice": invoice,
             "items": invoice.items.all(),
             "status_choices": Invoice.STATUS_CHOICES,
+            "last_invoice_email_sent_at": (
+                (last_invoice_email_log.sent_at or last_invoice_email_log.attempted_at)
+                if last_invoice_email_log
+                else None
+            ),
+            **reminder_context,
         },
     )
 

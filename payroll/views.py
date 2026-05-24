@@ -465,9 +465,15 @@ def payroll_upload_confirm_save(request):
 
     payment_date = date.fromisoformat(payment_date_raw)
     saved_count = 0
+    skipped_count = 0
 
     with transaction.atomic():
         for row in serialized_rows:
+            employee_code = str(row["employee_code"]).strip()
+            if PayrollRecord.objects.filter(employee_id=employee_code, payment_date=payment_date).exists():
+                skipped_count += 1
+                continue
+
             allowances = (
                 Decimal(row["physical_products_commission"])
                 + Decimal(row["credit_commission"])
@@ -476,7 +482,7 @@ def payroll_upload_confirm_save(request):
             deductions = Decimal(row["loan_deduction"]) + Decimal(row["other_deductions"])
             record = PayrollRecord(
                 employee_name=row["employee_name"],
-                employee_id=row["employee_code"],
+                employee_id=employee_code,
                 basic_salary=Decimal(row["basic_salary"]),
                 allowances=allowances,
                 deductions=deductions,
@@ -497,10 +503,27 @@ def payroll_upload_confirm_save(request):
     log_event(
         action="payroll.upload.saved",
         user=request.user,
-        metadata={"saved_count": saved_count, "payment_date": payment_date.isoformat()},
+        metadata={
+            "saved_count": saved_count,
+            "skipped_duplicate_count": skipped_count,
+            "payment_date": payment_date.isoformat(),
+        },
         ip_address=get_client_ip(request),
     )
-    messages.success(request, f"Payroll upload saved successfully. {saved_count} record(s) created.")
+    if saved_count > 0 and skipped_count > 0:
+        messages.success(
+            request,
+            f"Payroll upload saved successfully. {saved_count} record(s) created, {skipped_count} duplicate record(s) skipped.",
+        )
+    elif saved_count > 0:
+        messages.success(request, f"Payroll upload saved successfully. {saved_count} record(s) created.")
+    elif skipped_count > 0:
+        messages.warning(
+            request,
+            f"No new payroll records were created. {skipped_count} duplicate record(s) were skipped.",
+        )
+    else:
+        messages.warning(request, "No payroll records were created from this upload.")
     return redirect("payroll-list")
 
 
@@ -602,6 +625,12 @@ def my_payslips(request):
         return redirect("dashboard")
 
     payslip_records = PayrollRecord.objects.filter(employee_id=employee.employee_code)
+    log_event(
+        action="payroll.my_payslips.viewed",
+        user=request.user,
+        metadata={"path": request.path, "employee_code": employee.employee_code, "record_count": payslip_records.count()},
+        ip_address=get_client_ip(request),
+    )
     return render(
         request,
         "payroll/my_payslips.html",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date
 from typing import Any
 
@@ -118,13 +118,74 @@ def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:
     for row_number, row in enumerate(rows[1:], start=2):
         if row is None or all(v in (None, "") for v in row):
             continue
-        age = int(as_decimal(row[index_map["employee_age"]], "0"))
-        basic_salary = as_decimal(row[index_map["basic_salary"]])
-        physical_products_commission = as_decimal(row[index_map["physical_products_commission"]])
-        credit_commission = as_decimal(row[index_map["credit_commission"]])
-        services_commission = as_decimal(row[index_map["services_commission"]])
-        loan_deduction = as_decimal(row[index_map["loan_deduction"]])
-        other_deductions = as_decimal(row[index_map["other_deductions"]])
+        row_errors: list[str] = []
+        employee_code = str(row[index_map["employee_code"]] or "").strip()
+        employee_name = str(row[index_map["employee_name"]] or "").strip()
+
+        age_decimal = _parse_decimal_field(
+            row[index_map["employee_age"]],
+            "Employee age",
+            row_errors,
+            default="0",
+        )
+        age = None
+        if age_decimal is not None:
+            if age_decimal != age_decimal.to_integral_value():
+                row_errors.append("Employee age must be a whole number.")
+            elif age_decimal < 0:
+                row_errors.append("Employee age cannot be negative.")
+            else:
+                age = int(age_decimal)
+
+        working_days = _parse_decimal_field(
+            row[index_map["working_days"]],
+            "Working days",
+            row_errors,
+            default="0",
+        )
+        no_pay_leave_days = _parse_decimal_field(
+            row[index_map["no_pay_leave_days"]],
+            "No pay leave days",
+            row_errors,
+            default="0",
+        )
+        basic_salary = _parse_decimal_field(row[index_map["basic_salary"]], "Basic salary", row_errors)
+        physical_products_commission = _parse_decimal_field(
+            row[index_map["physical_products_commission"]],
+            "Physical products commission",
+            row_errors,
+            default="0",
+        )
+        credit_commission = _parse_decimal_field(
+            row[index_map["credit_commission"]],
+            "Credit commission",
+            row_errors,
+            default="0",
+        )
+        services_commission = _parse_decimal_field(
+            row[index_map["services_commission"]],
+            "Services commission",
+            row_errors,
+            default="0",
+        )
+        loan_deduction = _parse_decimal_field(row[index_map["loan_deduction"]], "Loan deduction", row_errors, default="0")
+        other_deductions = _parse_decimal_field(
+            row[index_map["other_deductions"]],
+            "Other deductions",
+            row_errors,
+            default="0",
+        )
+
+        if row_errors:
+            parsed.append(
+                {
+                    "row_number": row_number,
+                    "employee_code": employee_code,
+                    "employee_name": employee_name,
+                    "__parse_errors": row_errors,
+                }
+            )
+            continue
 
         total_earnings = basic_salary + physical_products_commission + credit_commission + services_commission
         cpf = cpf_for_2026(total_earnings, age)
@@ -134,12 +195,12 @@ def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:
         parsed.append(
             {
                 "row_number": row_number,
-                "employee_code": row[index_map["employee_code"]] or "",
-                "employee_name": row[index_map["employee_name"]] or "",
+                "employee_code": employee_code,
+                "employee_name": employee_name,
                 "employee_age": age,
                 "primary_work_location": row[index_map["primary_work_location"]] or "",
-                "working_days": as_decimal(row[index_map["working_days"]]),
-                "no_pay_leave_days": as_decimal(row[index_map["no_pay_leave_days"]]),
+                "working_days": working_days,
+                "no_pay_leave_days": no_pay_leave_days,
                 "basic_salary": money(basic_salary),
                 "physical_products_commission": money(physical_products_commission),
                 "credit_commission": money(credit_commission),
@@ -165,20 +226,20 @@ def parse_and_validate_payroll_excel(uploaded_file) -> dict[str, Any]:
     valid_rows: list[dict[str, Any]] = []
 
     for row in parsed_rows:
-        reasons: list[str] = []
+        reasons: list[str] = list(row.get("__parse_errors", []))
         if not str(row.get("employee_code") or "").strip():
             reasons.append("Employee code is required.")
         if not str(row.get("employee_name") or "").strip():
             reasons.append("Employee name is required.")
-        if row.get("basic_salary", Decimal("0")) < 0:
+        if row.get("basic_salary") is not None and row.get("basic_salary", Decimal("0")) < 0:
             reasons.append("Basic salary cannot be negative.")
-        if row.get("working_days", Decimal("0")) < 0:
+        if row.get("working_days") is not None and row.get("working_days", Decimal("0")) < 0:
             reasons.append("Working days cannot be negative.")
-        if row.get("no_pay_leave_days", Decimal("0")) < 0:
+        if row.get("no_pay_leave_days") is not None and row.get("no_pay_leave_days", Decimal("0")) < 0:
             reasons.append("No pay leave days cannot be negative.")
-        if row.get("loan_deduction", Decimal("0")) < 0:
+        if row.get("loan_deduction") is not None and row.get("loan_deduction", Decimal("0")) < 0:
             reasons.append("Loan deduction cannot be negative.")
-        if row.get("other_deductions", Decimal("0")) < 0:
+        if row.get("other_deductions") is not None and row.get("other_deductions", Decimal("0")) < 0:
             reasons.append("Other deductions cannot be negative.")
 
         if reasons:
@@ -216,3 +277,13 @@ def default_template_row() -> list[Any]:
         0,
         "Sample row",
     ]
+
+
+def _parse_decimal_field(value: Any, label: str, row_errors: list[str], default: str | None = None) -> Decimal | None:
+    try:
+        if default is None:
+            return as_decimal(value)
+        return as_decimal(value, default=default)
+    except (InvalidOperation, ValueError):
+        row_errors.append(f"{label} must be a valid number.")
+        return None

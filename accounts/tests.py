@@ -258,6 +258,22 @@ class AccountsPhaseOneTests(TestCase):
 
         self.assertNotContains(response, "Admin Console")
 
+    def test_customer_is_redirected_from_management_dashboard_to_my_invoices(self):
+        user = User.objects.create_user(
+            username="customer_dashboard_redirect",
+            email="customer_dashboard_redirect@example.com",
+            password="TempPass123!",
+        )
+        user.role_profile.role = CUSTOMER
+        user.role_profile.save()
+        Customer.objects.create(name="Dashboard Customer", email="customer_dashboard_redirect@example.com")
+
+        self.client.login(username="customer_dashboard_redirect", password="TempPass123!")
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], reverse("customer-invoice-dashboard"))
+
     def test_admin_role_is_not_superuser_but_has_admin_permissions(self):
         user = User.objects.create_user(username="role_admin_perms", password="TempPass123!")
         user.role_profile.role = ADMIN

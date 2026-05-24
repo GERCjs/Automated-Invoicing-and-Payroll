@@ -3,11 +3,17 @@
 {% block title %}Create Admin Account | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Create Admin Account</h1>
+        <p class="page-subtitle">Provision an administrator for portal operations and controls.</p>
+    </div>
+</div>
 <div class="row justify-content-center">
     <div class="col-md-6 col-lg-5">
-        <div class="card shadow-sm">
+        <div class="card">
             <div class="card-body p-4">
-                <h1 class="h4 mb-3 text-center">Create Admin Account</h1>
+                <h2 class="section-heading mb-3">Create Admin Account</h2>
                 <form method="post" novalidate>
                     {% csrf_token %}
                     <div class="mb-3">

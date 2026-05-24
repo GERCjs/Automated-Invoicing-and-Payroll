@@ -3,10 +3,16 @@
 {% block title %}Payroll Upload & Preview{% endblock %}
 
 {% block content %}
-<div class="card shadow-sm border-0 mb-4">
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Payroll Excel Upload</h1>
+        <p class="page-subtitle">Preview payslip calculations, net pay, and CPF contributions before saving.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
     <div class="card-body">
-        <h1 class="h3 mb-3">Payroll Excel Upload</h1>
-        <p class="text-muted mb-3">Upload payroll data to preview payslip calculations, net pay, and CPF contributions (2026 rates).</p>
+        <h2 class="section-heading">Upload File</h2>
         <div class="d-flex flex-wrap gap-2 mb-3">
             <a href="{% url 'payroll-template-download' %}" class="btn btn-outline-primary">Download Excel Template</a>
         </div>
@@ -30,12 +36,12 @@
 </div>
 
 {% if total_rows %}
-<div class="card shadow-sm border-0 mb-3">
+<div class="card mb-3">
     <div class="card-body">
         <div class="row g-3">
-            <div class="col-md-4"><strong>Total rows:</strong> {{ total_rows }}</div>
-            <div class="col-md-4"><strong>Valid rows:</strong> {{ valid_count }}</div>
-            <div class="col-md-4"><strong>Invalid rows:</strong> {{ invalid_count }}</div>
+            <div class="col-md-4"><div class="sub-kpi"><strong>Total rows:</strong> {{ total_rows }}</div></div>
+            <div class="col-md-4"><div class="sub-kpi"><strong>Valid rows:</strong> {{ valid_count }}</div></div>
+            <div class="col-md-4"><div class="sub-kpi"><strong>Invalid rows:</strong> {{ invalid_count }}</div></div>
         </div>
     </div>
 </div>
@@ -43,14 +49,14 @@
 
 {% if preview_rows or invalid_rows %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="h4 mb-0">Upload Preview</h2>
-    <span class="badge text-bg-secondary">{{ valid_count }} valid / {{ invalid_count }} invalid</span>
+    <h2 class="section-heading mb-0">Upload Preview</h2>
+    <span class="badge bg-secondary">{{ valid_count }} valid / {{ invalid_count }} invalid</span>
 </div>
 {% endif %}
 
 {% if preview_rows %}
 {% for row in preview_rows %}
-<div class="card mb-4 shadow-sm">
+<div class="card mb-4">
     <div class="card-header bg-light">
         <strong>Vaniday - Payslip</strong><br>
         <span class="text-muted">Employee: {{ row.employee_name }}</span>
@@ -61,8 +67,8 @@
             <div><strong>Working days:</strong> {{ row.working_days }} | <strong>No pay leave:</strong> {{ row.no_pay_leave_days }}</div>
         </div>
         <div class="table-responsive">
-            <table class="table table-bordered mb-0 align-middle">
-                <thead class="table-light">
+            <table class="table table-clean mb-0 align-middle">
+                <thead>
                     <tr>
                         <th>Earnings</th>
                         <th class="text-end">Amount (SGD)</th>
@@ -124,12 +130,12 @@
 {% endif %}
 
 {% if invalid_rows %}
-<div class="card shadow-sm">
+<div class="card">
     <div class="card-header bg-danger-subtle">
         <strong>Invalid Rows</strong>
     </div>
     <div class="table-responsive">
-        <table class="table table-bordered mb-0">
+        <table class="table table-clean mb-0">
             <thead>
                 <tr>
                     <th>Row</th>

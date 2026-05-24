@@ -3,13 +3,19 @@
 {% block title %}{% if is_edit %}Edit Employee{% else %}Add New Employee{% endif %} | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="card shadow-sm border-0">
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{% if is_edit %}Edit Employee{% else %}Add New Employee{% endif %}</h1>
+        <p class="page-subtitle">Maintain employee profile, payroll eligibility, and bank payout details.</p>
+    </div>
+</div>
+
+<div class="card">
     <div class="card-body p-4">
-        <h1 class="h3 mb-4">{% if is_edit %}Edit Employee{% else %}Add New Employee{% endif %}</h1>
         <form method="post" novalidate>
             {% csrf_token %}
 
-            <h2 class="h6 fw-bold text-primary mb-3">Essentials</h2>
+            <h2 class="section-heading">Essentials</h2>
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label">Linked User Account</label>
@@ -79,7 +85,7 @@
                 </div>
             </div>
 
-            <h2 class="h5 fw-bold mt-4 mb-3">Bank Account Details</h2>
+            <h2 class="section-heading mt-4">Bank Account Details</h2>
             <div class="row g-3">
                 <div class="col-md-6">
                     <label class="form-label">Bank</label>

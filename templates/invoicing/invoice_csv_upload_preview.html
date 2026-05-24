@@ -3,12 +3,16 @@
 {% block title %}Invoice CSV Upload | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="card shadow-sm border-0 mb-4">
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Invoice CSV Upload</h1>
+        <p class="page-subtitle">Upload Vaniday CSV data, preview grouped invoices, and confirm import safely.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
     <div class="card-body">
-        <h1 class="h3 mb-2">Invoice CSV Upload</h1>
-        <p class="text-muted mb-3">
-            Upload Vaniday CSV data, preview grouped invoices, and confirm import.
-        </p>
+        <h2 class="section-heading">Upload File</h2>
         <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
             {% csrf_token %}
             <input type="hidden" name="action" value="preview">
@@ -28,30 +32,30 @@
 </div>
 
 {% if preview %}
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-body">
         <h2 class="h5 mb-3">Preview Summary</h2>
         <div class="row g-3">
             <div class="col-md-3">
-                <div class="border rounded p-3">
+                <div class="sub-kpi">
                     <div class="text-muted small">Total Rows</div>
                     <div class="h4 mb-0">{{ preview.total_rows }}</div>
                 </div>
             </div>
             <div class="col-md-3">
-                <div class="border rounded p-3">
+                <div class="sub-kpi">
                     <div class="text-muted small">Valid Rows</div>
                     <div class="h4 mb-0 text-success">{{ preview.valid_rows|length }}</div>
                 </div>
             </div>
             <div class="col-md-3">
-                <div class="border rounded p-3">
+                <div class="sub-kpi">
                     <div class="text-muted small">Invalid Rows</div>
                     <div class="h4 mb-0 text-danger">{{ preview.invalid_rows|length }}</div>
                 </div>
             </div>
             <div class="col-md-3">
-                <div class="border rounded p-3">
+                <div class="sub-kpi">
                     <div class="text-muted small">Source File</div>
                     <div class="small fw-semibold">{{ preview.source_file_name }}</div>
                 </div>
@@ -60,13 +64,13 @@
     </div>
 </div>
 
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Grouped Invoice Preview</span>
-        <span class="badge text-bg-secondary">{{ group_preview_rows|length }} group(s)</span>
+        <span class="badge bg-secondary">{{ group_preview_rows|length }} group(s)</span>
     </div>
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-clean table-hover mb-0">
             <thead>
                 <tr>
                     <th>Merchant/Customer</th>
@@ -85,7 +89,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="4" class="text-center py-4">No valid groups to import.</td>
+                    <td colspan="4" class="text-center py-4"><div class="empty-state">No valid groups to import.</div></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -94,12 +98,12 @@
 </div>
 
 {% if invalid_preview_rows %}
-<div class="card shadow-sm mb-3 border-danger">
+<div class="card mb-3 border-danger">
     <div class="card-header bg-danger-subtle text-danger-emphasis">
         Validation Issues (Invalid Rows - First 20)
     </div>
     <div class="table-responsive">
-        <table class="table table-sm mb-0">
+        <table class="table table-clean table-sm mb-0">
             <thead>
                 <tr>
                     <th>Row #</th>

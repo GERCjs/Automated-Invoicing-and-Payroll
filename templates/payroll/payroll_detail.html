@@ -3,8 +3,11 @@
 {% block title %}Payslip Record {{ payslip_record.employee_id }}{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">Payslip Record {{ payslip_record.employee_id }}</h1>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Payslip Record {{ payslip_record.employee_id }}</h1>
+        <p class="page-subtitle">Review and share generated payslip details for this payroll entry.</p>
+    </div>
     <div class="d-flex gap-2">
         <form method="post" action="{% url 'payslip-email-send' payslip_record.pk %}">
             {% csrf_token %}
@@ -16,7 +19,7 @@
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card">
     <div class="card-body">
         <p class="mb-1"><strong>Employee Name:</strong> {{ payslip_record.employee_name }}</p>
         <p class="mb-1"><strong>Employee ID:</strong> {{ payslip_record.employee_id }}</p>

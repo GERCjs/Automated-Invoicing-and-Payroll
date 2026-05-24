@@ -5,7 +5,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from accounts.permissions import get_user_role, role_required
-from accounts.roles import ADMIN, FINANCE, HR, ROLE_CHOICES, SUPERADMIN
+from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, SUPERADMIN
 from imports.models import ImportJob, ImportRowError
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
@@ -39,6 +39,7 @@ AUDIT_ACTION_LABELS = {
     "payment.stripe.redirect_confirmed": "Stripe success redirect confirmed",
     "payment.invoice.marked_paid": "Invoice marked as paid from payment",
     "report.payment_stripe.viewed": "Payment report viewed",
+    "report.admin_security.viewed": "Admin and security report viewed",
     "admin.dashboard.viewed": "Admin dashboard viewed",
     "admin.account.created": "Account created",
     "admin.account.role_changed": "User role changed",
@@ -81,6 +82,7 @@ def explain_audit_action(action):
         "payment.stripe.redirect_confirmed": "Success redirect confirmed payment in sandbox fallback mode.",
         "payment.invoice.marked_paid": "Invoice status was updated to paid from payment processing.",
         "report.payment_stripe.viewed": "An authorized user opened the Payment and Stripe report.",
+        "report.admin_security.viewed": "An authorized admin opened the Admin and Security report.",
         "admin.dashboard.viewed": "An admin opened the admin dashboard.",
         "admin.account.created": "An admin created a user account.",
         "admin.account.role_changed": "An admin changed a user's role.",
@@ -133,6 +135,9 @@ def home(request):
 @login_required
 def dashboard(request):
     role = get_user_role(request.user)
+    if role == CUSTOMER:
+        return redirect("customer-invoice-dashboard")
+
     can_view_admin_stats = role in {SUPERADMIN, ADMIN}
     can_view_invoice_stats = role in {SUPERADMIN, ADMIN, FINANCE}
     can_view_payroll_stats = role in {SUPERADMIN, ADMIN, HR}

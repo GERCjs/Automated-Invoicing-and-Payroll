@@ -3,16 +3,16 @@
 {% block title %}My Payslips | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="page-header">
     <div>
-        <h1 class="h3 mb-1">My Payslips</h1>
-        <p class="text-muted mb-0">Employee: {{ employee.first_name }} {{ employee.last_name }} ({{ employee.employee_code }})</p>
+        <h1 class="page-title">My Payslips</h1>
+        <p class="page-subtitle">Employee: {{ employee.first_name }} {{ employee.last_name }} ({{ employee.employee_code }})</p>
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card">
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-clean table-hover mb-0">
             <thead>
                 <tr>
                     <th>Employee ID</th>
@@ -42,7 +42,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="9" class="text-center py-4">No payslips available yet.</td></tr>
+                <tr><td colspan="9" class="text-center py-4"><div class="empty-state">No payslips available yet.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>

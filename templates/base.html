@@ -4,97 +4,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Automated Invoicing & Payroll{% endblock %}</title>
+    <title>{% block title %}Vaniday Operations Portal{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <style>
+        /* Critical theme fallback to avoid stale-cache/bootstrap-only look */
+        .portal-header { background: #222 !important; color: #fff !important; }
+        .portal-nav { background: #2b2d34 !important; }
+        .portal-brand, .portal-brand:hover, .portal-brand-main, .portal-brand-title, .portal-subtitle { color: #fff !important; text-decoration: none !important; }
+        .portal-user { color: #d6dbe4 !important; }
+        .btn-primary { background: #ff7f73 !important; border-color: #ff7f73 !important; color: #fff !important; }
+        .btn-primary:hover { background: #f06d62 !important; border-color: #f06d62 !important; }
+        .auth-card-header { background: #2a2c33 !important; color: #fff !important; }
+        .auth-card { max-width: 500px !important; margin: 72px auto 0 !important; }
+        .auth-page { background: #f6f6f6 !important; }
+        a, a:visited { text-decoration: none !important; }
+    </style>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260525b">
 </head>
-<body class="bg-light">
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-    <div class="container">
-        <a class="navbar-brand" href="{% url 'dashboard' %}">AIP System</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="mainNav">
-            <ul class="navbar-nav me-auto">
-                {% if user.is_authenticated %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'dashboard' %}">Management Dashboard</a>
-                </li>
-                {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'payroll-dashboard' %}">Payroll</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'employee-list' %}">Employees</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'payroll-report' %}">Payroll Report</a>
-                </li>
-                {% endif %}
-                {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'invoice-dashboard' %}">Invoices</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'payment-stripe-report' %}">Payment Report</a>
-                </li>
-                {% endif %}
-                {% if current_user_role == "customer" %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'customer-invoice-dashboard' %}">My Invoices</a>
-                </li>
-                {% endif %}
-                {% if current_user_role == "staff" %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'my-payslips' %}">My Payslips</a>
-                </li>
-                {% endif %}
-                {% if current_user_role == "superadmin" or current_user_role == "admin" %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'admin-dashboard' %}">Admin Console</a>
-                </li>
-                {% if current_user_role == "superadmin" %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'admin:index' %}">Django Admin</a>
-                </li>
-                {% endif %}
-                {% endif %}
-                {% endif %}
-            </ul>
-            <ul class="navbar-nav ms-auto">
-                {% if user.is_authenticated %}
-                <li class="nav-item me-3 text-white d-flex align-items-center">
-                    {{ user.username }}{% if current_user_role_label %} ({{ current_user_role_label }}){% endif %}
-                </li>
-                <li class="nav-item">
-                    <form method="post" action="{% url 'logout' %}" class="d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
-                    </form>
-                </li>
-                {% else %}
-                <li class="nav-item">
-                    <div class="d-flex gap-2">
-                        <a class="btn btn-outline-light btn-sm" href="{% url 'register' %}">Register</a>
-                        <a class="btn btn-outline-light btn-sm" href="{% url 'login' %}">Login</a>
-                    </div>
-                </li>
-                {% endif %}
-            </ul>
+<body class="portal-body d-flex flex-column min-vh-100">
+<div class="portal-shell d-flex flex-column flex-grow-1">
+    <div class="portal-utility-bar">
+        <div class="container d-flex justify-content-between align-items-center">
+            <span>Welcome to Vaniday Operations Portal</span>
+            {% if user.is_authenticated %}
+            <span>{{ user.username }}{% if current_user_role_label %} ({{ current_user_role_label }}){% endif %}</span>
+            {% else %}
+            <span>Internal Access</span>
+            {% endif %}
         </div>
     </div>
-</nav>
-<main class="container py-4">
-    {% if messages %}
-    <div class="mb-3">
-        {% for message in messages %}
-        <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
-        {% endfor %}
-    </div>
+
+    <header class="portal-header">
+        <div class="container">
+            <div class="portal-header-main d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <a class="portal-brand" href="{% url 'dashboard' %}">
+                    <span class="portal-logo portal-brand-main">VANIDAY.</span>
+                    <span class="portal-brand-title">Operations Portal</span>
+                    <span class="portal-brand-subtitle portal-subtitle">Automated Invoicing &amp; Payroll</span>
+                </a>
+
+                {% if user.is_authenticated %}
+                <div class="d-flex align-items-center gap-2">
+                    <span class="portal-user">{{ user.username }}{% if current_user_role_label %} ({{ current_user_role_label }}){% endif %}</span>
+                    <form method="post" action="{% url 'logout' %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-portal-ghost btn-sm">Logout</button>
+                    </form>
+                </div>
+                {% else %}
+                <div class="d-flex gap-2">
+                    <a class="btn btn-portal-ghost btn-sm" href="{% url 'register' %}">Register</a>
+                    <a class="btn btn-primary btn-sm" href="{% url 'login' %}">Log In</a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    {% if user.is_authenticated %}
+    <nav class="portal-nav" aria-label="Role based navigation">
+        <div class="container">
+            <div class="portal-nav-links">
+                {% if current_user_role == "superadmin" or current_user_role == "admin" %}
+                <a class="portal-nav-link" href="{% url 'dashboard' %}">Management Dashboard</a>
+                {% endif %}
+
+                {% if current_user_role == "finance" or current_user_role == "hr" %}
+                <a class="portal-nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+                {% endif %}
+
+                {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
+                <a class="portal-nav-link" href="{% url 'invoice-dashboard' %}">Invoices</a>
+                {% endif %}
+
+                {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
+                <a class="portal-nav-link" href="{% url 'payroll-dashboard' %}">Payroll</a>
+                <a class="portal-nav-link" href="{% url 'employee-list' %}">Employees</a>
+                {% endif %}
+
+                {% if current_user_role == "superadmin" or current_user_role == "admin" %}
+                <a class="portal-nav-link" href="{% url 'admin-dashboard' %}">Admin Console</a>
+                {% if current_user_role == "superadmin" %}
+                <a class="portal-nav-link" href="{% url 'admin:index' %}">Django Admin</a>
+                {% endif %}
+                {% endif %}
+
+                {% if current_user_role == "customer" %}
+                <a class="portal-nav-link" href="{% url 'customer-invoice-dashboard' %}">My Invoices</a>
+                {% endif %}
+
+                {% if current_user_role == "staff" %}
+                <a class="portal-nav-link" href="{% url 'my-payslips' %}">My Payslips</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
     {% endif %}
-    {% block content %}{% endblock %}
-</main>
+
+    <main class="portal-main flex-grow-1">
+        <div class="container py-4">
+            {% if messages %}
+            <div class="mb-3">
+                {% for message in messages %}
+                <div class="alert portal-alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <footer class="portal-footer mt-auto">
+        <div class="container text-center">
+            Vaniday Operations Portal - Internal system for invoicing, payments, payroll, and reporting.
+        </div>
+    </footer>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

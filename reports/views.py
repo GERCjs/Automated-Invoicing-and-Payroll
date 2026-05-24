@@ -1,14 +1,16 @@
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum
+from django.contrib.auth import get_user_model
+from django.db.models import Count, Q, Sum
 from django.shortcuts import render
 from django.utils import timezone
 
 from accounts.permissions import role_required
-from accounts.roles import ADMIN, FINANCE, HR, STAFF, SUPERADMIN
+from accounts.roles import ADMIN, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
 from core.audit import get_client_ip, log_event
 from core.models import AuditLog
 from invoicing.models import Invoice
 from notifications.models import EmailDeliveryLog
+from notifications.models import PaymentReminderSettings
 from payments.models import PaymentRecord
 from payroll.models import Employee, PayrollRecord
 from payroll.services import cpf_for_2026
@@ -35,6 +37,197 @@ def _month_bounds(selected_month: str, today):
         next_month = month_start.replace(month=month_start.month + 1, day=1)
     month_end = next_month - timezone.timedelta(days=1)
     return selected_month, month_start, month_end
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_customer_report(request):
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    year_start = today.replace(month=1, day=1)
+
+    invoice_queryset = Invoice.objects.select_related("customer")
+    paid_invoices = invoice_queryset.filter(status=Invoice.STATUS_PAID)
+    outstanding_invoices = invoice_queryset.filter(
+        status__in=[Invoice.STATUS_DRAFT, Invoice.STATUS_SENT, Invoice.STATUS_VIEWED, Invoice.STATUS_OVERDUE]
+    )
+
+    total_amount_collected_month = _safe_sum(
+        paid_invoices.filter(updated_at__date__gte=month_start, updated_at__date__lte=today),
+        "total_amount",
+    )
+    total_amount_collected_year = _safe_sum(
+        paid_invoices.filter(updated_at__date__gte=year_start, updated_at__date__lte=today),
+        "total_amount",
+    )
+    outstanding_amount = _safe_sum(outstanding_invoices, "total_amount")
+
+    draft_count = invoice_queryset.filter(status=Invoice.STATUS_DRAFT).count()
+    pending_payment_count = invoice_queryset.filter(status=Invoice.STATUS_SENT).count()
+    viewed_count = invoice_queryset.filter(status=Invoice.STATUS_VIEWED).count()
+    overdue_count = invoice_queryset.filter(status=Invoice.STATUS_OVERDUE).count()
+    paid_count = invoice_queryset.filter(status=Invoice.STATUS_PAID).count()
+
+    status_summary = [
+        {"label": "Draft", "count": draft_count},
+        {"label": "Pending Payment", "count": pending_payment_count},
+        {"label": "Viewed", "count": viewed_count},
+        {"label": "Overdue", "count": overdue_count},
+        {"label": "Paid", "count": paid_count},
+    ]
+
+    total_customers_with_invoices = (
+        invoice_queryset.values("customer_id").distinct().count()
+    )
+    top_customers_by_total = list(
+        invoice_queryset.values("customer__name", "customer__email")
+        .annotate(
+            invoice_count=Count("id"),
+            total_amount=Sum("total_amount"),
+        )
+        .order_by("-total_amount", "customer__name")[:8]
+    )
+    customers_with_overdue = list(
+        invoice_queryset.filter(status=Invoice.STATUS_OVERDUE)
+        .values("customer__name", "customer__email")
+        .annotate(
+            overdue_invoice_count=Count("id"),
+            overdue_amount=Sum("total_amount"),
+        )
+        .order_by("-overdue_invoice_count", "-overdue_amount", "customer__name")[:8]
+    )
+
+    recent_invoices_created = invoice_queryset.order_by("-created_at")[:10]
+    recent_invoices_paid = paid_invoices.order_by("-updated_at")[:10]
+    recent_invoice_emails_sent = EmailDeliveryLog.objects.filter(
+        template_key="invoice_email_v1"
+    ).order_by("-attempted_at")[:10]
+
+    log_event(
+        action="report.invoice_customer.viewed",
+        user=request.user,
+        metadata={"path": request.path},
+        ip_address=get_client_ip(request),
+    )
+
+    return render(
+        request,
+        "reports/invoice_customer_report.html",
+        {
+            "today": today,
+            "month_start": month_start,
+            "year_start": year_start,
+            "total_amount_collected_month": total_amount_collected_month,
+            "total_amount_collected_year": total_amount_collected_year,
+            "outstanding_amount": outstanding_amount,
+            "overdue_count": overdue_count,
+            "pending_payment_count": pending_payment_count,
+            "paid_count": paid_count,
+            "draft_count": draft_count,
+            "status_summary": status_summary,
+            "total_customers_with_invoices": total_customers_with_invoices,
+            "top_customers_by_total": top_customers_by_total,
+            "customers_with_overdue": customers_with_overdue,
+            "recent_invoices_created": recent_invoices_created,
+            "recent_invoices_paid": recent_invoices_paid,
+            "recent_invoice_emails_sent": recent_invoice_emails_sent,
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def admin_security_report(request):
+    user_model = get_user_model()
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+
+    users = user_model.objects.select_related("role_profile")
+    total_users = users.count()
+    users_by_role = [
+        {"role": role, "label": label, "count": users.filter(role_profile__role=role).count()}
+        for role, label in ROLE_CHOICES
+    ]
+    new_users_this_month = users.filter(date_joined__date__gte=month_start, date_joined__date__lte=today).count()
+    active_users_count = users.filter(is_active=True, role_profile__suspended_at__isnull=True).count()
+    suspended_or_inactive_users_count = users.filter(
+        Q(is_active=False) | Q(role_profile__suspended_at__isnull=False)
+    ).distinct().count()
+    suspended_accounts_count = users.filter(role_profile__suspended_at__isnull=False).count()
+
+    failed_login_attempts_count = AuditLog.objects.filter(action="auth.login.failed").count()
+    suspicious_activity_count = AuditLog.objects.filter(
+        Q(action="auth.permission_denied") | Q(action="auth.login.failed")
+    ).count()
+    recent_suspicious_activities = (
+        AuditLog.objects.select_related("user", "user__role_profile")
+        .filter(Q(action="auth.permission_denied") | Q(action="auth.login.failed"))
+        .order_by("-created_at")[:10]
+    )
+    recent_login_related_logs = (
+        AuditLog.objects.select_related("user", "user__role_profile")
+        .filter(action__startswith="auth.login")
+        .order_by("-created_at")[:10]
+    )
+
+    recent_account_creations = (
+        AuditLog.objects.select_related("user", "user__role_profile")
+        .filter(action__in=["admin.account.created", "auth.admin_account.created"])
+        .order_by("-created_at")[:10]
+    )
+    recent_role_changes = (
+        AuditLog.objects.select_related("user", "user__role_profile")
+        .filter(action="admin.account.role_changed")
+        .order_by("-created_at")[:10]
+    )
+    recent_password_changes = (
+        AuditLog.objects.select_related("user", "user__role_profile")
+        .filter(action="admin.account.password_updated")
+        .order_by("-created_at")[:10]
+    )
+    recent_admin_actions = (
+        AuditLog.objects.select_related("user", "user__role_profile")
+        .filter(action__startswith="admin.")
+        .order_by("-created_at")[:12]
+    )
+
+    reminder_settings = PaymentReminderSettings.load()
+    reminder_email_logs = EmailDeliveryLog.objects.filter(template_key__startswith="payment_reminder_")
+    reminder_emails_sent_count = reminder_email_logs.filter(status=EmailDeliveryLog.STATUS_SENT).count()
+    recent_reminder_email_logs = reminder_email_logs.order_by("-attempted_at")[:10]
+
+    log_event(
+        action="report.admin_security.viewed",
+        user=request.user,
+        metadata={"path": request.path},
+        ip_address=get_client_ip(request),
+    )
+
+    return render(
+        request,
+        "reports/admin_security_report.html",
+        {
+            "today": today,
+            "month_start": month_start,
+            "total_users": total_users,
+            "users_by_role": users_by_role,
+            "new_users_this_month": new_users_this_month,
+            "active_users_count": active_users_count,
+            "suspended_or_inactive_users_count": suspended_or_inactive_users_count,
+            "suspended_accounts_count": suspended_accounts_count,
+            "failed_login_attempts_count": failed_login_attempts_count,
+            "suspicious_activity_count": suspicious_activity_count,
+            "recent_suspicious_activities": recent_suspicious_activities,
+            "recent_login_related_logs": recent_login_related_logs,
+            "recent_account_creations": recent_account_creations,
+            "recent_role_changes": recent_role_changes,
+            "recent_password_changes": recent_password_changes,
+            "recent_admin_actions": recent_admin_actions,
+            "reminder_settings": reminder_settings,
+            "reminder_emails_sent_count": reminder_emails_sent_count,
+            "recent_reminder_email_logs": recent_reminder_email_logs,
+        },
+    )
 
 
 @login_required

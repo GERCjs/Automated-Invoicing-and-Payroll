@@ -3,9 +3,9 @@
 {% block title %}Invoice {{ invoice.invoice_number }}{% endblock %}
 
 {% block content %}
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-body">
-        <h1 class="h4">Invoice {{ invoice.invoice_number }}</h1>
+        <h1 class="section-heading mb-2">Invoice {{ invoice.invoice_number }}</h1>
         <p class="mb-1"><strong>Customer:</strong> {{ invoice.customer.name }}</p>
         <p class="mb-1"><strong>Issue Date:</strong> {{ invoice.issue_date }}</p>
         <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
@@ -19,9 +19,9 @@
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card">
     <div class="table-responsive">
-        <table class="table mb-0">
+        <table class="table table-clean mb-0">
             <thead>
                 <tr>
                     <th>Description</th>

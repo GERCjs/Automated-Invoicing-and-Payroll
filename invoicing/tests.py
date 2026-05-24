@@ -108,6 +108,48 @@ class InvoicingMvpTests(TestCase):
             ).exists()
         )
 
+    def test_finance_can_open_customer_create_page_from_invoice_flow(self):
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-customer-create"), data={"next": reverse("invoice-create")})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Add New Customer")
+
+    def test_finance_can_create_customer_and_return_to_invoice_create_with_selection(self):
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("invoice-customer-create"),
+            data={
+                "name": "New Merchant Partner",
+                "email": "new-merchant@example.com",
+                "phone": "",
+                "billing_address": "",
+                "tax_number": "",
+                "status": "active",
+                "next": reverse("invoice-create"),
+            },
+        )
+
+        customer = Customer.objects.get(email="new-merchant@example.com")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"{reverse('invoice-create')}?customer={customer.id}")
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="invoice.customer.created",
+                target_type="customer",
+                target_id=str(customer.id),
+            ).exists()
+        )
+
+    def test_staff_cannot_access_customer_create_page(self):
+        self.client.login(username="staff_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-customer-create"))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_staff_cannot_access_invoice_pages(self):
         self.client.login(username="staff_u", password="TempPass123!")
         response = self.client.get(reverse("invoice-list"))
@@ -301,6 +343,29 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Only Draft invoices can be edited.")
 
+    def test_invoice_detail_shows_resend_email_button_and_last_email_label(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-detail", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Send / Resend Invoice Email")
+        self.assertContains(response, "Last Invoice Email Sent:")
+
+    def test_invoice_list_shows_visible_issue_date_labels_and_pending_payment_status(self):
+        invoice = self._create_invoice_with_item()
+        invoice.status = Invoice.STATUS_SENT
+        invoice.save(update_fields=["status", "updated_at"])
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Issue Date From")
+        self.assertContains(response, "Issue Date To")
+        self.assertContains(response, "Pending Payment")
+
     def test_finance_can_download_invoice_pdf(self):
         invoice = self._create_invoice_with_item()
         self.client.login(username="finance_u", password="TempPass123!")
@@ -439,6 +504,8 @@ class InvoicingMvpTests(TestCase):
 
     def test_customer_dashboard_shows_only_own_invoices(self):
         own_invoice = self._create_invoice_with_item()
+        own_invoice.status = Invoice.STATUS_SENT
+        own_invoice.save(update_fields=["status", "updated_at"])
         other_customer = Customer.objects.create(
             name="Other Corp",
             email="othercorp@example.com",
@@ -466,6 +533,8 @@ class InvoicingMvpTests(TestCase):
 
     def test_customer_can_view_own_invoice_detail_and_download_pdf(self):
         own_invoice = self._create_invoice_with_item()
+        own_invoice.status = Invoice.STATUS_SENT
+        own_invoice.save(update_fields=["status", "updated_at"])
         self.client.login(username="customer_u", password="TempPass123!")
 
         detail_response = self.client.get(reverse("customer-invoice-detail", args=[own_invoice.pk]))
@@ -475,6 +544,18 @@ class InvoicingMvpTests(TestCase):
         self.assertContains(detail_response, own_invoice.invoice_number)
         self.assertEqual(pdf_response.status_code, 200)
         self.assertEqual(pdf_response["Content-Type"], "application/pdf")
+
+    def test_customer_invoice_detail_shows_reminder_history_empty_state(self):
+        own_invoice = self._create_invoice_with_item()
+        own_invoice.status = Invoice.STATUS_SENT
+        own_invoice.save(update_fields=["status", "updated_at"])
+        self.client.login(username="customer_u", password="TempPass123!")
+
+        response = self.client.get(reverse("customer-invoice-detail", args=[own_invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reminder History")
+        self.assertContains(response, "No reminders sent yet.")
 
     def test_customer_cannot_view_other_customer_invoice(self):
         other_customer = Customer.objects.create(

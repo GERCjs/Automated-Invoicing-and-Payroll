@@ -2,7 +2,7 @@ from django import forms
 from django.forms import inlineformset_factory
 from django.core.validators import FileExtensionValidator
 
-from .models import Invoice, InvoiceItem
+from .models import Customer, Invoice, InvoiceItem
 
 
 class InvoiceForm(forms.ModelForm):
@@ -48,3 +48,17 @@ class InvoiceCsvUploadForm(forms.Form):
         validators=[FileExtensionValidator(allowed_extensions=["csv"])],
         widget=forms.ClearableFileInput(attrs={"class": "form-control"}),
     )
+
+
+class CustomerCreateForm(forms.ModelForm):
+    class Meta:
+        model = Customer
+        fields = ["name", "email", "phone", "billing_address", "tax_number", "status"]
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Customer name"}),
+            "email": forms.EmailInput(attrs={"class": "form-control", "placeholder": "billing@example.com"}),
+            "phone": forms.TextInput(attrs={"class": "form-control", "placeholder": "+65 ..."}),
+            "billing_address": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+            "tax_number": forms.TextInput(attrs={"class": "form-control", "placeholder": "Optional"}),
+            "status": forms.Select(attrs={"class": "form-select"}),
+        }

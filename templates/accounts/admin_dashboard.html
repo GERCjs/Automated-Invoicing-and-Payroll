@@ -3,16 +3,16 @@
 {% block title %}Admin Console | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+<div class="page-header">
     <div>
-        <h1 class="h3 mb-1">Admin Console</h1>
-        <p class="text-muted mb-0">Admin Console for account access control, suspicious activity review, audit logs, and reminder settings.</p>
+        <h1 class="page-title">Admin Console</h1>
+        <p class="page-subtitle">Account access control, suspicious activity review, audit logs, and reminder settings.</p>
     </div>
 </div>
 
 <div class="row g-3 mb-3">
     <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm border-0 h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Total Users</div>
                 <div class="display-6 fw-semibold">{{ total_users }}</div>
@@ -20,7 +20,7 @@
         </div>
     </div>
     <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm border-primary h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Admins</div>
                 <div class="display-6 fw-semibold text-primary">{{ admin_count }}</div>
@@ -28,7 +28,7 @@
         </div>
     </div>
     <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm border-dark h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">SuperAdmin</div>
                 <div class="display-6 fw-semibold text-dark">{{ superadmin_count }}</div>
@@ -38,7 +38,7 @@
     </div>
     <div class="col-md-3 col-sm-6">
         <a href="{% url 'suspicious-activity-list' %}" class="text-decoration-none text-reset">
-        <div class="card shadow-sm border-warning h-100">
+        <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Suspicious Activity</div>
                 <div class="display-6 fw-semibold text-warning">{{ suspicious_count }}</div>
@@ -49,12 +49,13 @@
     </div>
 </div>
 
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-body">
-        <h2 class="h6">Quick Actions</h2>
+        <h2 class="section-heading">Quick Actions</h2>
         <div class="d-flex flex-wrap gap-2">
             <a href="{% url 'managed-account-create' %}" class="btn btn-primary btn-sm">Create Account</a>
             <a href="{% url 'dashboard-audit-logs' %}" class="btn btn-outline-dark btn-sm">Audit Logs</a>
+            <a href="{% url 'admin-security-report' %}" class="btn btn-outline-success btn-sm">Admin / Security Report</a>
             <a href="{% url 'payment-reminder-settings-update' %}" class="btn btn-outline-primary btn-sm">Reminder Settings</a>
             <a href="{% url 'mass-email-send' %}" class="btn btn-outline-secondary btn-sm">Mass Email</a>
             <a href="{% url 'suspicious-activity-list' %}" class="btn btn-outline-warning btn-sm">Suspicious Activity</a>
@@ -63,7 +64,7 @@
     </div>
 </div>
 
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-header">Role Summary</div>
     <div class="card-body">
         <div class="d-flex flex-nowrap gap-2 overflow-auto pb-1">
@@ -77,14 +78,14 @@
     </div>
 </div>
 
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-header">Login Security Policy</div>
     <div class="card-body">
         <p class="text-muted mb-3">Set auto-suspension threshold (failed login attempts) by role.</p>
         <form method="post" action="{% url 'login-security-policy-update' %}">
             {% csrf_token %}
             <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
+                <table class="table table-clean table-sm align-middle mb-0">
                     <thead>
                         <tr>
                             <th>Role</th>
@@ -113,7 +114,7 @@
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span>Accounts</span>
         <form method="get" class="d-flex flex-wrap gap-2">
@@ -129,7 +130,7 @@
         </form>
     </div>
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-clean table-hover align-middle mb-0">
             <thead>
                 <tr>
                     <th>User</th>
@@ -158,14 +159,14 @@
                             <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
                         </form>
                         {% else %}
-                        <span class="badge text-bg-secondary">{{ managed_user.role_profile.get_role_display }}</span>
+                        <span class="badge bg-secondary">{{ managed_user.role_profile.get_role_display }}</span>
                         {% endif %}
                     </td>
                     <td>
                         {% if managed_user.is_suspended %}
-                        <span class="badge text-bg-danger">Suspended</span>
+                        <span class="badge bg-danger">Suspended</span>
                         {% else %}
-                        <span class="badge text-bg-success">Active</span>
+                        <span class="badge bg-success">Active</span>
                         {% endif %}
                     </td>
                     <td>

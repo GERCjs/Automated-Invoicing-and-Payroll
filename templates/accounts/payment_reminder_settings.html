@@ -5,12 +5,18 @@
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-lg-8">
-        <div class="card shadow-sm">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Payment Reminder Settings</h1>
+                <p class="page-subtitle">Configure automated reminder behavior for due and overdue invoices.</p>
+            </div>
+        </div>
+        <div class="card">
             <div class="card-header">Payment Reminder Settings</div>
             <div class="card-body">
                 <form method="post">
                     {% csrf_token %}
-                    <div class="border rounded p-3 mb-3">
+                    <div class="sub-kpi mb-3">
                         <div class="form-check mb-2">
                             {{ form.before_due_reminders_enabled }}
                             <label class="form-check-label">Reminder before due date</label>
@@ -20,14 +26,14 @@
                         {% for error in form.reminder_days_before_due.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                     </div>
 
-                    <div class="border rounded p-3 mb-3">
+                    <div class="sub-kpi mb-3">
                         <div class="form-check">
                             {{ form.due_date_reminders_enabled }}
                             <label class="form-check-label">Reminder on due date</label>
                         </div>
                     </div>
 
-                    <div class="border rounded p-3 mb-3">
+                    <div class="sub-kpi mb-3">
                         <div class="form-check mb-2">
                             {{ form.after_due_reminders_enabled }}
                             <label class="form-check-label">Reminder after due date</label>
@@ -37,7 +43,7 @@
                         {% for error in form.after_due_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                     </div>
 
-                    <div class="border rounded p-3 mb-3">
+                    <div class="sub-kpi mb-3">
                         <div class="form-check mb-2">
                             {{ form.overdue_repeat_enabled }}
                             <label class="form-check-label">Repeat overdue reminder</label>
@@ -60,7 +66,7 @@
 
                 <hr class="my-4">
                 <div>
-                    <h2 class="h6 mb-2">Run Reminder Check</h2>
+                    <h2 class="section-heading mb-2">Run Reminder Check</h2>
                     <p class="text-muted small mb-3">Use simulation first to preview which invoices will receive reminders.</p>
                     <div class="d-flex flex-wrap gap-2">
                         <form method="post" action="{% url 'payment-reminder-run-check' %}">

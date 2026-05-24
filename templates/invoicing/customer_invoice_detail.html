@@ -3,13 +3,16 @@
 {% block title %}Invoice {{ invoice.invoice_number }} | My Invoices{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0">Invoice {{ invoice.invoice_number }}</h1>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Invoice {{ invoice.invoice_number }}</h1>
+        <p class="page-subtitle">View your invoice line items, reminders, and payment action.</p>
+    </div>
     <div class="d-flex gap-2">
         {% if invoice.status == "sent" or invoice.status == "viewed" or invoice.status == "overdue" %}
         <form method="post" action="{% url 'payment-checkout-customer' invoice.pk %}" class="d-inline">
             {% csrf_token %}
-            <button type="submit" class="btn btn-success">Pay by Card or PayNow</button>
+            <button type="submit" class="btn btn-success">Pay Now</button>
         </form>
         {% endif %}
         <a href="{% url 'customer-invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
@@ -17,29 +20,57 @@
     </div>
 </div>
 
-<div class="card shadow-sm mb-3">
+<div class="card mb-3">
     <div class="card-body">
         <div class="row g-2">
             <div class="col-md-6">
                 <p class="mb-1"><strong>Invoice #:</strong> {{ invoice.invoice_number }}</p>
                 <p class="mb-1"><strong>Invoice Date:</strong> {{ invoice.issue_date }}</p>
                 <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
-                <p class="mb-0"><strong>Status:</strong> <span class="badge text-bg-secondary">{{ invoice.get_status_display }}</span></p>
+                <p class="mb-1"><strong>Status:</strong> <span class="badge bg-secondary">{% if invoice.status == "sent" %}Pending Payment{% else %}{{ invoice.get_status_display }}{% endif %}</span></p>
+                <p class="mb-0"><strong>Last Reminder Sent:</strong> {{ last_reminder_sent_at|date:"Y-m-d H:i"|default:"No reminders sent yet" }}</p>
             </div>
             <div class="col-md-6">
                 <p class="mb-1"><strong>Customer:</strong> {{ invoice.customer.name }}</p>
                 <p class="mb-1"><strong>Email:</strong> {{ invoice.customer.email }}</p>
                 <p class="mb-1"><strong>Currency:</strong> {{ invoice.currency }}</p>
-                <p class="mb-0"><strong>Total:</strong> {{ invoice.currency }} {{ invoice.total_amount }}</p>
+                <p class="mb-1"><strong>Total:</strong> {{ invoice.currency }} {{ invoice.total_amount }}</p>
+                <p class="mb-0"><strong>Total Reminders Sent:</strong> {{ reminders_sent_count }}</p>
             </div>
         </div>
     </div>
 </div>
 
-<div class="card shadow-sm">
+<div class="card mb-3">
+    <div class="card-header">Reminder History</div>
+    <div class="table-responsive">
+        <table class="table table-clean table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Attempted At</th>
+                    <th>Template</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in reminder_history %}
+                <tr>
+                    <td>{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ log.template_key }}</td>
+                    <td>{{ log.get_status_display }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="3" class="text-center py-3">No reminders sent yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
     <div class="card-header">Invoice Items</div>
     <div class="table-responsive">
-        <table class="table mb-0">
+        <table class="table table-clean mb-0">
             <thead>
                 <tr>
                     <th>Description</th>
