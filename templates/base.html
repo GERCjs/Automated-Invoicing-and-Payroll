@@ -84,9 +84,6 @@
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" %}
                 <a class="portal-nav-link" href="{% url 'admin-dashboard' %}">Admin Console</a>
-                {% if current_user_role == "superadmin" %}
-                <a class="portal-nav-link" href="{% url 'admin:index' %}">Django Admin</a>
-                {% endif %}
                 {% endif %}
 
                 {% if current_user_role == "customer" %}

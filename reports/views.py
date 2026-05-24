@@ -6,7 +6,6 @@ from django.utils import timezone
 
 from accounts.permissions import role_required
 from accounts.roles import ADMIN, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
-from core.audit import get_client_ip, log_event
 from core.models import AuditLog
 from invoicing.models import Invoice
 from notifications.models import EmailDeliveryLog
@@ -103,13 +102,6 @@ def invoice_customer_report(request):
         template_key="invoice_email_v1"
     ).order_by("-attempted_at")[:10]
 
-    log_event(
-        action="report.invoice_customer.viewed",
-        user=request.user,
-        metadata={"path": request.path},
-        ip_address=get_client_ip(request),
-    )
-
     return render(
         request,
         "reports/invoice_customer_report.html",
@@ -195,13 +187,6 @@ def admin_security_report(request):
     reminder_email_logs = EmailDeliveryLog.objects.filter(template_key__startswith="payment_reminder_")
     reminder_emails_sent_count = reminder_email_logs.filter(status=EmailDeliveryLog.STATUS_SENT).count()
     recent_reminder_email_logs = reminder_email_logs.order_by("-attempted_at")[:10]
-
-    log_event(
-        action="report.admin_security.viewed",
-        user=request.user,
-        metadata={"path": request.path},
-        ip_address=get_client_ip(request),
-    )
 
     return render(
         request,
@@ -309,13 +294,6 @@ def payment_stripe_report(request):
             "note": "Represented by provider=manual records.",
         },
     ]
-
-    log_event(
-        action="report.payment_stripe.viewed",
-        user=request.user,
-        metadata={"path": request.path},
-        ip_address=get_client_ip(request),
-    )
 
     return render(
         request,
@@ -446,13 +424,6 @@ def payroll_report(request):
         Employee.objects.filter(user__role_profile__role=STAFF).values_list("employee_code", flat=True)
     )
     staff_payslip_records_count = PayrollRecord.objects.filter(employee_id__in=staff_employee_codes).count()
-
-    log_event(
-        action="report.payroll.viewed",
-        user=request.user,
-        metadata={"path": request.path, "selected_month": selected_month},
-        ip_address=get_client_ip(request),
-    )
 
     return render(
         request,

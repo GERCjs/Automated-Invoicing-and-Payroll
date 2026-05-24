@@ -13,7 +13,7 @@ class CorePhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("login"), response.url)
 
-    def test_login_logout_and_dashboard_audit(self):
+    def test_login_logout_and_dashboard_flow(self):
         user = User.objects.create_user(username="coreuser", password="TempPass123!")
 
         login_response = self.client.post(
@@ -24,9 +24,35 @@ class CorePhaseOneTests(TestCase):
 
         dashboard_response = self.client.get(reverse("dashboard"))
         self.assertEqual(dashboard_response.status_code, 200)
-        self.assertTrue(
-            AuditLog.objects.filter(action="core.dashboard.viewed", user=user).exists()
-        )
+        self.assertFalse(AuditLog.objects.filter(action="core.dashboard.viewed", user=user).exists())
 
         logout_response = self.client.post(reverse("logout"))
         self.assertEqual(logout_response.status_code, 302)
+        self.assertTrue(AuditLog.objects.filter(action="auth.login", user=user).exists())
+        self.assertTrue(AuditLog.objects.filter(action="auth.logout", user=user).exists())
+
+    def test_audit_log_page_hides_noisy_actions_without_deleting_rows(self):
+        admin = User.objects.create_superuser(
+            username="auditadmin",
+            email="auditadmin@example.com",
+            password="TempPass123!",
+        )
+        noisy_log = AuditLog.objects.create(action="invoice.list.viewed", user=admin)
+        important_log = AuditLog.objects.create(action="payment.invoice.marked_paid", user=admin)
+
+        self.client.login(username="auditadmin", password="TempPass123!")
+
+        response = self.client.get(reverse("dashboard-audit-logs"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "payment.invoice.marked_paid")
+        self.assertNotContains(response, "invoice.list.viewed")
+
+        filtered_response = self.client.get(
+            reverse("dashboard-audit-logs"),
+            data={"action": "invoice.list.viewed"},
+        )
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertNotContains(filtered_response, "invoice.list.viewed")
+
+        self.assertTrue(AuditLog.objects.filter(pk=noisy_log.pk).exists())
+        self.assertTrue(AuditLog.objects.filter(pk=important_log.pk).exists())

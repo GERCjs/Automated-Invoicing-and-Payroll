@@ -263,16 +263,6 @@ def customer_invoice_dashboard(request):
     pending_payment_count = action_required_invoices.filter(status=Invoice.STATUS_SENT).count()
     overdue_count = action_required_invoices.filter(status=Invoice.STATUS_OVERDUE).count()
 
-    log_event(
-        action="invoice.customer.dashboard.viewed",
-        user=request.user,
-        metadata={
-            "path": request.path,
-            "linked_customer_id": str(linked_customer.id) if linked_customer else None,
-            "linked_customer_found": linked_customer is not None,
-        },
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "invoicing/customer_invoice_dashboard.html",
@@ -298,17 +288,6 @@ def customer_invoice_detail(request, pk):
     invoice.refresh_from_db()
     reminder_context = _invoice_reminder_context(invoice)
 
-    log_event(
-        action="invoice.customer.detail.viewed",
-        user=request.user,
-        target_type="invoice",
-        target_id=str(invoice.id),
-        metadata={
-            "invoice_number": invoice.invoice_number,
-            "customer_id": linked_customer.id,
-        },
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "invoicing/customer_invoice_detail.html",
@@ -418,19 +397,6 @@ def invoice_list(request):
     }
     active_filter_label = filter_label_map.get(selected_filter, "All invoices")
 
-    log_event(
-        action="invoice.list.viewed",
-        user=request.user,
-        metadata={
-            "path": request.path,
-            "overdue_updates": updated_count,
-            "filter": selected_filter or "all",
-            "search_query": search_query,
-            "issue_date_from": issue_date_from.isoformat() if issue_date_from else "",
-            "issue_date_to": issue_date_to.isoformat() if issue_date_to else "",
-        },
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "invoicing/invoice_list.html",
@@ -520,18 +486,6 @@ def invoice_dashboard(request):
         .order_by("due_date", "-issue_date", "-created_at")[:10]
     )
 
-    log_event(
-        action="invoice.dashboard.viewed",
-        user=request.user,
-        metadata={
-            "path": request.path,
-            "overdue_updates": updated_count,
-            "overdue_count": overdue_count,
-            "draft_count": draft_count,
-            "pending_payment_count": pending_payment_count,
-        },
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "invoicing/invoice_dashboard.html",
@@ -705,14 +659,6 @@ def invoice_detail(request, pk):
         )
         .order_by("-attempted_at")
         .first()
-    )
-    log_event(
-        action="invoice.detail.viewed",
-        user=request.user,
-        target_type="invoice",
-        target_id=str(invoice.id),
-        metadata={"invoice_number": invoice.invoice_number},
-        ip_address=get_client_ip(request),
     )
     return render(
         request,

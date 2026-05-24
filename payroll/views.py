@@ -141,12 +141,6 @@ def payroll_dashboard(request):
     total_records = PayrollRecord.objects.count()
     total_net_salary = sum(record.net_salary for record in PayrollRecord.objects.only("net_salary"))
     recent_payslip_records = PayrollRecord.objects.all()[:8]
-    log_event(
-        action="payroll.dashboard.viewed",
-        user=request.user,
-        metadata={"path": request.path},
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "payroll/payroll_dashboard.html",
@@ -180,12 +174,6 @@ def payroll_list(request):
             messages.warning(request, "Invalid month filter. Please use YYYY-MM format.")
             payroll_month = ""
 
-    log_event(
-        action="payroll.list.viewed",
-        user=request.user,
-        metadata={"path": request.path, "search_query": search_query, "payroll_month": payroll_month},
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "payroll/payroll_list.html",
@@ -339,14 +327,6 @@ def payroll_edit(request, pk):
 def payroll_detail(request, pk):
     payslip_record = get_object_or_404(PayrollRecord, pk=pk)
     employer_cpf_contribution = _calculate_employer_cpf_for_record(payslip_record)
-    log_event(
-        action="payroll.record.viewed",
-        user=request.user,
-        target_type="payroll_record",
-        target_id=str(payslip_record.id),
-        metadata={"employee_id": payslip_record.employee_id},
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "payroll/payroll_detail.html",
@@ -625,12 +605,6 @@ def my_payslips(request):
         return redirect("dashboard")
 
     payslip_records = PayrollRecord.objects.filter(employee_id=employee.employee_code)
-    log_event(
-        action="payroll.my_payslips.viewed",
-        user=request.user,
-        metadata={"path": request.path, "employee_code": employee.employee_code, "record_count": payslip_records.count()},
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "payroll/my_payslips.html",

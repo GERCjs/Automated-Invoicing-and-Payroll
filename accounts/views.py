@@ -263,12 +263,6 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def admin_dashboard(request):
-    log_event(
-        action="admin.dashboard.viewed",
-        user=request.user,
-        metadata={"path": request.path},
-        ip_address=get_client_ip(request),
-    )
     return render(request, "accounts/admin_dashboard.html", _dashboard_context(request))
 
 

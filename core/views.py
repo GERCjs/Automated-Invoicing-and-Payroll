@@ -11,7 +11,6 @@ from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
 from payroll.models import Employee, PayrollBatch, PayrollEntry, PayrollRecord
 
-from .audit import get_client_ip, log_event
 from .models import AuditLog
 
 
@@ -48,6 +47,26 @@ AUDIT_ACTION_LABELS = {
     "admin.payment_reminders.updated": "Reminder settings updated",
     "admin.payment_reminders.run_check": "Reminder check executed",
     "admin.mass_email.sent": "Mass email sent",
+}
+
+
+NOISY_AUDIT_ACTIONS = {
+    "admin.dashboard.viewed",
+    "core.dashboard.viewed",
+    "core.finance_console.viewed",
+    "invoice.customer.dashboard.viewed",
+    "invoice.customer.detail.viewed",
+    "invoice.list.viewed",
+    "invoice.dashboard.viewed",
+    "invoice.detail.viewed",
+    "payroll.dashboard.viewed",
+    "payroll.list.viewed",
+    "payroll.record.viewed",
+    "payroll.my_payslips.viewed",
+    "report.invoice_customer.viewed",
+    "report.admin_security.viewed",
+    "report.payment_stripe.viewed",
+    "report.payroll.viewed",
 }
 
 
@@ -180,12 +199,6 @@ def dashboard(request):
 
     email_status_counts = _safe_group_counts(EmailDeliveryLog.objects.all(), "status")
 
-    log_event(
-        action="core.dashboard.viewed",
-        user=request.user,
-        metadata={"path": request.path},
-        ip_address=get_client_ip(request),
-    )
     return render(
         request,
         "core/dashboard.html",
@@ -225,8 +238,13 @@ def audit_log_list(request):
     selected_role = request.GET.get("role", "").strip()
     selected_action = request.GET.get("action", "").strip()
     search_query = request.GET.get("q", "").strip()
+    selected_action_display = "" if selected_action in NOISY_AUDIT_ACTIONS else selected_action
 
-    logs = AuditLog.objects.select_related("user", "user__role_profile").order_by("-created_at")
+    logs = (
+        AuditLog.objects.select_related("user", "user__role_profile")
+        .exclude(action__in=NOISY_AUDIT_ACTIONS)
+        .order_by("-created_at")
+    )
     if selected_role:
         logs = logs.filter(user__role_profile__role=selected_role)
     if selected_action:
@@ -257,7 +275,7 @@ def audit_log_list(request):
             ],
             "role_choices": ROLE_CHOICES,
             "selected_role": selected_role,
-            "selected_action": selected_action,
+            "selected_action": selected_action_display,
             "search_query": search_query,
         },
     )
@@ -294,10 +312,4 @@ def validation_error_list(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def finance_console(request):
-    log_event(
-        action="core.finance_console.viewed",
-        user=request.user,
-        metadata={"path": request.path},
-        ip_address=get_client_ip(request),
-    )
     return render(request, "core/finance_console.html")

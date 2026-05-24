@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.urls import NoReverseMatch
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -234,7 +235,7 @@ class AccountsPhaseOneTests(TestCase):
         response = self.client.get(reverse("dashboard"))
 
         self.assertContains(response, "Admin Console")
-        self.assertNotContains(response, reverse("admin:index"))
+        self.assertNotContains(response, "Django Admin")
 
     def test_admin_role_auto_sets_staff_and_shows_admin_console_link(self):
         user = User.objects.create_user(username="notstaff", password="TempPass123!")
@@ -295,7 +296,7 @@ class AccountsPhaseOneTests(TestCase):
         self.assertTrue(user.is_superuser)
         self.assertFalse(user.groups.filter(name=ADMIN_CONSOLE_GROUP_NAME).exists())
 
-    def test_django_admin_is_only_visible_to_superadmin(self):
+    def test_django_admin_is_not_visible_to_superadmin(self):
         superadmin = User.objects.create_user(username="django_admin_super", password="TempPass123!")
         superadmin.role_profile.role = SUPERADMIN
         superadmin.role_profile.save()
@@ -304,43 +305,12 @@ class AccountsPhaseOneTests(TestCase):
         response = self.client.get(reverse("dashboard"))
 
         self.assertContains(response, "Admin Console")
-        self.assertContains(response, reverse("admin:index"))
+        self.assertNotContains(response, "Django Admin")
 
-    def test_django_admin_rejects_regular_admin(self):
-        admin = User.objects.create_user(username="django_admin_regular", password="TempPass123!")
-        admin.role_profile.role = ADMIN
-        admin.role_profile.save()
+    def test_django_admin_route_is_not_exposed(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("admin:index")
 
-        self.client.login(username="django_admin_regular", password="TempPass123!")
-        response = self.client.get(reverse("admin:index"))
-
-        self.assertEqual(response.status_code, 302)
-
-    def test_django_admin_allows_superadmin(self):
-        superadmin = User.objects.create_user(username="django_admin_allowed", password="TempPass123!")
-        superadmin.role_profile.role = SUPERADMIN
-        superadmin.role_profile.save()
-
-        self.client.login(username="django_admin_allowed", password="TempPass123!")
-        response = self.client.get(reverse("admin:index"))
-
-        self.assertEqual(response.status_code, 200)
-
-    def test_django_admin_user_change_hides_password_hash_details(self):
-        superadmin = User.objects.create_user(username="django_admin_password_viewer", password="TempPass123!")
-        superadmin.role_profile.role = SUPERADMIN
-        superadmin.role_profile.save()
-        target_user = User.objects.create_user(username="password_hash_target", password="TempPass123!")
-
-        self.client.login(username="django_admin_password_viewer", password="TempPass123!")
-        response = self.client.get(reverse("admin:auth_user_change", args=[target_user.id]))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Reset password")
-        self.assertNotContains(response, "algorithm:")
-        self.assertNotContains(response, "iterations:")
-        self.assertNotContains(response, "salt:")
-        self.assertNotContains(response, "hash:")
 
     def test_customer_role_cannot_be_changed_from_admin_dashboard(self):
         admin = User.objects.create_user(username="customer_guard_admin", password="TempPass123!")

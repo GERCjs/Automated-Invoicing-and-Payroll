@@ -403,13 +403,13 @@ class MyPayslipsViewTests(TestCase):
             payment_date=date(2026, 5, 24),
         )
 
-    def test_staff_my_payslips_shows_only_own_records_and_logs_event(self):
+    def test_staff_my_payslips_shows_only_own_records_without_page_view_log(self):
         self.client.login(username="staff_list_1", password="pass12345")
         response = self.client.get(reverse("my-payslips"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.own_record.employee_id)
         self.assertNotContains(response, self.other_record.employee_id)
-        self.assertTrue(
+        self.assertFalse(
             AuditLog.objects.filter(
                 user=self.staff_user,
                 action="payroll.my_payslips.viewed",
