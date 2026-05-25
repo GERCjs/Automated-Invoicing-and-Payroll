@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<body style="font-family: Arial, sans-serif; color: #212529; line-height: 1.5;">
+    <p>Hello {{ customer.name }},</p>
+    <p>Your payment was successful.</p>
+    <table style="border-collapse: collapse; margin: 12px 0;">
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Invoice Number:</strong></td>
+            <td style="padding: 4px 0;">{{ invoice.invoice_number }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Payment Reference:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_record.payment_reference }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Payment Date:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_record.paid_at|date:"Y-m-d H:i"|default:"Confirmed by Stripe" }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Amount Paid:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_record.currency }} {{ payment_record.amount }}</td>
+        </tr>
+    </table>
+    <p>The invoice PDF is attached for your records.</p>
+    <p>
+        View your invoice online:
+        <a href="{{ public_invoice_url }}">{{ public_invoice_url }}</a>
+    </p>
+    <p>If you have questions, contact us at {{ company_email }} or {{ company_phone }}.</p>
+    <p>Regards,<br>{{ company_name }}</p>
+</body>
+</html>

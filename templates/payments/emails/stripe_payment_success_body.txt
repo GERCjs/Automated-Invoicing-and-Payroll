@@ -1,0 +1,18 @@
+Hello {{ customer.name }},
+
+Your payment was successful.
+
+Invoice Number: {{ invoice.invoice_number }}
+Payment Reference: {{ payment_record.payment_reference }}
+Payment Date: {{ payment_record.paid_at|date:"Y-m-d H:i"|default:"Confirmed by Stripe" }}
+Amount Paid: {{ payment_record.currency }} {{ payment_record.amount }}
+
+The invoice PDF is attached for your records.
+
+View your invoice online:
+{{ public_invoice_url }}
+
+If you have questions, contact us at {{ company_email }} or {{ company_phone }}.
+
+Regards,
+{{ company_name }}
