@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Admin & Security Report{% endblock %}
 
@@ -59,6 +60,46 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<h2 class="section-heading mb-3">Report Visuals</h2>
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Users by Role</div>
+            <div class="report-chart-body">
+                <canvas id="usersByRoleChart" class="report-chart-canvas" aria-label="Users by role chart" role="img"></canvas>
+                <div id="usersByRoleChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Account Status Breakdown</div>
+            <div class="report-chart-body">
+                <canvas id="accountStatusChart" class="report-chart-canvas" aria-label="Account status breakdown chart" role="img"></canvas>
+                <div id="accountStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Failed Login Attempts Trend (Last 7 Days)</div>
+            <div class="report-chart-body">
+                <canvas id="failedLoginTrendChart" class="report-chart-canvas" aria-label="Failed login attempts trend chart" role="img"></canvas>
+                <div id="failedLoginTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Admin Action Summary</div>
+            <div class="report-chart-body">
+                <canvas id="adminActionSummaryChart" class="report-chart-canvas" aria-label="Admin action summary chart" role="img"></canvas>
+                <div id="adminActionSummaryChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
         </div>
     </div>
 </div>
@@ -328,4 +369,132 @@
         </div>
     </div>
 </div>
+
+{{ users_by_role_chart|json_script:"users-by-role-data" }}
+{{ active_users_count|json_script:"active-users-data" }}
+{{ suspended_or_inactive_only_count|json_script:"suspended-or-inactive-only-data" }}
+{{ unverified_users_count|json_script:"unverified-users-data" }}
+{{ failed_login_trend_labels|json_script:"failed-login-trend-labels-data" }}
+{{ failed_login_trend_values|json_script:"failed-login-trend-values-data" }}
+{{ admin_action_summary|json_script:"admin-action-summary-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/report_charts.js' %}"></script>
+<script>
+    (function () {
+        var usersByRole = window.ReportCharts.parseJsonScript("users-by-role-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "usersByRoleChart",
+            emptyStateId: "usersByRoleChartEmpty",
+            type: "bar",
+            labels: usersByRole.map(function (row) { return row.label; }),
+            datasets: [
+                {
+                    label: "Users",
+                    data: usersByRole.map(function (row) { return row.count; }),
+                    backgroundColor: "#ff7f73",
+                    borderColor: "#f06d62",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        precision: 0
+                    }
+                }
+            }
+        });
+
+        var activeUsers = window.ReportCharts.parseJsonScript("active-users-data", 0);
+        var suspendedOrInactiveOnlyUsers = window.ReportCharts.parseJsonScript("suspended-or-inactive-only-data", 0);
+        var unverifiedUsers = window.ReportCharts.parseJsonScript("unverified-users-data", 0);
+        window.ReportCharts.renderChart({
+            canvasId: "accountStatusChart",
+            emptyStateId: "accountStatusChartEmpty",
+            type: "doughnut",
+            labels: ["Active", "Suspended / Inactive", "Unverified"],
+            datasets: [
+                {
+                    label: "Accounts",
+                    data: [activeUsers, suspendedOrInactiveOnlyUsers, unverifiedUsers],
+                    backgroundColor: ["#198754", "#ff7f73", "#64748b"],
+                    borderColor: "#ffffff",
+                    borderWidth: 2
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" }
+                }
+            }
+        });
+
+        var failedLoginTrendLabels = window.ReportCharts.parseJsonScript("failed-login-trend-labels-data", []);
+        var failedLoginTrendValues = window.ReportCharts.parseJsonScript("failed-login-trend-values-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "failedLoginTrendChart",
+            emptyStateId: "failedLoginTrendChartEmpty",
+            type: "line",
+            labels: failedLoginTrendLabels,
+            datasets: [
+                {
+                    label: "Failed Logins",
+                    data: failedLoginTrendValues,
+                    borderColor: "#dc3545",
+                    backgroundColor: "rgba(220, 53, 69, 0.15)",
+                    borderWidth: 2,
+                    tension: 0.25,
+                    fill: true
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        precision: 0
+                    }
+                }
+            }
+        });
+
+        var adminActionSummary = window.ReportCharts.parseJsonScript("admin-action-summary-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "adminActionSummaryChart",
+            emptyStateId: "adminActionSummaryChartEmpty",
+            type: "bar",
+            labels: adminActionSummary.map(function (row) { return row.label; }),
+            datasets: [
+                {
+                    label: "Action Count",
+                    data: adminActionSummary.map(function (row) { return row.count; }),
+                    backgroundColor: ["#ff7f73", "#f59e0b", "#64748b", "#dc3545", "#198754"],
+                    borderColor: "#e5e7eb",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        precision: 0
+                    }
+                }
+            }
+        });
+    })();
+</script>
 {% endblock %}

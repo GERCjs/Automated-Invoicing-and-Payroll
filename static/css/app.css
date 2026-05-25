@@ -282,6 +282,44 @@ a:visited {
     box-shadow: var(--portal-shadow);
 }
 
+.report-chart-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    box-shadow: 0 10px 24px rgba(17, 24, 39, 0.08);
+    height: 100%;
+}
+
+.report-chart-header {
+    border-bottom: 1px solid #eceff3;
+    color: #2b2d34;
+    font-size: 0.95rem;
+    font-weight: 700;
+    padding: 0.78rem 1rem;
+}
+
+.report-chart-body {
+    min-height: 280px;
+    padding: 0.9rem 1rem 1rem;
+    position: relative;
+}
+
+.report-chart-canvas {
+    height: 240px !important;
+    width: 100% !important;
+}
+
+.report-chart-empty {
+    align-items: center;
+    color: #6b7280;
+    display: flex;
+    font-size: 0.92rem;
+    font-weight: 600;
+    height: 240px;
+    justify-content: center;
+    text-align: center;
+}
+
 .btn {
     border-radius: 10px;
     font-weight: 600;

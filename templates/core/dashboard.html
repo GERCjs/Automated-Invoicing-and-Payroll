@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Management Dashboard | Automated Invoicing & Payroll{% endblock %}
 
@@ -26,6 +27,87 @@
 {% endif %}
 
 {% if can_view_admin_stats %}
+<h2 class="section-heading mb-3">CEO Snapshot</h2>
+<div class="row g-3 mb-3">
+    <div class="col-md-4 col-lg">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Collected This Month</div>
+                <div class="h4 mb-0 text-success">SGD {{ collected_this_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Outstanding Invoice Amount</div>
+                <div class="h4 mb-0 text-danger">SGD {{ invoice_outstanding|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Overdue Invoice Exposure</div>
+                <div class="h4 mb-0 text-danger">SGD {{ overdue_invoice_amount|floatformat:2 }}</div>
+                <div class="small text-muted">{{ invoice_overdue_count }} overdue invoice(s)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Payroll Cost This Month</div>
+                <div class="h4 mb-0">SGD {{ payroll_cost_this_month|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-lg">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Major System Issues (Monthly)</div>
+                <div class="h4 mb-0 text-warning">{{ import_failed_count|add:import_with_errors_count|add:suspicious_activity_count }}</div>
+                <div class="small text-muted">
+                    Failed imports: {{ import_failed_count }} |
+                    Imports w/ errors: {{ import_with_errors_count }} |
+                    Suspicious activity: {{ suspicious_activity_count }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2 class="section-heading mb-3">CEO Analytics</h2>
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Monthly Collection Trend</div>
+            <div class="report-chart-body">
+                <canvas id="collectionTrendChart" class="report-chart-canvas" aria-label="Monthly collection trend chart" role="img"></canvas>
+                <div id="collectionTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Outstanding vs Collected Amount</div>
+            <div class="report-chart-body">
+                <canvas id="outstandingVsCollectedChart" class="report-chart-canvas" aria-label="Outstanding vs collected chart" role="img"></canvas>
+                <div id="outstandingVsCollectedChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-12">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Monthly Payroll Cost Trend</div>
+            <div class="report-chart-body">
+                <canvas id="payrollTrendChart" class="report-chart-canvas" aria-label="Monthly payroll cost trend chart" role="img"></canvas>
+                <div id="payrollTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-3 mb-3">
     <div class="col-md-3 col-sm-6">
         <a href="{% url 'dashboard-audit-logs' %}" class="text-decoration-none text-reset">
@@ -179,5 +261,110 @@
     <p class="mb-3 text-muted">View pending, overdue, and paid invoices linked to your payment email.</p>
     <a href="{% url 'customer-invoice-dashboard' %}" class="btn btn-primary btn-sm">Open My Invoices</a>
 </div>
+{% endif %}
+
+{% if can_view_admin_stats %}
+{{ collection_trend_labels|json_script:"collection-trend-labels" }}
+{{ collection_trend_values|json_script:"collection-trend-values" }}
+{{ outstanding_vs_collected_labels|json_script:"outstanding-vs-collected-labels" }}
+{{ outstanding_vs_collected_values|json_script:"outstanding-vs-collected-values" }}
+{{ payroll_trend_labels|json_script:"payroll-trend-labels" }}
+{{ payroll_trend_values|json_script:"payroll-trend-values" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/report_charts.js' %}"></script>
+<script>
+    (function () {
+        var collectionLabels = window.ReportCharts.parseJsonScript("collection-trend-labels", []);
+        var collectionValues = window.ReportCharts.parseJsonScript("collection-trend-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "collectionTrendChart",
+            emptyStateId: "collectionTrendChartEmpty",
+            type: "line",
+            labels: collectionLabels,
+            datasets: [
+                {
+                    label: "Collected (SGD)",
+                    data: collectionValues,
+                    borderColor: "#198754",
+                    backgroundColor: "rgba(25, 135, 84, 0.18)",
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        var outstandingLabels = window.ReportCharts.parseJsonScript("outstanding-vs-collected-labels", []);
+        var outstandingValues = window.ReportCharts.parseJsonScript("outstanding-vs-collected-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "outstandingVsCollectedChart",
+            emptyStateId: "outstandingVsCollectedChartEmpty",
+            type: "bar",
+            labels: outstandingLabels,
+            datasets: [
+                {
+                    label: "Amount (SGD)",
+                    data: outstandingValues,
+                    backgroundColor: ["#198754", "#ff7f73"],
+                    borderColor: ["#157347", "#f06d62"],
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        var payrollLabels = window.ReportCharts.parseJsonScript("payroll-trend-labels", []);
+        var payrollValues = window.ReportCharts.parseJsonScript("payroll-trend-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "payrollTrendChart",
+            emptyStateId: "payrollTrendChartEmpty",
+            type: "line",
+            labels: payrollLabels,
+            datasets: [
+                {
+                    label: "Payroll Cost (SGD)",
+                    data: payrollValues,
+                    borderColor: "#ff7f73",
+                    backgroundColor: "rgba(255, 127, 115, 0.2)",
+                    borderWidth: 2,
+                    tension: 0.28,
+                    fill: true
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    })();
+</script>
 {% endif %}
 {% endblock %}

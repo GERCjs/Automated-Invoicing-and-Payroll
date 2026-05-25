@@ -1,9 +1,11 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncDate, TruncMonth
 from django.shortcuts import render
 from django.utils import timezone
 
+from accounts.models import EmailVerificationToken
 from accounts.permissions import role_required
 from accounts.roles import ADMIN, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
 from core.models import AuditLog
@@ -17,6 +19,26 @@ from payroll.services import cpf_for_2026
 
 def _safe_sum(queryset, field_name):
     return queryset.aggregate(total=Sum(field_name))["total"] or 0
+
+
+def _to_float(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _recent_month_starts(today, total_months=6):
+    month_start = today.replace(day=1)
+    month_starts = []
+    for offset in range(total_months - 1, -1, -1):
+        year = month_start.year
+        month = month_start.month - offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_starts.append(month_start.replace(year=year, month=month, day=1))
+    return month_starts
 
 
 def _month_bounds(selected_month: str, today):
@@ -95,6 +117,66 @@ def invoice_customer_report(request):
         )
         .order_by("-overdue_invoice_count", "-overdue_amount", "customer__name")[:8]
     )
+    top_customers_by_outstanding = list(
+        outstanding_invoices.values("customer__name", "customer__email")
+        .annotate(
+            outstanding_invoice_count=Count("id"),
+            outstanding_amount=Sum("total_amount"),
+        )
+        .order_by("-outstanding_amount", "customer__name")[:8]
+    )
+
+    month_starts = _recent_month_starts(today, total_months=6)
+    monthly_collection_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+
+    succeeded_payments = PaymentRecord.objects.filter(
+        status=PaymentRecord.STATUS_SUCCEEDED,
+        paid_at__isnull=False,
+    )
+    if succeeded_payments.exists():
+        collection_rows = list(
+            succeeded_payments.annotate(month=TruncMonth("paid_at"))
+            .values("month")
+            .annotate(total=Sum("amount"))
+            .order_by("month")
+        )
+    else:
+        collection_rows = list(
+            paid_invoices.annotate(month=TruncMonth("updated_at"))
+            .values("month")
+            .annotate(total=Sum("total_amount"))
+            .order_by("month")
+        )
+
+    monthly_collection_map = {}
+    for row in collection_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        monthly_collection_map[month_value.strftime("%Y-%m")] = _to_float(row.get("total"))
+    monthly_collection_values = [monthly_collection_map.get(month_key, 0.0) for month_key in month_keys]
+
+    overdue_ageing_labels = ["1-7 days overdue", "8-14 days overdue", "15-30 days overdue", "Over 30 days overdue"]
+    overdue_ageing_values = [0.0, 0.0, 0.0, 0.0]
+    overdue_rows = invoice_queryset.filter(
+        status=Invoice.STATUS_OVERDUE,
+        due_date__lt=today,
+    ).values("due_date", "total_amount")
+    for row in overdue_rows:
+        due_date = row.get("due_date")
+        if not due_date:
+            continue
+        days_overdue = (today - due_date).days
+        amount = _to_float(row.get("total_amount"))
+        if 1 <= days_overdue <= 7:
+            overdue_ageing_values[0] += amount
+        elif 8 <= days_overdue <= 14:
+            overdue_ageing_values[1] += amount
+        elif 15 <= days_overdue <= 30:
+            overdue_ageing_values[2] += amount
+        elif days_overdue > 30:
+            overdue_ageing_values[3] += amount
 
     recent_invoices_created = invoice_queryset.order_by("-created_at")[:10]
     recent_invoices_paid = paid_invoices.order_by("-updated_at")[:10]
@@ -119,7 +201,12 @@ def invoice_customer_report(request):
             "status_summary": status_summary,
             "total_customers_with_invoices": total_customers_with_invoices,
             "top_customers_by_total": top_customers_by_total,
+            "top_customers_by_outstanding": top_customers_by_outstanding,
             "customers_with_overdue": customers_with_overdue,
+            "monthly_collection_labels": monthly_collection_labels,
+            "monthly_collection_values": monthly_collection_values,
+            "overdue_ageing_labels": overdue_ageing_labels,
+            "overdue_ageing_values": overdue_ageing_values,
             "recent_invoices_created": recent_invoices_created,
             "recent_invoices_paid": recent_invoices_paid,
             "recent_invoice_emails_sent": recent_invoice_emails_sent,
@@ -140,12 +227,25 @@ def admin_security_report(request):
         {"role": role, "label": label, "count": users.filter(role_profile__role=role).count()}
         for role, label in ROLE_CHOICES
     ]
+    users_by_role_chart = [
+        {
+            "role": row["role"],
+            "label": "HR / Payroll" if row["role"] == HR else row["label"].replace(" Officer", ""),
+            "count": row["count"],
+        }
+        for row in users_by_role
+    ]
     new_users_this_month = users.filter(date_joined__date__gte=month_start, date_joined__date__lte=today).count()
     active_users_count = users.filter(is_active=True, role_profile__suspended_at__isnull=True).count()
     suspended_or_inactive_users_count = users.filter(
         Q(is_active=False) | Q(role_profile__suspended_at__isnull=False)
     ).distinct().count()
     suspended_accounts_count = users.filter(role_profile__suspended_at__isnull=False).count()
+    unverified_users_count = EmailVerificationToken.objects.filter(
+        used_at__isnull=True,
+        user__is_active=False,
+    ).values("user_id").distinct().count()
+    suspended_or_inactive_only_count = max(suspended_or_inactive_users_count - unverified_users_count, 0)
 
     failed_login_attempts_count = AuditLog.objects.filter(action="auth.login.failed").count()
     suspicious_activity_count = AuditLog.objects.filter(
@@ -182,6 +282,55 @@ def admin_security_report(request):
         .filter(action__startswith="admin.")
         .order_by("-created_at")[:12]
     )
+    failed_login_trend_start = today - timezone.timedelta(days=6)
+    failed_login_rows = list(
+        AuditLog.objects.filter(
+            action="auth.login.failed",
+            created_at__date__gte=failed_login_trend_start,
+            created_at__date__lte=today,
+        )
+        .annotate(day=TruncDate("created_at"))
+        .values("day")
+        .annotate(total=Count("id"))
+        .order_by("day")
+    )
+    failed_login_map = {}
+    for row in failed_login_rows:
+        day_value = row.get("day")
+        if not day_value:
+            continue
+        failed_login_map[day_value] = int(row.get("total") or 0)
+    failed_login_trend_labels = []
+    failed_login_trend_values = []
+    for day_offset in range(7):
+        day = failed_login_trend_start + timezone.timedelta(days=day_offset)
+        failed_login_trend_labels.append(day.strftime("%d %b"))
+        failed_login_trend_values.append(failed_login_map.get(day, 0))
+
+    admin_action_summary = [
+        {
+            "label": "Account Created",
+            "count": AuditLog.objects.filter(
+                action__in=["admin.account.created", "auth.admin_account.created"]
+            ).count(),
+        },
+        {
+            "label": "Role Changed",
+            "count": AuditLog.objects.filter(action="admin.account.role_changed").count(),
+        },
+        {
+            "label": "Password Updated",
+            "count": AuditLog.objects.filter(action="admin.account.password_updated").count(),
+        },
+        {
+            "label": "Account Suspended",
+            "count": AuditLog.objects.filter(action="admin.account.suspended").count(),
+        },
+        {
+            "label": "Account Unsuspended",
+            "count": AuditLog.objects.filter(action="admin.account.unsuspended").count(),
+        },
+    ]
 
     reminder_settings = PaymentReminderSettings.load()
     reminder_email_logs = EmailDeliveryLog.objects.filter(template_key__startswith="payment_reminder_")
@@ -196,11 +345,17 @@ def admin_security_report(request):
             "month_start": month_start,
             "total_users": total_users,
             "users_by_role": users_by_role,
+            "users_by_role_chart": users_by_role_chart,
             "new_users_this_month": new_users_this_month,
             "active_users_count": active_users_count,
             "suspended_or_inactive_users_count": suspended_or_inactive_users_count,
             "suspended_accounts_count": suspended_accounts_count,
+            "unverified_users_count": unverified_users_count,
+            "suspended_or_inactive_only_count": suspended_or_inactive_only_count,
             "failed_login_attempts_count": failed_login_attempts_count,
+            "failed_login_trend_labels": failed_login_trend_labels,
+            "failed_login_trend_values": failed_login_trend_values,
+            "admin_action_summary": admin_action_summary,
             "suspicious_activity_count": suspicious_activity_count,
             "recent_suspicious_activities": recent_suspicious_activities,
             "recent_login_related_logs": recent_login_related_logs,
@@ -221,6 +376,9 @@ def payment_stripe_report(request):
     today = timezone.localdate()
     month_start = today.replace(day=1)
     year_start = today.replace(month=1, day=1)
+    month_starts = _recent_month_starts(today, total_months=6)
+    payment_trend_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
 
     succeeded_payments = PaymentRecord.objects.filter(status=PaymentRecord.STATUS_SUCCEEDED)
     failed_cancelled_payments = PaymentRecord.objects.filter(
@@ -250,9 +408,16 @@ def payment_stripe_report(request):
     )
 
     stripe_payments = PaymentRecord.objects.filter(provider=PaymentRecord.PROVIDER_STRIPE)
-    stripe_status_summary = list(
-        stripe_payments.values("status").annotate(total=Count("id")).order_by("status")
-    )
+    status_count_map = {
+        row["status"]: row["total"]
+        for row in PaymentRecord.objects.values("status").annotate(total=Count("id"))
+    }
+    payment_status_summary = [
+        {"status": "succeeded", "label": "Successful", "total": status_count_map.get(PaymentRecord.STATUS_SUCCEEDED, 0)},
+        {"status": "failed", "label": "Failed", "total": status_count_map.get(PaymentRecord.STATUS_FAILED, 0)},
+        {"status": "cancelled", "label": "Cancelled", "total": status_count_map.get(PaymentRecord.STATUS_CANCELLED, 0)},
+        {"status": "refunded", "label": "Refunded", "total": status_count_map.get(PaymentRecord.STATUS_REFUNDED, 0)},
+    ]
     recent_stripe_transactions = stripe_payments.select_related("invoice", "invoice__customer").order_by(
         "-created_at"
     )[:8]
@@ -267,33 +432,46 @@ def payment_stripe_report(request):
     payment_method_summary = [
         {
             "method": "Stripe",
-            "available": True,
+            "available": stripe_total > 0,
             "has_count": True,
             "count": stripe_total,
-            "note": "Current integrated prototype method.",
-        },
-        {
-            "method": "PayNow",
-            "available": False,
-            "has_count": False,
-            "count": None,
-            "note": "Processed within Stripe Checkout but not stored separately yet.",
-        },
-        {
-            "method": "Credit card",
-            "available": False,
-            "has_count": False,
-            "count": None,
-            "note": "Processed within Stripe Checkout but not stored separately yet.",
-        },
-        {
-            "method": "Bank transfer",
-            "available": manual_total > 0,
-            "has_count": True,
-            "count": manual_total,
-            "note": "Represented by provider=manual records.",
+            "note": (
+                "Current integrated prototype method."
+                if stripe_total > 0 and manual_total == 0
+                else "Stripe payment records."
+            ),
         },
     ]
+    if manual_total > 0:
+        payment_method_summary.append(
+            {
+                "method": "Manual / Bank transfer",
+                "available": True,
+                "has_count": True,
+                "count": manual_total,
+                "note": "Stored as provider=manual records.",
+            }
+        )
+
+    monthly_successful_rows = list(
+        succeeded_payments.filter(paid_at__isnull=False)
+        .annotate(month=TruncMonth("paid_at"))
+        .values("month")
+        .annotate(total_amount=Sum("amount"), payment_count=Count("id"))
+        .order_by("month")
+    )
+    monthly_successful_amount_map = {}
+    monthly_successful_count_map = {}
+    for row in monthly_successful_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        month_key = month_value.strftime("%Y-%m")
+        monthly_successful_amount_map[month_key] = _to_float(row.get("total_amount"))
+        monthly_successful_count_map[month_key] = int(row.get("payment_count") or 0)
+
+    monthly_payment_amount_values = [monthly_successful_amount_map.get(month_key, 0.0) for month_key in month_keys]
+    monthly_successful_count_values = [monthly_successful_count_map.get(month_key, 0) for month_key in month_keys]
 
     return render(
         request,
@@ -309,11 +487,14 @@ def payment_stripe_report(request):
             "refunded_count": refunded_payments.count(),
             "outstanding_amount": outstanding_amount,
             "stripe_total": stripe_total,
-            "stripe_status_summary": stripe_status_summary,
+            "payment_status_summary": payment_status_summary,
             "recent_stripe_transactions": recent_stripe_transactions,
             "payment_method_summary": payment_method_summary,
             "recent_payments": recent_payments,
             "is_stripe_only_prototype": stripe_total > 0 and manual_total == 0,
+            "payment_trend_labels": payment_trend_labels,
+            "monthly_payment_amount_values": monthly_payment_amount_values,
+            "monthly_successful_count_values": monthly_successful_count_values,
         },
     )
 
@@ -336,6 +517,33 @@ def payroll_report(request):
     total_deductions_month = _safe_sum(month_records, "deductions")
     employee_cpf_total_month = _safe_sum(month_records, "cpf_contribution")
     employees_paid_month = month_records.values("employee_id").distinct().count()
+
+    month_starts = _recent_month_starts(today, total_months=6)
+    payroll_monthly_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+
+    payroll_monthly_rows = list(
+        PayrollRecord.objects.annotate(month=TruncMonth("payment_date"))
+        .values("month")
+        .annotate(
+            total_basic=Sum("basic_salary"),
+            total_allowances=Sum("allowances"),
+            employees_paid=Count("employee_id", distinct=True),
+        )
+        .order_by("month")
+    )
+    payroll_amount_map = {}
+    payroll_employees_map = {}
+    for row in payroll_monthly_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        month_key = month_value.strftime("%Y-%m")
+        payroll_amount_map[month_key] = _to_float(row.get("total_basic")) + _to_float(row.get("total_allowances"))
+        payroll_employees_map[month_key] = int(row.get("employees_paid") or 0)
+
+    payroll_monthly_cost_values = [payroll_amount_map.get(month_key, 0.0) for month_key in month_keys]
+    payroll_monthly_employee_values = [payroll_employees_map.get(month_key, 0) for month_key in month_keys]
 
     month_rows = list(
         month_records.order_by("-payment_date", "employee_id").values(
@@ -437,6 +645,9 @@ def payroll_report(request):
             "total_payroll_amount_month": total_payroll_amount_month,
             "total_payroll_amount_year": total_payroll_amount_year,
             "employees_paid_month": employees_paid_month,
+            "payroll_monthly_labels": payroll_monthly_labels,
+            "payroll_monthly_cost_values": payroll_monthly_cost_values,
+            "payroll_monthly_employee_values": payroll_monthly_employee_values,
             "total_net_pay_month": total_net_pay_month,
             "total_allowances_month": total_allowances_month,
             "total_deductions_month": total_deductions_month,

@@ -1,6 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.db import DatabaseError
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncMonth
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
@@ -9,6 +10,7 @@ from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, SUPERADMI
 from imports.models import ImportJob, ImportRowError
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
+from payments.models import PaymentRecord
 from payroll.models import Employee, PayrollBatch, PayrollEntry, PayrollRecord
 
 from .models import AuditLog
@@ -145,6 +147,26 @@ def _safe_list(queryset):
         return []
 
 
+def _to_float(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _recent_month_starts(today, total_months=6):
+    month_start = today.replace(day=1)
+    month_starts = []
+    for offset in range(total_months - 1, -1, -1):
+        year = month_start.year
+        month = month_start.month - offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_starts.append(month_start.replace(year=year, month=month, day=1))
+    return month_starts
+
+
 def home(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
@@ -162,6 +184,9 @@ def dashboard(request):
     can_view_payroll_stats = role in {SUPERADMIN, ADMIN, HR}
 
     recent_since = timezone.now() - timezone.timedelta(days=7)
+    today = timezone.localdate()
+    current_month_start = today.replace(day=1)
+
     audit_logs = AuditLog.objects.select_related("user", "user__role_profile")
     audit_action_stats = _safe_list(
         audit_logs.values("action").annotate(total=Count("id")).order_by("-total", "action")[:6]
@@ -199,6 +224,69 @@ def dashboard(request):
 
     email_status_counts = _safe_group_counts(EmailDeliveryLog.objects.all(), "status")
 
+    succeeded_payments = PaymentRecord.objects.filter(
+        status=PaymentRecord.STATUS_SUCCEEDED,
+        paid_at__isnull=False,
+    )
+    collected_total = _safe_sum(succeeded_payments, "amount")
+    collected_this_month = _safe_sum(
+        succeeded_payments.filter(paid_at__date__gte=current_month_start, paid_at__date__lte=today),
+        "amount",
+    )
+
+    month_starts = _recent_month_starts(today, total_months=6)
+    month_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+
+    payment_month_rows = _safe_list(
+        succeeded_payments.annotate(month=TruncMonth("paid_at"))
+        .values("month")
+        .annotate(total=Sum("amount"))
+        .order_by("month")
+    )
+    collected_by_month = {}
+    for row in payment_month_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        collected_by_month[month_value.strftime("%Y-%m")] = _to_float(row.get("total"))
+    monthly_collection_values = [collected_by_month.get(month_key, 0.0) for month_key in month_keys]
+
+    payroll_month_rows = _safe_list(
+        PayrollRecord.objects.annotate(month=TruncMonth("payment_date"))
+        .values("month")
+        .annotate(
+            total_basic=Sum("basic_salary"),
+            total_allowances=Sum("allowances"),
+        )
+        .order_by("month")
+    )
+    payroll_by_month = {}
+    for row in payroll_month_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        payroll_by_month[month_value.strftime("%Y-%m")] = _to_float(row.get("total_basic")) + _to_float(
+            row.get("total_allowances")
+        )
+    monthly_payroll_values = [payroll_by_month.get(month_key, 0.0) for month_key in month_keys]
+
+    payroll_cost_this_month = _safe_sum(
+        PayrollRecord.objects.filter(payment_date__gte=current_month_start, payment_date__lte=today),
+        "net_salary",
+    )
+    overdue_invoice_amount = _safe_sum(
+        Invoice.objects.filter(status=Invoice.STATUS_OVERDUE),
+        "total_amount",
+    )
+
+    suspicious_activity_count = _safe_count(
+        AuditLog.objects.filter(
+            created_at__gte=current_month_start,
+            action__in=["auth.permission_denied", "auth.login.failed"],
+        )
+    )
+
     return render(
         request,
         "core/dashboard.html",
@@ -228,6 +316,16 @@ def dashboard(request):
             "recent_import_errors": recent_import_errors,
             "email_sent_count": email_status_counts.get(EmailDeliveryLog.STATUS_SENT, 0),
             "email_failed_count": email_status_counts.get(EmailDeliveryLog.STATUS_FAILED, 0),
+            "collection_trend_labels": month_labels,
+            "collection_trend_values": monthly_collection_values,
+            "outstanding_vs_collected_labels": ["Collected", "Outstanding"],
+            "outstanding_vs_collected_values": [_to_float(collected_total), _to_float(invoice_outstanding)],
+            "payroll_trend_labels": month_labels,
+            "payroll_trend_values": monthly_payroll_values,
+            "collected_this_month": collected_this_month,
+            "payroll_cost_this_month": payroll_cost_this_month,
+            "overdue_invoice_amount": overdue_invoice_amount,
+            "suspicious_activity_count": suspicious_activity_count,
         },
     )
 

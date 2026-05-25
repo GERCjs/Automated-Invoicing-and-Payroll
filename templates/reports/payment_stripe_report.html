@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Payment & Stripe Report{% endblock %}
 
@@ -59,6 +60,46 @@
     </div>
 </div>
 
+<h2 class="section-heading mb-3">Report Visuals</h2>
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Monthly Payment Collection Trend</div>
+            <div class="report-chart-body">
+                <canvas id="monthlyPaymentAmountChart" class="report-chart-canvas" aria-label="Monthly payment collection trend chart" role="img"></canvas>
+                <div id="monthlyPaymentAmountChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Payment Status Breakdown</div>
+            <div class="report-chart-body">
+                <canvas id="paymentStatusChart" class="report-chart-canvas" aria-label="Payment status breakdown chart" role="img"></canvas>
+                <div id="paymentStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Payment Method Summary</div>
+            <div class="report-chart-body">
+                <canvas id="paymentMethodChart" class="report-chart-canvas" aria-label="Payment method summary chart" role="img"></canvas>
+                <div id="paymentMethodChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Successful Payment Count Trend</div>
+            <div class="report-chart-body">
+                <canvas id="successfulPaymentCountChart" class="report-chart-canvas" aria-label="Successful payment count trend chart" role="img"></canvas>
+                <div id="successfulPaymentCountChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-3 mb-3">
     <div class="col-md-4">
         <div class="dashboard-card h-100">
@@ -90,7 +131,7 @@
 <div class="row g-3 mb-3">
     <div class="col-lg-6">
         <div class="card h-100">
-            <div class="card-header">Stripe Status Summary</div>
+            <div class="card-header">Payment Status Summary</div>
             <div class="table-responsive">
                 <table class="table table-clean mb-0">
                     <thead>
@@ -100,13 +141,13 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for row in stripe_status_summary %}
+                        {% for row in payment_status_summary %}
                         <tr>
-                            <td>{{ row.status|title }}</td>
+                            <td>{{ row.label }}</td>
                             <td class="text-end">{{ row.total }}</td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="2" class="text-center py-3">No Stripe payments yet.</td></tr>
+                        <tr><td colspan="2" class="text-center py-3">No payment status data yet.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -213,4 +254,121 @@
         </table>
     </div>
 </div>
+
+{{ payment_trend_labels|json_script:"payment-trend-labels-data" }}
+{{ monthly_payment_amount_values|json_script:"payment-trend-amount-values-data" }}
+{{ payment_status_summary|json_script:"payment-status-summary-data" }}
+{{ payment_method_summary|json_script:"payment-method-data" }}
+{{ monthly_successful_count_values|json_script:"payment-trend-success-count-values-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/report_charts.js' %}"></script>
+<script>
+    (function () {
+        var paymentTrendLabels = window.ReportCharts.parseJsonScript("payment-trend-labels-data", []);
+        var paymentTrendAmountValues = window.ReportCharts.parseJsonScript("payment-trend-amount-values-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "monthlyPaymentAmountChart",
+            emptyStateId: "monthlyPaymentAmountChartEmpty",
+            type: "line",
+            labels: paymentTrendLabels,
+            datasets: [
+                {
+                    label: "Successful Amount (SGD)",
+                    data: paymentTrendAmountValues,
+                    borderColor: "#198754",
+                    backgroundColor: "rgba(25, 135, 84, 0.15)",
+                    borderWidth: 2,
+                    tension: 0.28,
+                    fill: true
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        var paymentStatusSummary = window.ReportCharts.parseJsonScript("payment-status-summary-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "paymentStatusChart",
+            emptyStateId: "paymentStatusChartEmpty",
+            type: "doughnut",
+            labels: paymentStatusSummary.map(function (row) { return row.label; }),
+            datasets: [
+                {
+                    label: "Payment Count",
+                    data: paymentStatusSummary.map(function (row) { return row.total; }),
+                    backgroundColor: ["#198754", "#dc3545", "#ff7f73", "#64748b"],
+                    borderColor: "#ffffff",
+                    borderWidth: 2
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" }
+                }
+            }
+        });
+
+        var methodSummary = window.ReportCharts.parseJsonScript("payment-method-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "paymentMethodChart",
+            emptyStateId: "paymentMethodChartEmpty",
+            type: "doughnut",
+            labels: methodSummary.map(function (method) { return method.method; }),
+            datasets: [
+                {
+                    label: "Method Count",
+                    data: methodSummary.map(function (method) { return method.has_count ? method.count : 0; }),
+                    backgroundColor: ["#ff7f73", "#64748b", "#94a3b8"],
+                    borderColor: "#ffffff",
+                    borderWidth: 2
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" }
+                }
+            }
+        });
+
+        var paymentTrendCountValues = window.ReportCharts.parseJsonScript("payment-trend-success-count-values-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "successfulPaymentCountChart",
+            emptyStateId: "successfulPaymentCountChartEmpty",
+            type: "bar",
+            labels: paymentTrendLabels,
+            datasets: [
+                {
+                    label: "Successful Payments",
+                    data: paymentTrendCountValues,
+                    backgroundColor: "#94a3b8",
+                    borderColor: "#64748b",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        precision: 0
+                    }
+                }
+            }
+        });
+    })();
+</script>
 {% endblock %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Invoice / Customer Report{% endblock %}
 
@@ -42,6 +43,46 @@
                 <div class="text-muted small">Reporting Window</div>
                 <div class="small">Month start: {{ month_start }}</div>
                 <div class="small">Year start: {{ year_start }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2 class="section-heading mb-3">Report Visuals</h2>
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Invoice Status Distribution</div>
+            <div class="report-chart-body">
+                <canvas id="invoiceStatusChart" class="report-chart-canvas" aria-label="Invoice status chart" role="img"></canvas>
+                <div id="invoiceStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Monthly Collection Trend</div>
+            <div class="report-chart-body">
+                <canvas id="collectionTrendChart" class="report-chart-canvas" aria-label="Monthly collection trend chart" role="img"></canvas>
+                <div id="collectionTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Overdue Invoice Duration</div>
+            <div class="report-chart-body">
+                <canvas id="overdueAgeingChart" class="report-chart-canvas" aria-label="Overdue ageing chart" role="img"></canvas>
+                <div id="overdueAgeingChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Top Customers by Outstanding Amount</div>
+            <div class="report-chart-body">
+                <canvas id="topOutstandingCustomersChart" class="report-chart-canvas" aria-label="Top outstanding customers chart" role="img"></canvas>
+                <div id="topOutstandingCustomersChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
         </div>
     </div>
@@ -266,4 +307,128 @@
         </div>
     </div>
 </div>
+
+{{ status_summary|json_script:"invoice-status-data" }}
+{{ monthly_collection_labels|json_script:"invoice-monthly-collection-labels" }}
+{{ monthly_collection_values|json_script:"invoice-monthly-collection-values" }}
+{{ overdue_ageing_labels|json_script:"invoice-overdue-ageing-labels" }}
+{{ overdue_ageing_values|json_script:"invoice-overdue-ageing-values" }}
+{{ top_customers_by_outstanding|json_script:"invoice-top-outstanding-customers-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/report_charts.js' %}"></script>
+<script>
+    (function () {
+        var statusRows = window.ReportCharts.parseJsonScript("invoice-status-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "invoiceStatusChart",
+            emptyStateId: "invoiceStatusChartEmpty",
+            type: "doughnut",
+            labels: statusRows.map(function (row) { return row.label; }),
+            datasets: [
+                {
+                    label: "Invoices",
+                    data: statusRows.map(function (row) { return row.count; }),
+                    backgroundColor: ["#ff7f73", "#f59e0b", "#64748b", "#dc3545", "#198754"],
+                    borderColor: "#ffffff",
+                    borderWidth: 2
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" }
+                }
+            }
+        });
+
+        var monthlyCollectionLabels = window.ReportCharts.parseJsonScript("invoice-monthly-collection-labels", []);
+        var monthlyCollectionValues = window.ReportCharts.parseJsonScript("invoice-monthly-collection-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "collectionTrendChart",
+            emptyStateId: "collectionTrendChartEmpty",
+            type: "line",
+            labels: monthlyCollectionLabels,
+            datasets: [
+                {
+                    label: "Collected Amount (SGD)",
+                    data: monthlyCollectionValues,
+                    borderColor: "#198754",
+                    backgroundColor: "rgba(25, 135, 84, 0.16)",
+                    borderWidth: 2,
+                    tension: 0.28,
+                    fill: true
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        var overdueAgeingLabels = window.ReportCharts.parseJsonScript("invoice-overdue-ageing-labels", []);
+        var overdueAgeingValues = window.ReportCharts.parseJsonScript("invoice-overdue-ageing-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "overdueAgeingChart",
+            emptyStateId: "overdueAgeingChartEmpty",
+            type: "bar",
+            labels: overdueAgeingLabels,
+            datasets: [
+                {
+                    label: "Overdue Amount (SGD)",
+                    data: overdueAgeingValues,
+                    backgroundColor: ["#fca5a5", "#fb7185", "#f43f5e", "#e11d48"],
+                    borderColor: ["#ef4444", "#e11d48", "#be123c", "#9f1239"],
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        var topOutstandingCustomers = window.ReportCharts.parseJsonScript("invoice-top-outstanding-customers-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "topOutstandingCustomersChart",
+            emptyStateId: "topOutstandingCustomersChartEmpty",
+            type: "bar",
+            labels: topOutstandingCustomers.map(function (row) { return row.customer__name || "Unknown"; }),
+            datasets: [
+                {
+                    label: "Outstanding Amount (SGD)",
+                    data: topOutstandingCustomers.map(function (row) { return row.outstanding_amount; }),
+                    backgroundColor: "#ff7f73",
+                    borderColor: "#f06d62",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                indexAxis: "y",
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    })();
+</script>
 {% endblock %}

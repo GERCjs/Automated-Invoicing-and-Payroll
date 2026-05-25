@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Payroll Report{% endblock %}
 
@@ -36,6 +37,46 @@
             <div class="card-body">
                 <div class="text-muted small">Employees Paid This Month</div>
                 <div class="display-6 mb-0">{{ employees_paid_month }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2 class="section-heading mb-3">Report Visuals</h2>
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Monthly Payroll Cost Trend</div>
+            <div class="report-chart-body">
+                <canvas id="payrollCostTrendChart" class="report-chart-canvas" aria-label="Monthly payroll cost trend chart" role="img"></canvas>
+                <div id="payrollCostTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">CPF Contribution Split (Selected Month)</div>
+            <div class="report-chart-body">
+                <canvas id="cpfSplitChart" class="report-chart-canvas" aria-label="CPF contribution split chart" role="img"></canvas>
+                <div id="cpfSplitChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Net Pay vs Deductions (Selected Month)</div>
+            <div class="report-chart-body">
+                <canvas id="netPayVsDeductionsChart" class="report-chart-canvas" aria-label="Net pay versus deductions chart" role="img"></canvas>
+                <div id="netPayVsDeductionsChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="report-chart-card">
+            <div class="report-chart-header">Employees Paid by Month</div>
+            <div class="report-chart-body">
+                <canvas id="employeesPaidByMonthChart" class="report-chart-canvas" aria-label="Employees paid by month chart" role="img"></canvas>
+                <div id="employeesPaidByMonthChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
         </div>
     </div>
@@ -178,4 +219,132 @@
         </div>
     </div>
 </div>
+
+{{ payroll_monthly_labels|json_script:"payroll-monthly-labels-data" }}
+{{ payroll_monthly_cost_values|json_script:"payroll-monthly-cost-values-data" }}
+{{ payroll_monthly_employee_values|json_script:"payroll-monthly-employee-values-data" }}
+{{ total_net_pay_month|json_script:"payroll-net-pay-data" }}
+{{ total_deductions_month|json_script:"payroll-deductions-data" }}
+{{ employee_cpf_total_month|json_script:"payroll-employee-cpf-data" }}
+{{ employer_cpf_total_month|json_script:"payroll-employer-cpf-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/report_charts.js' %}"></script>
+<script>
+    (function () {
+        var payrollMonthlyLabels = window.ReportCharts.parseJsonScript("payroll-monthly-labels-data", []);
+        var payrollMonthlyCosts = window.ReportCharts.parseJsonScript("payroll-monthly-cost-values-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "payrollCostTrendChart",
+            emptyStateId: "payrollCostTrendChartEmpty",
+            type: "line",
+            labels: payrollMonthlyLabels,
+            datasets: [
+                {
+                    label: "Payroll Cost (SGD)",
+                    data: payrollMonthlyCosts,
+                    borderColor: "#ff7f73",
+                    backgroundColor: "rgba(255, 127, 115, 0.2)",
+                    borderWidth: 2,
+                    tension: 0.28,
+                    fill: true
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        var netPay = window.ReportCharts.parseJsonScript("payroll-net-pay-data", 0);
+        var deductions = window.ReportCharts.parseJsonScript("payroll-deductions-data", 0);
+        window.ReportCharts.renderChart({
+            canvasId: "netPayVsDeductionsChart",
+            emptyStateId: "netPayVsDeductionsChartEmpty",
+            type: "bar",
+            labels: ["Net Pay", "Deductions"],
+            datasets: [
+                {
+                    label: "Amount (SGD)",
+                    data: [netPay, deductions],
+                    backgroundColor: ["#198754", "#ff7f73"],
+                    borderColor: "#e5e7eb",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        var employeeCpf = window.ReportCharts.parseJsonScript("payroll-employee-cpf-data", 0);
+        var employerCpf = window.ReportCharts.parseJsonScript("payroll-employer-cpf-data", 0);
+        window.ReportCharts.renderChart({
+            canvasId: "cpfSplitChart",
+            emptyStateId: "cpfSplitChartEmpty",
+            type: "doughnut",
+            labels: ["Employee CPF", "Employer CPF"],
+            datasets: [
+                {
+                    label: "Amount (SGD)",
+                    data: [employeeCpf, employerCpf],
+                    backgroundColor: ["#ff7f73", "#64748b"],
+                    borderColor: "#ffffff",
+                    borderWidth: 2
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" }
+                }
+            }
+        });
+
+        var payrollMonthlyEmployeeCounts = window.ReportCharts.parseJsonScript("payroll-monthly-employee-values-data", []);
+        window.ReportCharts.renderChart({
+            canvasId: "employeesPaidByMonthChart",
+            emptyStateId: "employeesPaidByMonthChartEmpty",
+            type: "bar",
+            labels: payrollMonthlyLabels,
+            datasets: [
+                {
+                    label: "Employees Paid",
+                    data: payrollMonthlyEmployeeCounts,
+                    backgroundColor: "#64748b",
+                    borderColor: "#475569",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                }
+            }
+        });
+    })();
+</script>
 {% endblock %}

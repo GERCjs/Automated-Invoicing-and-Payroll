@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import timedelta
+import warnings
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -14,6 +15,13 @@ from payments.models import PaymentRecord
 
 
 User = get_user_model()
+
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"DateTimeField AuditLog\.created_at received a naive datetime .* while time zone support is active\.",
+    category=RuntimeWarning,
+)
 
 
 class PaymentStripeReportAccessTests(TestCase):
