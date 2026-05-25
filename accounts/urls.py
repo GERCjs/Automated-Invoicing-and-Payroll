@@ -9,6 +9,7 @@ from .views import (
     managed_account_create,
     managed_account_delete,
     managed_account_password_update,
+    managed_account_resend_verification,
     managed_account_role_update,
     managed_account_suspend,
     managed_account_unsuspend,
@@ -52,6 +53,11 @@ urlpatterns = [
         "admin-dashboard/accounts/<int:user_id>/unsuspend/",
         managed_account_unsuspend,
         name="managed-account-unsuspend",
+    ),
+    path(
+        "admin-dashboard/accounts/<int:user_id>/resend-verification/",
+        managed_account_resend_verification,
+        name="managed-account-resend-verification",
     ),
     path(
         "admin-dashboard/login-security/",

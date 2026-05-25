@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase
 from django.test import override_settings
@@ -12,6 +13,8 @@ from django.utils import timezone
 from accounts.roles import CUSTOMER
 from core.models import AuditLog
 from invoicing.models import Customer, Invoice
+from notifications.models import EmailDeliveryLog
+from notifications.services import send_stripe_payment_success_email
 
 from .models import PaymentRecord, StripeWebhookEvent
 from .services import create_checkout_for_invoice
@@ -176,6 +179,78 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
         self.assertEqual(payment_record.external_transaction_id, "pi_test_1001")
         self.assertEqual(StripeWebhookEvent.objects.filter(event_id="evt_test_1001").count(), 1)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    def test_payment_success_email_service_sends_invoice_pdf(self):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-SUCCESS-EMAIL-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            paid_at=timezone.now(),
+            stripe_checkout_session_id="cs_test_success_email_1",
+        )
+
+        success, log = send_stripe_payment_success_email(
+            invoice=self.invoice,
+            payment_record=payment_record,
+            public_invoice_url="http://testserver/invoices/view/test-token/",
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)
+        self.assertEqual(log.template_key, "stripe_payment_success_invoice_email_v1")
+        self.assertEqual(log.related_object_type, "invoice")
+        self.assertEqual(log.related_object_id, str(self.invoice.id))
+        self.assertEqual(log.metadata.get("payment_reference"), payment_record.payment_reference)
+        self.assertEqual(log.metadata.get("pdf_attachment_added"), True)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Payment received", mail.outbox[0].subject)
+        self.assertEqual(mail.outbox[0].to, [self.invoice.customer.email])
+        self.assertIn(payment_record.payment_reference, mail.outbox[0].body)
+        self.assertIn("http://testserver/invoices/view/test-token/", mail.outbox[0].body)
+        self.assertTrue(mail.outbox[0].attachments)
+        attachment_name, _attachment_content, attachment_type = mail.outbox[0].attachments[0]
+        self.assertIn(self.invoice.invoice_number, attachment_name)
+        self.assertEqual(attachment_type, "application/pdf")
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    @patch("notifications.services.generate_invoice_pdf", side_effect=RuntimeError("PDF unavailable"))
+    def test_payment_success_email_service_requires_pdf_attachment(self, _pdf_mock):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-SUCCESS-EMAIL-002",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            paid_at=timezone.now(),
+            stripe_checkout_session_id="cs_test_success_email_2",
+        )
+
+        success, log = send_stripe_payment_success_email(
+            invoice=self.invoice,
+            payment_record=payment_record,
+            public_invoice_url="http://testserver/invoices/view/test-token/",
+        )
+
+        self.assertFalse(success)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_FAILED)
+        self.assertIn("Invoice PDF could not be generated", log.error_message)
+        self.assertEqual(log.metadata.get("pdf_attachment_added"), False)
 
     @patch("payments.views.construct_webhook_event")
     def test_webhook_duplicate_event_is_idempotent(self, construct_event_mock):

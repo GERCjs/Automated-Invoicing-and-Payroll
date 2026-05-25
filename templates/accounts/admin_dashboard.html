@@ -165,6 +165,8 @@
                     <td>
                         {% if managed_user.is_suspended %}
                         <span class="badge bg-danger">Suspended</span>
+                        {% elif managed_user.is_unverified %}
+                        <span class="badge bg-warning text-dark">Unverified</span>
                         {% else %}
                         <span class="badge bg-success">Active</span>
                         {% endif %}

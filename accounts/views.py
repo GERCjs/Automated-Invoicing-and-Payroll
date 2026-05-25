@@ -32,6 +32,61 @@ from .permissions import get_user_role, role_required
 from .roles import ADMIN, CUSTOMER, ROLE_CHOICES, STAFF, SUPERADMIN
 
 User = get_user_model()
+VERIFICATION_EMAIL_TEMPLATE_KEY = "account_verification_email_v1"
+
+
+def _send_verification_email(request, user, *, triggered_by=None):
+    verification = EmailVerificationToken.issue_for_user(user)
+    verify_url = request.build_absolute_uri(reverse("verify-email", args=[verification.token]))
+    subject = "Verify your account"
+    body = (
+        "Welcome to Automated Invoicing & Payroll.\n\n"
+        "Please verify your account by clicking this link:\n"
+        f"{verify_url}\n\n"
+        "This link expires in 48 hours."
+    )
+    recipient = (user.email or "").strip().lower()
+    email_log = EmailDeliveryLog.objects.create(
+        recipient_email=recipient,
+        subject=subject,
+        template_key=VERIFICATION_EMAIL_TEMPLATE_KEY,
+        status=EmailDeliveryLog.STATUS_PENDING,
+        related_object_type="user",
+        related_object_id=str(user.id),
+        triggered_by=triggered_by,
+        metadata={
+            "username": user.username,
+            "role": get_user_role(user),
+            "verification_token_id": verification.id,
+        },
+    )
+
+    if not recipient:
+        email_log.status = EmailDeliveryLog.STATUS_FAILED
+        email_log.error_message = "User email address is missing."
+        email_log.save(update_fields=["status", "error_message"])
+        return False, verification, email_log
+
+    try:
+        sent_count = send_mail(
+            subject=subject,
+            message=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[recipient],
+            fail_silently=False,
+        )
+        if sent_count < 1:
+            raise RuntimeError("Email backend returned zero deliveries.")
+    except Exception as exc:
+        email_log.status = EmailDeliveryLog.STATUS_FAILED
+        email_log.error_message = str(exc)
+        email_log.save(update_fields=["status", "error_message"])
+        return False, verification, email_log
+
+    email_log.status = EmailDeliveryLog.STATUS_SENT
+    email_log.sent_at = timezone.now()
+    email_log.save(update_fields=["status", "sent_at"])
+    return True, verification, email_log
 
 
 class UserLoginView(LoginView):
@@ -55,24 +110,11 @@ def register(request):
             role = form.get_registration_role()
             user.role_profile.role = role
             user.role_profile.save(update_fields=["role", "updated_at"])
-            verification = EmailVerificationToken.issue_for_user(user)
-            verify_url = request.build_absolute_uri(reverse("verify-email", args=[verification.token]))
-            verification_email_sent = True
-            try:
-                send_mail(
-                    subject="Verify your account",
-                    message=(
-                        "Welcome to Automated Invoicing & Payroll.\n\n"
-                        "Please verify your account by clicking this link:\n"
-                        f"{verify_url}\n\n"
-                        "This link expires in 48 hours."
-                    ),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=False,
-                )
-            except Exception:
-                verification_email_sent = False
+            verification_email_sent, _verification, email_log = _send_verification_email(
+                request,
+                user,
+                triggered_by=user,
+            )
             log_event(
                 action="auth.registered",
                 user=user,
@@ -83,6 +125,7 @@ def register(request):
                     "role": user.role_profile.role,
                     "verification_required": True,
                     "verification_email_sent": verification_email_sent,
+                    "verification_email_log_id": email_log.id,
                 },
                 ip_address=get_client_ip(request),
             )
@@ -199,6 +242,9 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         .annotate(last_activity=Max("created_at"))
     }
     users_with_activity = []
+    pending_verification_user_ids = set(
+        EmailVerificationToken.objects.filter(used_at__isnull=True).values_list("user_id", flat=True)
+    )
     for managed_user in users:
         managed_user.last_activity_at = last_seen.get(managed_user.id)
         managed_user.role_update_form = ManagedRoleUpdateForm(
@@ -209,6 +255,15 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         managed_user.can_be_managed = _can_manage_target(request.user, managed_user)
         managed_user.can_be_suspended = _can_suspend_target(request.user, managed_user)
         managed_user.is_suspended = managed_user.role_profile.is_suspended
+        managed_user.has_pending_verification = (
+            not managed_user.is_suspended
+            and managed_user.id in pending_verification_user_ids
+        )
+        managed_user.is_unverified = (
+            not managed_user.is_active
+            and not managed_user.is_suspended
+            and managed_user.has_pending_verification
+        )
         users_with_activity.append(managed_user)
 
     policy_rows = []
@@ -431,6 +486,57 @@ def managed_account_unsuspend(request, user_id):
         ip_address=get_client_ip(request),
     )
     messages.success(request, f"Unsuspended account {target_user.username}.")
+    return redirect("admin-dashboard")
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def managed_account_resend_verification(request, user_id):
+    if request.method != "POST":
+        return redirect("admin-dashboard")
+
+    target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
+    has_pending_verification = EmailVerificationToken.objects.filter(
+        user=target_user,
+        used_at__isnull=True,
+    ).exists()
+    if target_user.is_active and not has_pending_verification:
+        messages.info(request, f"{target_user.username} is already verified.")
+        return redirect("admin-dashboard")
+    if target_user.role_profile.is_suspended:
+        messages.error(request, "Cannot resend verification email for a suspended account.")
+        return redirect("admin-dashboard")
+
+    success, _verification, email_log = _send_verification_email(
+        request,
+        target_user,
+        triggered_by=request.user,
+    )
+    log_event(
+        action=(
+            "admin.account.verification_email_resent"
+            if success
+            else "admin.account.verification_email_failed"
+        ),
+        user=request.user,
+        target_type="user",
+        target_id=str(target_user.id),
+        metadata={
+            "username": target_user.username,
+            "role": get_user_role(target_user),
+            "recipient_email": target_user.email,
+            "email_log_id": email_log.id,
+            "error_message": email_log.error_message,
+        },
+        ip_address=get_client_ip(request),
+    )
+    if success:
+        messages.success(request, f"Verification email resent to {target_user.email}.")
+    else:
+        messages.error(
+            request,
+            f"Failed to resend verification email to {target_user.email}: {email_log.error_message}",
+        )
     return redirect("admin-dashboard")
 
 

@@ -17,6 +17,8 @@ from invoicing.models import Invoice
 
 from .models import EmailDeliveryLog, PaymentReminderSettings
 
+STRIPE_PAYMENT_SUCCESS_EMAIL_TEMPLATE_KEY = "stripe_payment_success_invoice_email_v1"
+
 
 def _calculate_amount_due(invoice: Invoice) -> Decimal:
     if invoice.status == Invoice.STATUS_PAID:
@@ -115,6 +117,100 @@ def send_invoice_email(
             metadata["pdf_attachment_error"] = attachment_error
         log.metadata = metadata
         log.save(update_fields=["status", "sent_at", "metadata"])
+    return True, log
+
+
+def send_stripe_payment_success_email(
+    *,
+    invoice: Invoice,
+    payment_record,
+    public_invoice_url: str,
+    triggered_by=None,
+) -> tuple[bool, EmailDeliveryLog]:
+    recipient = (invoice.customer.email or "").strip().lower()
+    context = {
+        "invoice": invoice,
+        "customer": invoice.customer,
+        "payment_record": payment_record,
+        "company_name": settings.COMPANY_NAME,
+        "company_email": settings.COMPANY_EMAIL,
+        "company_phone": settings.COMPANY_PHONE,
+        "public_invoice_url": public_invoice_url,
+    }
+    subject = render_to_string("payments/emails/stripe_payment_success_subject.txt", context).strip()
+    text_body = render_to_string("payments/emails/stripe_payment_success_body.txt", context)
+    html_body = render_to_string("payments/emails/stripe_payment_success_body.html", context)
+
+    log = EmailDeliveryLog.objects.create(
+        recipient_email=recipient,
+        subject=subject,
+        template_key=STRIPE_PAYMENT_SUCCESS_EMAIL_TEMPLATE_KEY,
+        status=EmailDeliveryLog.STATUS_PENDING,
+        related_object_type="invoice",
+        related_object_id=str(invoice.id),
+        triggered_by=triggered_by,
+        metadata={
+            "invoice_number": invoice.invoice_number,
+            "invoice_status_before_send": invoice.status,
+            "customer_name": invoice.customer.name,
+            "payment_record_id": str(payment_record.id),
+            "payment_reference": payment_record.payment_reference,
+            "stripe_checkout_session_id": payment_record.stripe_checkout_session_id or "",
+            "public_invoice_url": public_invoice_url,
+        },
+    )
+
+    if not recipient:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = "Customer email is missing on invoice customer record."
+        log.save(update_fields=["status", "error_message"])
+        return False, log
+
+    try:
+        pdf_bytes = generate_invoice_pdf(invoice)
+    except Exception as exc:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = f"Invoice PDF could not be generated: {exc}"
+        metadata = dict(log.metadata or {})
+        metadata.update({"pdf_attachment_added": False, "pdf_attachment_error": str(exc)})
+        log.metadata = metadata
+        log.save(update_fields=["status", "error_message", "metadata"])
+        return False, log
+
+    message = EmailMultiAlternatives(
+        subject=subject,
+        body=text_body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[recipient],
+    )
+    message.attach_alternative(html_body, "text/html")
+    message.attach(
+        filename=f"{invoice.invoice_number}.pdf",
+        content=pdf_bytes,
+        mimetype="application/pdf",
+    )
+
+    try:
+        sent_count = message.send()
+        if sent_count < 1:
+            raise RuntimeError("Email backend returned zero deliveries.")
+    except Exception as exc:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = str(exc)
+        log.save(update_fields=["status", "error_message"])
+        return False, log
+
+    log.status = EmailDeliveryLog.STATUS_SENT
+    log.sent_at = timezone.now()
+    metadata = dict(log.metadata or {})
+    metadata.update(
+        {
+            "invoice_status_after_send": invoice.status,
+            "pdf_attachment_added": True,
+        }
+    )
+    log.metadata = metadata
+    log.save(update_fields=["status", "sent_at", "metadata"])
     return True, log
 
 

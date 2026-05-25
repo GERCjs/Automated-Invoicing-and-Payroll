@@ -173,6 +173,84 @@ class AccountsPhaseOneTests(TestCase):
             "Your account is not verified. Please check your email for the verification link.",
         )
 
+    def test_admin_dashboard_shows_unverified_status_for_unverified_account(self):
+        admin = User.objects.create_user(username="verify_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+        target = User.objects.create_user(
+            username="unverified_dashboard_user",
+            email="unverified_dashboard_user@vaniday.com",
+            password="TempPass123!",
+        )
+        target.is_active = False
+        target.save(update_fields=["is_active"])
+        EmailVerificationToken.issue_for_user(target)
+
+        self.client.login(username="verify_admin", password="TempPass123!")
+        response = self.client.get(reverse("admin-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Unverified")
+        self.assertNotContains(response, "Resend Verification")
+
+    def test_admin_can_resend_verification_email(self):
+        admin = User.objects.create_user(username="resend_verify_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+        target = User.objects.create_user(
+            username="resend_verify_target",
+            email="resend_verify_target@vaniday.com",
+            password="TempPass123!",
+        )
+        target.is_active = False
+        target.save(update_fields=["is_active"])
+        old_token = EmailVerificationToken.issue_for_user(target)
+
+        self.client.login(username="resend_verify_admin", password="TempPass123!")
+        response = self.client.post(reverse("managed-account-resend-verification", args=[target.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], reverse("admin-dashboard"))
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Verify your account", mail.outbox[0].subject)
+        self.assertEqual(mail.outbox[0].to, [target.email])
+        old_token.refresh_from_db()
+        self.assertIsNotNone(old_token.used_at)
+        new_token = EmailVerificationToken.objects.filter(user=target, used_at__isnull=True).latest("created_at")
+        self.assertIn(new_token.token, mail.outbox[0].body)
+        email_log = EmailDeliveryLog.objects.latest("attempted_at")
+        self.assertEqual(email_log.template_key, "account_verification_email_v1")
+        self.assertEqual(email_log.status, EmailDeliveryLog.STATUS_SENT)
+        self.assertEqual(email_log.triggered_by, admin)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="admin.account.verification_email_resent",
+                user=admin,
+                target_type="user",
+                target_id=str(target.id),
+            ).exists()
+        )
+
+    def test_admin_can_resend_verification_for_active_account_with_pending_token(self):
+        admin = User.objects.create_user(username="active_resend_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+        target = User.objects.create_user(
+            username="active_pending_verify_target",
+            email="geraldcjs@gmail.com",
+            password="TempPass123!",
+        )
+        old_token = EmailVerificationToken.issue_for_user(target)
+
+        self.client.login(username="active_resend_admin", password="TempPass123!")
+        response = self.client.post(reverse("managed-account-resend-verification", args=[target.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, [target.email])
+        old_token.refresh_from_db()
+        self.assertIsNotNone(old_token.used_at)
+
     def test_staff_user_cannot_access_admin_account_creation_page(self):
         staff = User.objects.create_user(username="plainstaff", password="TempPass123!")
         staff.role_profile.role = STAFF
