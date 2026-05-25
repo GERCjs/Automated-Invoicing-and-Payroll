@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlencode
 
@@ -19,6 +20,9 @@ WEBHOOK_EVENT_COMPLETED = "checkout.session.completed"
 WEBHOOK_EVENT_ASYNC_SUCCEEDED = "checkout.session.async_payment_succeeded"
 WEBHOOK_EVENT_ASYNC_FAILED = "checkout.session.async_payment_failed"
 WEBHOOK_EVENT_EXPIRED = "checkout.session.expired"
+WEBHOOK_EVENT_REFUND_CREATED = "refund.created"
+WEBHOOK_EVENT_REFUND_UPDATED = "refund.updated"
+WEBHOOK_EVENT_REFUND_FAILED = "refund.failed"
 PAYNOW_ENABLED_CURRENCY = "SGD"
 
 SUPPORTED_WEBHOOK_EVENTS = {
@@ -26,6 +30,9 @@ SUPPORTED_WEBHOOK_EVENTS = {
     WEBHOOK_EVENT_ASYNC_SUCCEEDED,
     WEBHOOK_EVENT_ASYNC_FAILED,
     WEBHOOK_EVENT_EXPIRED,
+    WEBHOOK_EVENT_REFUND_CREATED,
+    WEBHOOK_EVENT_REFUND_UPDATED,
+    WEBHOOK_EVENT_REFUND_FAILED,
 }
 
 
@@ -89,6 +96,32 @@ def _normalize_external_id(value: Any) -> str:
 def _append_checkout_cancel_reference(cancel_url: str, payment_record: PaymentRecord) -> str:
     separator = "&" if "?" in cancel_url else "?"
     return f"{cancel_url}{separator}{urlencode({'payment_reference': payment_record.payment_reference})}"
+
+
+def _resolve_refunded_invoice_status(invoice: Invoice) -> str:
+    if invoice.due_date < timezone.localdate():
+        return Invoice.STATUS_OVERDUE
+    return Invoice.STATUS_SENT
+
+
+def _apply_local_refunded_state(payment_record: PaymentRecord) -> None:
+    with transaction.atomic():
+        locked_record = (
+            PaymentRecord.objects.select_related("invoice")
+            .select_for_update()
+            .get(pk=payment_record.pk)
+        )
+        invoice = locked_record.invoice
+        updates = []
+        if locked_record.status != PaymentRecord.STATUS_REFUNDED:
+            locked_record.status = PaymentRecord.STATUS_REFUNDED
+            updates.append("status")
+        if updates:
+            updates.append("updated_at")
+            locked_record.save(update_fields=updates)
+        if invoice.status == Invoice.STATUS_PAID:
+            invoice.status = _resolve_refunded_invoice_status(invoice)
+            invoice.save(update_fields=["status", "updated_at"])
 
 
 def _build_checkout_session(
@@ -176,6 +209,45 @@ def retrieve_checkout_session(session_id: str) -> Any:
     stripe = _import_stripe()
     stripe.api_key = _require_stripe_secret_key()
     return stripe.checkout.Session.retrieve(session_id)
+
+
+def create_full_refund_for_payment(
+    *,
+    payment_record: PaymentRecord,
+    initiated_by=None,
+) -> Any:
+    if payment_record.provider != PaymentRecord.PROVIDER_STRIPE:
+        raise ValueError("Only Stripe payments can be refunded from this flow.")
+    if payment_record.status != PaymentRecord.STATUS_SUCCEEDED:
+        raise ValueError("Only successful Stripe payments can be refunded.")
+    payment_intent_id = _normalize_external_id(payment_record.external_transaction_id)
+    if not payment_intent_id:
+        raise ValueError("Stripe payment intent is missing for this payment record.")
+
+    stripe = _import_stripe()
+    stripe.api_key = _require_stripe_secret_key()
+    try:
+        refund = stripe.Refund.create(
+            payment_intent=payment_intent_id,
+            reason="requested_by_customer",
+            metadata={
+                "payment_record_id": str(payment_record.id),
+                "invoice_id": str(payment_record.invoice_id),
+                "payment_reference": payment_record.payment_reference,
+            },
+            idempotency_key=f"refund-full-{payment_record.id}",
+        )
+    except Exception as exc:
+        error_text = str(exc).lower()
+        if "already been refunded" in error_text:
+            _apply_local_refunded_state(payment_record)
+            return SimpleNamespace(id="", status="succeeded", payment_intent=payment_intent_id)
+        raise
+
+    refund_status = str(getattr(refund, "status", "") or "").lower()
+    if refund_status == "succeeded":
+        _apply_local_refunded_state(payment_record)
+    return refund
 
 
 def finalize_checkout_success_from_redirect(
@@ -295,6 +367,121 @@ def _lock_payment_record(session_object: dict[str, Any]) -> PaymentRecord | None
     if payment_record_id:
         return queryset.filter(id=payment_record_id).first()
     return None
+
+
+def _lock_payment_record_for_refund(refund_object: dict[str, Any]) -> PaymentRecord | None:
+    metadata = refund_object.get("metadata") or {}
+    if not hasattr(metadata, "get"):
+        try:
+            metadata = dict(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+    payment_record_id = metadata.get("payment_record_id")
+    payment_intent_id = _normalize_external_id(refund_object.get("payment_intent"))
+
+    queryset = PaymentRecord.objects.select_related("invoice").select_for_update()
+    if payment_record_id:
+        payment_record = queryset.filter(id=payment_record_id).first()
+        if payment_record is not None:
+            return payment_record
+    if payment_intent_id:
+        return queryset.filter(external_transaction_id=payment_intent_id).first()
+    return None
+
+
+def _mark_refund_from_event(
+    *,
+    event_type: str,
+    refund_object: dict[str, Any],
+    event_record: StripeWebhookEvent,
+) -> None:
+    refund_status = str(refund_object.get("status") or "").lower()
+    refund_id = _normalize_external_id(refund_object.get("id"))
+    with transaction.atomic():
+        payment_record = _lock_payment_record_for_refund(refund_object)
+        if payment_record is None:
+            event_record.status = StripeWebhookEvent.STATUS_IGNORED
+            event_record.error_message = "Payment record not found for refund event."
+            event_record.processed_at = timezone.now()
+            event_record.save(update_fields=["status", "error_message", "processed_at", "updated_at"])
+            return
+
+        invoice = payment_record.invoice
+        invoice_status_before = invoice.status
+        if refund_status == "succeeded":
+            if payment_record.status != PaymentRecord.STATUS_REFUNDED:
+                payment_record.status = PaymentRecord.STATUS_REFUNDED
+                payment_record.save(update_fields=["status", "updated_at"])
+            if invoice.status == Invoice.STATUS_PAID:
+                invoice.status = _resolve_refunded_invoice_status(invoice)
+                invoice.save(update_fields=["status", "updated_at"])
+            log_event(
+                action="payment.refund.succeeded",
+                user=None,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "payment_reference": payment_record.payment_reference,
+                    "refund_status": refund_status,
+                    "refund_id": refund_id,
+                    "event_type": event_type,
+                    "previous_invoice_status": invoice_status_before,
+                    "new_invoice_status": invoice.status,
+                },
+            )
+        elif refund_status in {"failed", "canceled"}:
+            log_event(
+                action="payment.refund.failed",
+                user=None,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "payment_reference": payment_record.payment_reference,
+                    "refund_status": refund_status,
+                    "refund_id": refund_id,
+                    "event_type": event_type,
+                },
+            )
+        else:
+            log_event(
+                action="payment.refund.requested",
+                user=None,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "payment_reference": payment_record.payment_reference,
+                    "refund_status": refund_status or "unknown",
+                    "refund_id": refund_id,
+                    "event_type": event_type,
+                },
+            )
+
+        event_record.status = StripeWebhookEvent.STATUS_PROCESSED
+        event_record.payment_record = payment_record
+        event_record.invoice = invoice
+        event_record.processed_at = timezone.now()
+        event_record.error_message = ""
+        event_record.save(
+            update_fields=[
+                "status",
+                "payment_record",
+                "invoice",
+                "processed_at",
+                "error_message",
+                "updated_at",
+            ]
+        )
+
+        event_record.payload = event_record.payload or {}
+        payload_data = event_record.payload.get("data") or {}
+        payload_object = payload_data.get("object") or {}
+        payload_object["normalized_refund_status"] = refund_status
+        payload_data["object"] = payload_object
+        event_record.payload["data"] = payload_data
+        event_record.save(update_fields=["payload", "updated_at"])
 
 
 def _mark_success_from_session(
@@ -509,6 +696,18 @@ def process_webhook_event(event_payload: dict[str, Any]) -> tuple[StripeWebhookE
                 session_object=event_object,
                 event_record=event_record,
                 final_status=PaymentRecord.STATUS_CANCELLED,
+            )
+            return event_record, created
+
+        if event_type in {
+            WEBHOOK_EVENT_REFUND_CREATED,
+            WEBHOOK_EVENT_REFUND_UPDATED,
+            WEBHOOK_EVENT_REFUND_FAILED,
+        }:
+            _mark_refund_from_event(
+                event_type=event_type,
+                refund_object=event_object,
+                event_record=event_record,
             )
             return event_record, created
 

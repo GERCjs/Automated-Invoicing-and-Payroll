@@ -1,0 +1,21 @@
+Hello {{ customer.name }},
+
+Your refund was completed successfully.
+Merchant/Customer: {{ customer.name }}
+
+Refund Status: Successful
+Invoice Number: {{ invoice.invoice_number }}
+Issue Date: {{ invoice.issue_date }}
+Due Date: {{ invoice.due_date }}
+Total Amount: {{ invoice.currency }} {{ invoice.total_amount }}
+Amount Due: {{ invoice.currency }} {{ amount_due }}
+Refunded Amount: {{ payment_record.currency }} {{ payment_record.amount }}
+Payment Reference: {{ payment_record.payment_reference }}
+
+View your invoice online:
+{{ public_invoice_url }}
+
+If you have questions, contact us at {{ company_email }} or {{ company_phone }}.
+
+Regards,
+{{ company_name }}

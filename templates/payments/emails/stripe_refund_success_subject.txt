@@ -1,0 +1,1 @@
+Refund completed for invoice {{ invoice.invoice_number }}

@@ -93,3 +93,23 @@ class CorePhaseOneTests(TestCase):
         self.assertEqual(second_page.status_code, 200)
         self.assertEqual(len(second_page.context["logs"]), 5)
         self.assertContains(second_page, "Showing 11-15 of 15")
+
+    def test_audit_log_page_shows_friendly_label_for_refund_actions(self):
+        admin = User.objects.create_superuser(
+            username="auditrefund",
+            email="auditrefund@example.com",
+            password="TempPass123!",
+        )
+        AuditLog.objects.create(
+            action="payment.refund.succeeded",
+            user=admin,
+            target_type="invoice",
+            target_id="1",
+        )
+
+        self.client.login(username="auditrefund", password="TempPass123!")
+        response = self.client.get(reverse("dashboard-audit-logs"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Stripe refund succeeded")
+        self.assertNotContains(response, "<td>payment.refund.succeeded</td>", html=True)
