@@ -14,7 +14,7 @@
 <div class="card">
     <div class="card-header">
         <form method="get" class="row g-2 align-items-end">
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label small">Role</label>
                 <select name="role" class="form-select form-select-sm">
                     <option value="">All roles</option>
@@ -27,9 +27,17 @@
                 <label class="form-label small">Action contains</label>
                 <input type="search" name="action" value="{{ selected_action }}" class="form-control form-control-sm">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label small">Search</label>
                 <input type="search" name="q" value="{{ search_query }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Show</label>
+                <select name="per_page" class="form-select form-select-sm">
+                    {% for choice in per_page_choices %}
+                    <option value="{{ choice }}" {% if selected_per_page == choice %}selected{% endif %}>{{ choice }} items</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="col-md-2">
                 <button type="submit" class="btn btn-sm btn-primary w-100">Filter</button>
@@ -44,7 +52,7 @@
                     <th>User</th>
                     <th>Role</th>
                     <th>Description</th>
-                    <th>Action Code</th>
+                    <th>Action</th>
                     <th>Target</th>
                     <th>IP</th>
                 </tr>
@@ -56,7 +64,7 @@
                     <td>{{ log.user.username|default:"System" }}</td>
                     <td>{% if log.user and log.user.role_profile %}{{ log.user.role_profile.get_role_display }}{% else %}-{% endif %}</td>
                     <td>{{ log.description }}</td>
-                    <td><span class="text-muted small">{{ log.action }}</span></td>
+                    <td>{{ log.action_label }}</td>
                     <td>{{ log.target_type }} {{ log.target_id }}</td>
                     <td>{{ log.ip_address|default:"-" }}</td>
                 </tr>
@@ -66,5 +74,35 @@
             </tbody>
         </table>
     </div>
+    {% if page_obj.paginator.count %}
+    <div class="card-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="text-muted small">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }}
+        </div>
+        <nav aria-label="Audit log pages">
+            <ul class="pagination pagination-sm mb-0">
+                {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <a class="page-link" href="?{% if pagination_query %}{{ pagination_query }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">Previous</span></li>
+                {% endif %}
+
+                <li class="page-item disabled">
+                    <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+                </li>
+
+                {% if page_obj.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="?{% if pagination_query %}{{ pagination_query }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+                </li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">Next</span></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

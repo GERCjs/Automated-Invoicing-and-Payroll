@@ -45,7 +45,6 @@
 
                 {% if user.is_authenticated %}
                 <div class="d-flex align-items-center gap-2">
-                    <span class="portal-user">{{ user.username }}{% if current_user_role_label %} ({{ current_user_role_label }}){% endif %}</span>
                     <form method="post" action="{% url 'logout' %}" class="d-inline">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-portal-ghost btn-sm">Logout</button>

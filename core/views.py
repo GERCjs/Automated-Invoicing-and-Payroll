@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db import DatabaseError
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
@@ -337,6 +338,13 @@ def audit_log_list(request):
     selected_action = request.GET.get("action", "").strip()
     search_query = request.GET.get("q", "").strip()
     selected_action_display = "" if selected_action in NOISY_AUDIT_ACTIONS else selected_action
+    per_page_choices = [10, 20, 30, 50]
+    try:
+        selected_per_page = int(request.GET.get("per_page", "10"))
+    except ValueError:
+        selected_per_page = 10
+    if selected_per_page not in per_page_choices:
+        selected_per_page = 10
 
     logs = (
         AuditLog.objects.select_related("user", "user__role_profile")
@@ -355,6 +363,12 @@ def audit_log_list(request):
             | Q(metadata__icontains=search_query)
         )
 
+    paginator = Paginator(logs, selected_per_page)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    query_params = request.GET.copy()
+    query_params.pop("page", None)
+    query_params["per_page"] = str(selected_per_page)
+
     return render(
         request,
         "core/audit_log_list.html",
@@ -364,16 +378,22 @@ def audit_log_list(request):
                     "created_at": log.created_at,
                     "user": log.user,
                     "action": log.action,
+                    "action_label": describe_audit_action(log.action),
                     "description": explain_audit_action(log.action),
                     "target_type": log.target_type,
                     "target_id": log.target_id,
                     "ip_address": log.ip_address,
                 }
-                for log in _safe_list(logs[:200])
+                for log in _safe_list(page_obj.object_list)
             ],
+            "page_obj": page_obj,
+            "paginator": paginator,
+            "pagination_query": query_params.urlencode(),
             "role_choices": ROLE_CHOICES,
             "selected_role": selected_role,
             "selected_action": selected_action_display,
+            "selected_per_page": selected_per_page,
+            "per_page_choices": per_page_choices,
             "search_query": search_query,
         },
     )

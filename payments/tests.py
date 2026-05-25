@@ -14,7 +14,7 @@ from accounts.roles import CUSTOMER
 from core.models import AuditLog
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
-from notifications.services import send_stripe_payment_success_email
+from notifications.services import send_stripe_payment_failed_email, send_stripe_payment_success_email
 
 from .models import PaymentRecord, StripeWebhookEvent
 from .services import create_checkout_for_invoice
@@ -138,6 +138,10 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(response.url, reverse("customer-invoice-detail", args=[self.invoice.pk]))
         create_checkout_mock.assert_not_called()
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
     @patch("payments.views.construct_webhook_event")
     def test_webhook_completed_marks_invoice_paid(self, construct_event_mock):
         payment_record = PaymentRecord.objects.create(
@@ -179,6 +183,15 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
         self.assertEqual(payment_record.external_transaction_id, "pi_test_1001")
         self.assertEqual(StripeWebhookEvent.objects.filter(event_id="evt_test_1001").count(), 1)
+        email_log = EmailDeliveryLog.objects.get(
+            template_key="stripe_payment_success_invoice_email_v1",
+            related_object_id=str(self.invoice.id),
+        )
+        self.assertEqual(email_log.status, EmailDeliveryLog.STATUS_SENT)
+        self.assertEqual(email_log.metadata.get("payment_reference"), payment_record.payment_reference)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Payment Status: Successful", mail.outbox[0].body)
+        self.assertIn(self.invoice.invoice_number, mail.outbox[0].body)
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
@@ -215,6 +228,8 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertIn("Payment received", mail.outbox[0].subject)
         self.assertEqual(mail.outbox[0].to, [self.invoice.customer.email])
         self.assertIn(payment_record.payment_reference, mail.outbox[0].body)
+        self.assertIn("Payment Status: Successful", mail.outbox[0].body)
+        self.assertIn("Total Amount", mail.outbox[0].body)
         self.assertIn("http://testserver/invoices/view/test-token/", mail.outbox[0].body)
         self.assertTrue(mail.outbox[0].attachments)
         attachment_name, _attachment_content, attachment_type = mail.outbox[0].attachments[0]
@@ -252,6 +267,43 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertIn("Invoice PDF could not be generated", log.error_message)
         self.assertEqual(log.metadata.get("pdf_attachment_added"), False)
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    def test_payment_failed_email_service_sends_invoice_details(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-FAILED-EMAIL-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_FAILED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_failed_email_1",
+        )
+
+        success, log = send_stripe_payment_failed_email(
+            invoice=self.invoice,
+            payment_record=payment_record,
+            public_invoice_url="http://testserver/invoices/view/test-token/",
+            failure_reason="Stripe reported that the payment failed.",
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)
+        self.assertEqual(log.template_key, "stripe_payment_failed_invoice_email_v1")
+        self.assertEqual(log.metadata.get("payment_reference"), payment_record.payment_reference)
+        self.assertEqual(log.metadata.get("payment_outcome"), "failed")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Payment Status: Failed", mail.outbox[0].body)
+        self.assertIn("Stripe reported that the payment failed.", mail.outbox[0].body)
+        self.assertIn(self.invoice.invoice_number, mail.outbox[0].body)
+        self.assertIn("Total Amount", mail.outbox[0].body)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
     @patch("payments.views.construct_webhook_event")
     def test_webhook_duplicate_event_is_idempotent(self, construct_event_mock):
         payment_record = PaymentRecord.objects.create(
@@ -295,7 +347,19 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(StripeWebhookEvent.objects.filter(event_id="evt_test_duplicate_1").count(), 1)
+        self.assertEqual(
+            EmailDeliveryLog.objects.filter(
+                template_key="stripe_payment_success_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).count(),
+            1,
+        )
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
     @patch("payments.views.construct_webhook_event")
     def test_webhook_async_failed_marks_payment_failed_and_invoice_not_paid(self, construct_event_mock):
         payment_record = PaymentRecord.objects.create(
@@ -340,7 +404,20 @@ class StripePaymentsPhaseTests(TestCase):
                 target_id=str(self.invoice.id),
             ).exists()
         )
+        self.assertTrue(
+            EmailDeliveryLog.objects.filter(
+                template_key="stripe_payment_failed_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).exists()
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Payment Status: Failed", mail.outbox[0].body)
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
     @patch("payments.views.construct_webhook_event")
     def test_webhook_expired_marks_payment_cancelled_and_invoice_not_paid(self, construct_event_mock):
         payment_record = PaymentRecord.objects.create(
@@ -385,7 +462,20 @@ class StripePaymentsPhaseTests(TestCase):
                 target_id=str(self.invoice.id),
             ).exists()
         )
+        self.assertTrue(
+            EmailDeliveryLog.objects.filter(
+                template_key="stripe_payment_failed_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).exists()
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Stripe Checkout expired", mail.outbox[0].body)
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
     @patch("payments.views.construct_webhook_event")
     def test_webhook_retries_failed_event_and_allows_reprocessing(self, construct_event_mock):
         payment_record = PaymentRecord.objects.create(
@@ -452,6 +542,10 @@ class StripePaymentsPhaseTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
     @patch("payments.views.retrieve_checkout_session")
     def test_success_page_renders_session_data(self, retrieve_session_mock):
         payment_record = PaymentRecord.objects.create(
@@ -473,12 +567,24 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Payment processing")
         self.assertContains(response, payment_record.payment_reference)
+        self.assertTrue(
+            EmailDeliveryLog.objects.filter(
+                template_key="stripe_payment_success_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).exists()
+        )
+        self.assertEqual(len(mail.outbox), 1)
 
     def test_cancel_page_renders(self):
         response = self.client.get(reverse("payment-checkout-cancel"), data={"next": "/invoices/"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Payment cancelled")
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
     def test_cancel_page_marks_payment_cancelled_when_reference_is_present(self):
         payment_record = PaymentRecord.objects.create(
             invoice=self.invoice,
@@ -510,6 +616,15 @@ class StripePaymentsPhaseTests(TestCase):
                 target_id=str(self.invoice.id),
             ).exists()
         )
+        self.assertTrue(
+            EmailDeliveryLog.objects.filter(
+                template_key="stripe_payment_failed_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).exists()
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Payment Status: Failed", mail.outbox[0].body)
 
     @override_settings(STRIPE_SECRET_KEY="")
     def test_create_checkout_requires_stripe_secret_key(self):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -85,6 +86,11 @@ def _normalize_external_id(value: Any) -> str:
     return ""
 
 
+def _append_checkout_cancel_reference(cancel_url: str, payment_record: PaymentRecord) -> str:
+    separator = "&" if "?" in cancel_url else "?"
+    return f"{cancel_url}{separator}{urlencode({'payment_reference': payment_record.payment_reference})}"
+
+
 def _build_checkout_session(
     *,
     invoice: Invoice,
@@ -150,7 +156,7 @@ def create_checkout_for_invoice(
         invoice=invoice,
         payment_record=payment_record,
         success_url=success_url,
-        cancel_url=cancel_url,
+        cancel_url=_append_checkout_cancel_reference(cancel_url, payment_record),
     )
     payment_record.stripe_checkout_session_id = session.id
     payment_record.external_transaction_id = _normalize_external_id(

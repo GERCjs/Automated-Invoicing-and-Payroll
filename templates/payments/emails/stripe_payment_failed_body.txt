@@ -1,17 +1,17 @@
 Hello {{ customer.name }},
 
-Your invoice payment was successful.
+Your invoice payment was not completed.
 Merchant/Customer: {{ customer.name }}
 
-Payment Status: Successful
+Payment Status: Failed
 Invoice Number: {{ invoice.invoice_number }}
 Issue Date: {{ invoice.issue_date }}
 Due Date: {{ invoice.due_date }}
 Total Amount: {{ invoice.currency }} {{ invoice.total_amount }}
 Amount Due: {{ invoice.currency }} {{ amount_due }}
-Payment Date: {{ payment_record.paid_at|date:"Y-m-d H:i"|default:"Confirmed by Stripe" }}
-Amount Paid: {{ payment_record.currency }} {{ payment_record.amount }}
+Attempted Amount: {{ payment_record.currency }} {{ payment_record.amount }}
 Payment Reference: {{ payment_record.payment_reference }}
+Failure Reason: {{ failure_reason }}
 
 View your invoice online:
 {{ public_invoice_url }}

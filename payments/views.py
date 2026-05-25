@@ -14,9 +14,17 @@ from accounts.roles import CUSTOMER
 from core.audit import get_client_ip, log_event
 from invoicing.models import Invoice
 from invoicing.services import apply_overdue_status
+from notifications.services import (
+    send_stripe_payment_failed_email,
+    send_stripe_payment_success_email,
+)
 
 from .models import PaymentRecord
 from .services import (
+    WEBHOOK_EVENT_ASYNC_FAILED,
+    WEBHOOK_EVENT_ASYNC_SUCCEEDED,
+    WEBHOOK_EVENT_COMPLETED,
+    WEBHOOK_EVENT_EXPIRED,
     construct_webhook_event,
     create_checkout_for_invoice,
     finalize_checkout_success_from_redirect,
@@ -29,6 +37,67 @@ PAYABLE_INVOICE_STATUSES = {
     Invoice.STATUS_VIEWED,
     Invoice.STATUS_OVERDUE,
 }
+
+
+def _public_invoice_url(request, invoice: Invoice) -> str:
+    return request.build_absolute_uri(reverse("invoice-public-view", args=[invoice.public_view_token]))
+
+
+def _send_success_payment_email(request, payment_record: PaymentRecord) -> None:
+    invoice = payment_record.invoice
+    success, delivery_log = send_stripe_payment_success_email(
+        invoice=invoice,
+        payment_record=payment_record,
+        public_invoice_url=_public_invoice_url(request, invoice),
+        triggered_by=request.user if request.user.is_authenticated else payment_record.created_by,
+    )
+    log_event(
+        action="payment.email.sent" if success else "payment.email.failed",
+        user=request.user if request.user.is_authenticated else payment_record.created_by,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata={
+            "invoice_number": invoice.invoice_number,
+            "delivery_log_id": delivery_log.id,
+            "payment_reference": payment_record.payment_reference,
+            "payment_outcome": "successful",
+            "recipient_email": invoice.customer.email,
+            "error_message": delivery_log.error_message,
+        },
+        ip_address=get_client_ip(request),
+    )
+
+
+def _send_failed_payment_email(
+    request,
+    payment_record: PaymentRecord,
+    *,
+    failure_reason: str,
+) -> None:
+    invoice = payment_record.invoice
+    success, delivery_log = send_stripe_payment_failed_email(
+        invoice=invoice,
+        payment_record=payment_record,
+        public_invoice_url=_public_invoice_url(request, invoice),
+        failure_reason=failure_reason,
+        triggered_by=request.user if request.user.is_authenticated else payment_record.created_by,
+    )
+    log_event(
+        action="payment.email.sent" if success else "payment.email.failed",
+        user=request.user if request.user.is_authenticated else payment_record.created_by,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata={
+            "invoice_number": invoice.invoice_number,
+            "delivery_log_id": delivery_log.id,
+            "payment_reference": payment_record.payment_reference,
+            "payment_outcome": "failed",
+            "recipient_email": invoice.customer.email,
+            "failure_reason": failure_reason,
+            "error_message": delivery_log.error_message,
+        },
+        ip_address=get_client_ip(request),
+    )
 
 
 def _checkout_success_url(request) -> str:
@@ -184,6 +253,8 @@ def checkout_success(request):
                 ).first()
             if payment_record is not None:
                 invoice = payment_record.invoice
+                if payment_record.status == PaymentRecord.STATUS_SUCCEEDED:
+                    _send_success_payment_email(request, payment_record)
 
     return render(
         request,
@@ -235,6 +306,12 @@ def checkout_cancel(request):
             },
             ip_address=get_client_ip(request),
         )
+        if payment_record.status == PaymentRecord.STATUS_CANCELLED:
+            _send_failed_payment_email(
+                request,
+                payment_record,
+                failure_reason="Stripe Checkout was cancelled before payment was completed.",
+            )
     else:
         log_event(
             action="payment.checkout.cancelled",
@@ -284,4 +361,21 @@ def stripe_webhook(request):
 
     if event_record.status == event_record.STATUS_FAILED:
         return HttpResponse(status=500)
+
+    if event_record.status == event_record.STATUS_PROCESSED and event_record.payment_record_id:
+        payment_record = event_record.payment_record
+        if event_record.event_type in {WEBHOOK_EVENT_COMPLETED, WEBHOOK_EVENT_ASYNC_SUCCEEDED}:
+            _send_success_payment_email(request, payment_record)
+        elif event_record.event_type == WEBHOOK_EVENT_ASYNC_FAILED:
+            _send_failed_payment_email(
+                request,
+                payment_record,
+                failure_reason="Stripe reported that the payment failed.",
+            )
+        elif event_record.event_type == WEBHOOK_EVENT_EXPIRED:
+            _send_failed_payment_email(
+                request,
+                payment_record,
+                failure_reason="Stripe Checkout expired before payment was completed.",
+            )
     return HttpResponse(status=200)
