@@ -140,16 +140,10 @@ SINGAPORE_BANK_CHOICES = [
 
 class EmployeeForm(forms.ModelForm):
     bank_name = forms.ChoiceField(choices=SINGAPORE_BANK_CHOICES, required=False)
-    user = forms.ModelChoiceField(
-        queryset=get_user_model().objects.none(),
-        required=False,
-        empty_label="Not linked",
-    )
 
     class Meta:
         model = Employee
         fields = [
-            "user",
             "employee_code",
             "nric",
             "first_name",
@@ -192,11 +186,33 @@ class EmployeeForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["date_of_appointment"].required = True
-        self.fields["user"].widget.attrs.update({"class": "form-select"})
+
+    def clean(self):
+        cleaned_data = super().clean()
+        email = (cleaned_data.get("email") or "").strip()
+        self._linked_user = None
+        if not email:
+            return cleaned_data
 
         User = get_user_model()
-        available_users = User.objects.order_by("username")
-        linked_user_ids = Employee.objects.exclude(user__isnull=True).values_list("user_id", flat=True)
-        if self.instance and self.instance.pk and self.instance.user_id:
-            linked_user_ids = [uid for uid in linked_user_ids if uid != self.instance.user_id]
-        self.fields["user"].queryset = available_users.exclude(id__in=linked_user_ids)
+        matched_user = User.objects.filter(email__iexact=email).order_by("id").first()
+        if matched_user is None:
+            return cleaned_data
+
+        existing_employee = Employee.objects.filter(user=matched_user)
+        if self.instance and self.instance.pk:
+            existing_employee = existing_employee.exclude(pk=self.instance.pk)
+        existing_employee = existing_employee.first()
+        if existing_employee is not None:
+            self.add_error("email", f"This email is already linked to employee {existing_employee.employee_code}.")
+            return cleaned_data
+
+        self._linked_user = matched_user
+        return cleaned_data
+
+    def save(self, commit=True):
+        employee = super().save(commit=False)
+        employee.user = self._linked_user
+        if commit:
+            employee.save()
+        return employee

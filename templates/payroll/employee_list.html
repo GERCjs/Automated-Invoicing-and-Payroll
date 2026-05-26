@@ -35,7 +35,6 @@
                     <th>Employee Code</th>
                     <th>Name</th>
                     <th>Email</th>
-                    <th>Linked Account</th>
                     <th>Job Title</th>
                     <th>Legal Status</th>
                     <th>Payment Method</th>
@@ -48,14 +47,13 @@
                     <td>{{ employee.employee_code }}</td>
                     <td>{{ employee.first_name }} {{ employee.last_name }}</td>
                     <td>{{ employee.email }}</td>
-                    <td>{% if employee.user %}{{ employee.user.username }}{% else %}-{% endif %}</td>
                     <td>{{ employee.job_title|default:"-" }}</td>
                     <td>{{ employee.get_legal_status_display|default:"-" }}</td>
                     <td>{{ employee.get_payment_method_display|default:"-" }}</td>
                     <td class="text-end"><a href="{% url 'employee-edit' employee.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="8" class="text-center py-4"><div class="empty-state">No employees found.</div></td></tr>
+                <tr><td colspan="7" class="text-center py-4"><div class="empty-state">No employees found.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>

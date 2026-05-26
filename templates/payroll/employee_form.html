@@ -15,51 +15,71 @@
         <form method="post" novalidate>
             {% csrf_token %}
 
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger mb-3">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
             <h2 class="section-heading">Essentials</h2>
             <div class="row g-3">
                 <div class="col-md-6">
-                    <label class="form-label">Linked User Account</label>
-                    {{ form.user }}
+                    <label class="form-label">Email</label>
+                    {{ form.email }}
+                    {% for error in form.email.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                    <div class="form-text">If this email matches an existing user account, the employee will be linked automatically.</div>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Employee Code</label>
                     {{ form.employee_code }}
+                    {% for error in form.employee_code.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">NRIC</label>
                     {{ form.nric }}
+                    {% for error in form.nric.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">First Name</label>
                     {{ form.first_name }}
+                    {% for error in form.first_name.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Last Name</label>
                     {{ form.last_name }}
+                    {% for error in form.last_name.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Date of Birth</label>
                     {{ form.date_of_birth }}
+                    {% for error in form.date_of_birth.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Date of Appointment</label>
                     {{ form.date_of_appointment }}
+                    {% for error in form.date_of_appointment.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Legal Status</label>
                     {{ form.legal_status }}
+                    {% for error in form.legal_status.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Gender</label>
                     {{ form.gender }}
+                    {% for error in form.gender.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Race</label>
                     {{ form.race }}
+                    {% for error in form.race.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Religion</label>
                     {{ form.religion }}
+                    {% for error in form.religion.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-12">
                     <div class="form-check mb-2">
@@ -74,14 +94,12 @@
                 <div class="col-md-6">
                     <label class="form-label">Job Title</label>
                     {{ form.job_title }}
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Email</label>
-                    {{ form.email }}
+                    {% for error in form.job_title.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Payment Method</label>
                     {{ form.payment_method }}
+                    {% for error in form.payment_method.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
             </div>
 
@@ -90,14 +108,17 @@
                 <div class="col-md-6">
                     <label class="form-label">Bank</label>
                     {{ form.bank_name }}
+                    {% for error in form.bank_name.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Account Number</label>
                     {{ form.bank_account_number }}
+                    {% for error in form.bank_account_number.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Branch Code</label>
                     {{ form.bank_branch_code }}
+                    {% for error in form.bank_branch_code.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
             </div>
 
