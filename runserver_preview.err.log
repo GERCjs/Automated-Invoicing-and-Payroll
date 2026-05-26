@@ -356,3 +356,13 @@ C:\Users\me\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\db\
 [27/May/2026 01:21:57] "GET /reports/admin-security/ HTTP/1.1" 200 41209
 [27/May/2026 01:21:58] "GET /reports/payroll/ HTTP/1.1" 200 23958
 [27/May/2026 01:22:04] "GET /reports/payments/ HTTP/1.1" 200 29964
+[27/May/2026 01:25:14] "GET /invoices/dashboard/ HTTP/1.1" 200 18809
+[27/May/2026 01:25:14] "GET /static/css/app.css?v=20260525b HTTP/1.1" 304 0
+[27/May/2026 01:25:15] "GET /payroll/dashboard/ HTTP/1.1" 200 10254
+[27/May/2026 01:25:16] "GET /invoices/dashboard/ HTTP/1.1" 200 18809
+[27/May/2026 01:25:17] "GET /payroll/dashboard/ HTTP/1.1" 200 10254
+[27/May/2026 01:25:17] "GET /payroll/employees/ HTTP/1.1" 200 9827
+[27/May/2026 01:25:19] "GET /invoices/dashboard/ HTTP/1.1" 200 18809
+[27/May/2026 01:25:20] "GET /payroll/dashboard/ HTTP/1.1" 200 10254
+[27/May/2026 01:25:21] "GET /payroll/employees/ HTTP/1.1" 200 9827
+[27/May/2026 01:25:22] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 95358
