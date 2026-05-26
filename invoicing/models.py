@@ -52,12 +52,14 @@ class Invoice(models.Model):
     STATUS_VIEWED = "viewed"
     STATUS_PAID = "paid"
     STATUS_OVERDUE = "overdue"
+    STATUS_REFUNDED = "refunded"
     STATUS_CHOICES = [
         (STATUS_DRAFT, "Draft"),
         (STATUS_SENT, "Pending Payment"),
         (STATUS_VIEWED, "Viewed"),
         (STATUS_PAID, "Paid"),
         (STATUS_OVERDUE, "Overdue"),
+        (STATUS_REFUNDED, "Refunded"),
     ]
 
     invoice_number = models.CharField(max_length=50, unique=True)

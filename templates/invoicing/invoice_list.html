@@ -25,6 +25,7 @@
             <a href="{% url 'invoice-list' %}?status=sent" class="invoice-filter-chip {% if selected_filter == 'sent' or selected_filter == 'pending_payment' %}is-active is-pending{% endif %}">Pending Payment ({{ status_summary.sent }})</a>
             <a href="{% url 'invoice-list' %}?status=viewed" class="invoice-filter-chip {% if selected_filter == 'viewed' %}is-active is-viewed{% endif %}">Viewed ({{ status_summary.viewed }})</a>
             <a href="{% url 'invoice-list' %}?status=paid" class="invoice-filter-chip {% if selected_filter == 'paid' %}is-active is-paid{% endif %}">Paid ({{ status_summary.paid }})</a>
+            <a href="{% url 'invoice-list' %}?status=refunded" class="invoice-filter-chip {% if selected_filter == 'refunded' %}is-active{% endif %}">Refunded ({{ status_summary.refunded }})</a>
         </div>
         <form method="get" class="row g-3 align-items-end invoice-search-form">
             {% if selected_filter %}

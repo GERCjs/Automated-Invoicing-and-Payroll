@@ -352,6 +352,7 @@ def invoice_list(request):
         "pending_payment": [Invoice.STATUS_SENT],
         "viewed": [Invoice.STATUS_VIEWED],
         "paid": [Invoice.STATUS_PAID],
+        "refunded": [Invoice.STATUS_REFUNDED],
         "overdue": [Invoice.STATUS_OVERDUE],
         "outstanding": [
             Invoice.STATUS_DRAFT,
@@ -382,6 +383,7 @@ def invoice_list(request):
         "sent": Invoice.objects.filter(status=Invoice.STATUS_SENT).count(),
         "viewed": Invoice.objects.filter(status=Invoice.STATUS_VIEWED).count(),
         "paid": Invoice.objects.filter(status=Invoice.STATUS_PAID).count(),
+        "refunded": Invoice.objects.filter(status=Invoice.STATUS_REFUNDED).count(),
         "overdue": Invoice.objects.filter(status=Invoice.STATUS_OVERDUE).count(),
     }
 
@@ -392,6 +394,7 @@ def invoice_list(request):
         "pending_payment": "Pending payment invoices",
         "viewed": "Viewed invoices",
         "paid": "Paid invoices",
+        "refunded": "Refunded invoices",
         "overdue": "Overdue invoices",
         "outstanding": "Outstanding invoices",
     }

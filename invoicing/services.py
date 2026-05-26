@@ -99,6 +99,7 @@ def transition_invoice_status(invoice: Invoice, new_status: str) -> tuple[bool, 
         Invoice.STATUS_VIEWED: {Invoice.STATUS_PAID, Invoice.STATUS_OVERDUE},
         Invoice.STATUS_OVERDUE: {Invoice.STATUS_PAID},
         Invoice.STATUS_PAID: set(),
+        Invoice.STATUS_REFUNDED: set(),
     }
     if new_status not in dict(Invoice.STATUS_CHOICES):
         return False, "Invalid status."

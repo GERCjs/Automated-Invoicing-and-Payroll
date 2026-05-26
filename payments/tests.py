@@ -657,7 +657,7 @@ class StripePaymentsPhaseTests(TestCase):
         event = StripeWebhookEvent.objects.get(event_id="evt_test_refund_1")
         self.assertEqual(event.status, StripeWebhookEvent.STATUS_PROCESSED)
         self.assertEqual(payment_record.status, PaymentRecord.STATUS_REFUNDED)
-        self.assertEqual(self.invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(self.invoice.status, Invoice.STATUS_REFUNDED)
         self.assertTrue(
             AuditLog.objects.filter(
                 action="payment.refund.succeeded",
@@ -1006,7 +1006,7 @@ class StripePaymentsPhaseTests(TestCase):
         payment_record.refresh_from_db()
         self.invoice.refresh_from_db()
         self.assertEqual(payment_record.status, PaymentRecord.STATUS_REFUNDED)
-        self.assertEqual(self.invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(self.invoice.status, Invoice.STATUS_REFUNDED)
         stripe_mock.Refund.create.assert_called_once()
 
     @override_settings(STRIPE_SECRET_KEY="sk_test_guardrails")
@@ -1037,7 +1037,7 @@ class StripePaymentsPhaseTests(TestCase):
         payment_record.refresh_from_db()
         self.invoice.refresh_from_db()
         self.assertEqual(payment_record.status, PaymentRecord.STATUS_REFUNDED)
-        self.assertEqual(self.invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(self.invoice.status, Invoice.STATUS_REFUNDED)
 
     @override_settings(STRIPE_SECRET_KEY="sk_test_guardrails")
     @patch("payments.services._import_stripe")

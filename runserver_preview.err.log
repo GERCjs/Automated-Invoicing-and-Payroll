@@ -37,3 +37,75 @@ C:\Users\me\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\db\
 [26/May/2026 23:01:01] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 91746
 [26/May/2026 23:03:01] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 93494
 [26/May/2026 23:05:26] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 94188
+[26/May/2026 23:06:22] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:06:24] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:33] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:35] "GET /invoices/create/ HTTP/1.1" 200 11000
+[26/May/2026 23:06:38] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:42] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:43] "GET /reports/invoice-customer/ HTTP/1.1" 200 34040
+[26/May/2026 23:06:44] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:45] "GET /reports/payments/ HTTP/1.1" 200 27693
+[26/May/2026 23:06:46] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:46] "GET /invoices/create/ HTTP/1.1" 200 11000
+[26/May/2026 23:06:50] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:56] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:06:59] "GET /invoices/create/ HTTP/1.1" 200 11000
+[26/May/2026 23:07:08] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:11:55] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:12:10] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:12:12] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:12:50] "GET /invoices/upload/csv/ HTTP/1.1" 200 5316
+[26/May/2026 23:12:51] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:20:56] "GET /invoices/?status=outstanding HTTP/1.1" 200 42632
+[26/May/2026 23:21:02] "GET /invoices/?status=overdue HTTP/1.1" 200 27116
+[26/May/2026 23:21:03] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:22:14] "GET /invoices/ HTTP/1.1" 200 63459
+[26/May/2026 23:22:17] "GET /invoices/?status=outstanding HTTP/1.1" 200 42632
+[26/May/2026 23:22:19] "GET /invoices/ HTTP/1.1" 200 63459
+[26/May/2026 23:22:22] "GET /invoices/ HTTP/1.1" 200 63459
+[26/May/2026 23:22:25] "GET /invoices/ HTTP/1.1" 200 63459
+[26/May/2026 23:22:26] "GET /invoices/ HTTP/1.1" 200 63459
+[26/May/2026 23:22:36] "GET /reports/payments/ HTTP/1.1" 200 27693
+[26/May/2026 23:22:54] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:23:06] "GET /reports/payments/ HTTP/1.1" 200 27693
+[26/May/2026 23:23:57] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:24:08] "GET /reports/payments/ HTTP/1.1" 200 27693
+[26/May/2026 23:24:12] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:30:00] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:30:03] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:30:09] "POST /accounts/logout/ HTTP/1.1" 302 0
+[26/May/2026 23:30:09] "GET /accounts/login/ HTTP/1.1" 200 4501
+[26/May/2026 23:30:15] "POST /accounts/login/ HTTP/1.1" 302 0
+[26/May/2026 23:30:15] "GET /dashboard/ HTTP/1.1" 302 0
+[26/May/2026 23:30:15] "GET /invoices/my/dashboard/ HTTP/1.1" 200 22284
+[26/May/2026 23:30:19] "POST /payments/checkout/customer/36/ HTTP/1.1" 302 0
+[26/May/2026 23:30:38] "GET /payments/checkout/success/?session_id=cs_test_a1YhJ1poYLAtAWJmsIoDdNrRVP6MDCHCKchNCJ41Ue2JFhoD8XGl1ydPxB HTTP/1.1" 200 4378
+[26/May/2026 23:30:39] "GET /invoices/my/dashboard/ HTTP/1.1" 200 21720
+[26/May/2026 23:30:40] "POST /accounts/logout/ HTTP/1.1" 302 0
+[26/May/2026 23:30:40] "GET /accounts/login/ HTTP/1.1" 200 4501
+[26/May/2026 23:30:46] "POST /accounts/login/ HTTP/1.1" 302 0
+C:\Users\me\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\db\models\fields\__init__.py:1611: RuntimeWarning: DateTimeField AuditLog.created_at received a naive datetime (2026-05-01 00:00:00) while time zone support is active.
+  warnings.warn(
+[26/May/2026 23:30:46] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:30:59] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:31:05] "GET /invoices/?status=outstanding HTTP/1.1" 200 41520
+[26/May/2026 23:31:09] "GET /invoices/?status=paid HTTP/1.1" 200 29917
+[26/May/2026 23:31:11] "GET /invoices/36/ HTTP/1.1" 200 9931
+[26/May/2026 23:31:17] "POST /payments/refund/invoice/36/ HTTP/1.1" 302 0
+[26/May/2026 23:31:17] "GET /invoices/36/ HTTP/1.1" 200 9818
+[26/May/2026 23:31:19,754] - Broken pipe from ('127.0.0.1', 52888)
+[26/May/2026 23:31:19] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 23:31:31] "GET /reports/payments/ HTTP/1.1" 200 27747
+[26/May/2026 23:31:35] "GET /invoices/dashboard/ HTTP/1.1" 200 18167
+[26/May/2026 23:31:37] "GET /dashboard/ HTTP/1.1" 200 20423
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\core\views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\invoicing\models.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\payments\services.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\invoicing\services.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\invoicing\views.py changed, reloading.
+Watching for file changes with StatReloader

@@ -236,6 +236,10 @@ def dashboard(request):
         paid_at__isnull=False,
     )
     collected_total = _safe_sum(succeeded_payments, "amount")
+    refunded_total = _safe_sum(
+        PaymentRecord.objects.filter(status=PaymentRecord.STATUS_REFUNDED),
+        "amount",
+    )
     collected_this_month = _safe_sum(
         succeeded_payments.filter(paid_at__date__gte=current_month_start, paid_at__date__lte=today),
         "amount",
@@ -325,8 +329,12 @@ def dashboard(request):
             "email_failed_count": email_status_counts.get(EmailDeliveryLog.STATUS_FAILED, 0),
             "collection_trend_labels": month_labels,
             "collection_trend_values": monthly_collection_values,
-            "outstanding_vs_collected_labels": ["Collected", "Outstanding"],
-            "outstanding_vs_collected_values": [_to_float(collected_total), _to_float(invoice_outstanding)],
+            "outstanding_vs_collected_labels": ["Collected", "Outstanding", "Refunded"],
+            "outstanding_vs_collected_values": [
+                _to_float(collected_total),
+                _to_float(invoice_outstanding),
+                _to_float(refunded_total),
+            ],
             "payroll_trend_labels": month_labels,
             "payroll_trend_values": monthly_payroll_values,
             "collected_this_month": collected_this_month,

@@ -99,9 +99,7 @@ def _append_checkout_cancel_reference(cancel_url: str, payment_record: PaymentRe
 
 
 def _resolve_refunded_invoice_status(invoice: Invoice) -> str:
-    if invoice.due_date < timezone.localdate():
-        return Invoice.STATUS_OVERDUE
-    return Invoice.STATUS_SENT
+    return Invoice.STATUS_REFUNDED
 
 
 def _apply_local_refunded_state(payment_record: PaymentRecord) -> None:

@@ -40,6 +40,7 @@ INVOICE_STATUS_MAP = {
     "viewed": Invoice.STATUS_VIEWED,
     "paid": Invoice.STATUS_PAID,
     "overdue": Invoice.STATUS_OVERDUE,
+    "refunded": Invoice.STATUS_REFUNDED,
 }
 
 PAYROLL_ENTRY_STATUS_MAP = {
