@@ -19,13 +19,34 @@
     <div class="card-body">
         <div class="d-flex flex-wrap gap-2 align-items-center mb-3 invoice-filter-toolbar">
             <span class="fw-semibold me-2">Filter:</span>
-            <a href="{% url 'invoice-list' %}" class="invoice-filter-chip {% if not selected_filter %}is-active is-all{% endif %}">All ({{ status_summary.total }})</a>
-            <a href="{% url 'invoice-list' %}?status=overdue" class="invoice-filter-chip {% if selected_filter == 'overdue' %}is-active is-overdue{% endif %}">Overdue ({{ status_summary.overdue }})</a>
-            <a href="{% url 'invoice-list' %}?status=draft" class="invoice-filter-chip {% if selected_filter == 'draft' %}is-active is-draft{% endif %}">Draft ({{ status_summary.draft }})</a>
-            <a href="{% url 'invoice-list' %}?status=sent" class="invoice-filter-chip {% if selected_filter == 'sent' or selected_filter == 'pending_payment' %}is-active is-pending{% endif %}">Pending Payment ({{ status_summary.sent }})</a>
-            <a href="{% url 'invoice-list' %}?status=viewed" class="invoice-filter-chip {% if selected_filter == 'viewed' %}is-active is-viewed{% endif %}">Viewed ({{ status_summary.viewed }})</a>
-            <a href="{% url 'invoice-list' %}?status=paid" class="invoice-filter-chip {% if selected_filter == 'paid' %}is-active is-paid{% endif %}">Paid ({{ status_summary.paid }})</a>
-            <a href="{% url 'invoice-list' %}?status=refunded" class="invoice-filter-chip {% if selected_filter == 'refunded' %}is-active{% endif %}">Refunded ({{ status_summary.refunded }})</a>
+            <div class="dropdown">
+                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    {% if selected_filter == "overdue" %}
+                    Overdue
+                    {% elif selected_filter == "draft" %}
+                    Draft
+                    {% elif selected_filter == "sent" or selected_filter == "pending_payment" %}
+                    Pending Payment
+                    {% elif selected_filter == "viewed" %}
+                    Viewed
+                    {% elif selected_filter == "paid" %}
+                    Paid
+                    {% elif selected_filter == "refunded" %}
+                    Refunded
+                    {% else %}
+                    All
+                    {% endif %}
+                </button>
+                <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="{% url 'invoice-list' %}">All ({{ status_summary.total }})</a></li>
+                    <li><a class="dropdown-item" href="{% url 'invoice-list' %}?status=overdue">Overdue ({{ status_summary.overdue }})</a></li>
+                    <li><a class="dropdown-item" href="{% url 'invoice-list' %}?status=draft">Draft ({{ status_summary.draft }})</a></li>
+                    <li><a class="dropdown-item" href="{% url 'invoice-list' %}?status=sent">Pending Payment ({{ status_summary.sent }})</a></li>
+                    <li><a class="dropdown-item" href="{% url 'invoice-list' %}?status=viewed">Viewed ({{ status_summary.viewed }})</a></li>
+                    <li><a class="dropdown-item" href="{% url 'invoice-list' %}?status=paid">Paid ({{ status_summary.paid }})</a></li>
+                    <li><a class="dropdown-item" href="{% url 'invoice-list' %}?status=refunded">Refunded ({{ status_summary.refunded }})</a></li>
+                </ul>
+            </div>
         </div>
         <form method="get" class="row g-3 align-items-end invoice-search-form">
             {% if selected_filter %}

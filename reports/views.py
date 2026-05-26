@@ -13,6 +13,7 @@ from invoicing.models import Invoice
 from notifications.models import EmailDeliveryLog
 from notifications.models import PaymentReminderSettings
 from payments.models import PaymentRecord
+from payments.services import _import_stripe, _require_stripe_secret_key
 from payroll.models import Employee, PayrollRecord
 from payroll.services import cpf_for_2026
 
@@ -453,6 +454,98 @@ def payment_stripe_report(request):
             }
         )
 
+    stripe_succeeded_payments = PaymentRecord.objects.filter(
+        provider=PaymentRecord.PROVIDER_STRIPE,
+        status=PaymentRecord.STATUS_SUCCEEDED,
+    )
+
+    stripe_card_total = 0
+    stripe_paynow_total = 0
+    stripe_unknown_total = 0
+    stripe_records = list(
+        stripe_succeeded_payments.exclude(external_transaction_id__exact="")
+        .only("id", "external_transaction_id")
+        .order_by("id")
+    )
+
+    try:
+        stripe = _import_stripe()
+        stripe.api_key = _require_stripe_secret_key()
+    except Exception:
+        stripe_unknown_total = stripe_succeeded_payments.count()
+    else:
+        for record in stripe_records:
+            method_type = ""
+            try:
+                payment_intent = stripe.PaymentIntent.retrieve(
+                    record.external_transaction_id,
+                    expand=["latest_charge"],
+                )
+                method_types = list(getattr(payment_intent, "payment_method_types", []) or [])
+                if method_types:
+                    method_type = str(method_types[0]).strip().lower()
+                if not method_type:
+                    latest_charge = getattr(payment_intent, "latest_charge", None)
+                    method_details = getattr(latest_charge, "payment_method_details", None)
+                    if method_details is not None:
+                        method_type = (
+                            str(getattr(method_details, "type", "") or method_details.get("type") or "")
+                            .strip()
+                            .lower()
+                        )
+            except Exception:
+                method_type = ""
+
+            if method_type == "paynow":
+                stripe_paynow_total += 1
+            elif method_type == "card":
+                stripe_card_total += 1
+            else:
+                stripe_unknown_total += 1
+
+    # Successful Stripe records without payment_intent IDs cannot be resolved to method type.
+    stripe_unknown_total += max(
+        stripe_succeeded_payments.count() - (stripe_card_total + stripe_paynow_total + stripe_unknown_total),
+        0,
+    )
+
+    payment_method_table_summary = [
+        {
+            "method": "Card",
+            "available": stripe_card_total > 0,
+            "has_count": True,
+            "count": stripe_card_total,
+            "note": "Successful Stripe card payments used by customers.",
+        },
+        {
+            "method": "PayNow",
+            "available": stripe_paynow_total > 0,
+            "has_count": True,
+            "count": stripe_paynow_total,
+            "note": "Successful Stripe PayNow payments used by customers.",
+        },
+    ]
+    if stripe_unknown_total > 0:
+        payment_method_table_summary.append(
+            {
+                "method": "Stripe (Unknown)",
+                "available": True,
+                "has_count": True,
+                "count": stripe_unknown_total,
+                "note": "Method could not be determined from stored Stripe details.",
+            }
+        )
+    if manual_total > 0:
+        payment_method_table_summary.append(
+            {
+                "method": "Manual / Bank transfer",
+                "available": True,
+                "has_count": True,
+                "count": manual_total,
+                "note": "Stored as provider=manual records.",
+            }
+        )
+
     monthly_successful_rows = list(
         succeeded_payments.filter(paid_at__isnull=False)
         .annotate(month=TruncMonth("paid_at"))
@@ -490,6 +583,7 @@ def payment_stripe_report(request):
             "payment_status_summary": payment_status_summary,
             "recent_stripe_transactions": recent_stripe_transactions,
             "payment_method_summary": payment_method_summary,
+            "payment_method_table_summary": payment_method_table_summary,
             "recent_payments": recent_payments,
             "is_stripe_only_prototype": stripe_total > 0 and manual_total == 0,
             "payment_trend_labels": payment_trend_labels,

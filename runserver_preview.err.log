@@ -109,3 +109,16 @@ C:\Users\me\Documents\Automated-Invoicing-and-Payroll\invoicing\services.py chan
 Watching for file changes with StatReloader
 C:\Users\me\Documents\Automated-Invoicing-and-Payroll\invoicing\views.py changed, reloading.
 Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+[27/May/2026 00:05:20] "GET /reports/payments/ HTTP/1.1" 200 28266
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
