@@ -138,6 +138,7 @@ a:visited {
 }
 
 .portal-nav-link {
+    background: transparent;
     border: 1px solid #4a4e5b;
     border-radius: 18px;
     color: #d7dce6;
@@ -153,11 +154,23 @@ a:visited {
     text-decoration: none;
 }
 
+.portal-nav .dropdown-menu .dropdown-item,
+.portal-nav .dropdown-menu .dropdown-item:visited,
+.portal-nav .dropdown-menu .dropdown-item:focus {
+    color: #000000;
+}
+
+.portal-nav .dropdown-menu .dropdown-item:hover
+{
+    background: #272829;
+    color: #ffffff;
+}
+
 .portal-nav-link:hover,
 .portal-nav-link:focus {
     background: #3a3e49;
     border-color: #666d7d;
-    color: #ffffff;
+    color: #d4d4d4;
 }
 
 .portal-main {

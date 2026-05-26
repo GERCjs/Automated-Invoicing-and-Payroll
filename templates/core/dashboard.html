@@ -11,21 +11,6 @@
     </div>
 </div>
 
-{% if current_user_role == "superadmin" or current_user_role == "admin" %}
-<div class="card mb-3">
-    <div class="card-header section-heading mb-0">Reports</div>
-    <div class="card-body">
-        <div class="d-flex flex-wrap gap-2">
-            <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Invoice / Customer Report</a>
-            <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-primary btn-sm">Payment &amp; Stripe Report</a>
-            <a href="{% url 'payroll-report' %}" class="btn btn-outline-dark btn-sm">Payroll / Payslip Report</a>
-            <a href="{% url 'admin-security-report' %}" class="btn btn-outline-success btn-sm">Admin / Security Report</a>
-        </div>
-        <div class="text-muted small mt-2">Report links are shown based on role access only.</div>
-    </div>
-</div>
-{% endif %}
-
 {% if can_view_admin_stats %}
 <h2 class="section-heading mb-3">CEO Snapshot</h2>
 <div class="row g-3 mb-3">

@@ -68,6 +68,28 @@
                 <a class="portal-nav-link" href="{% url 'dashboard' %}">Management Dashboard</a>
                 {% endif %}
 
+                {% if current_user_role == "superadmin" or current_user_role == "admin" %}
+                <div class="dropdown">
+                    <button class="portal-nav-link dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Reports
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li>
+                            <a href="{% url 'invoice-customer-report' %}" class="dropdown-item btn btn-outline-secondary btn-sm">Invoice / Customer Report</a>
+                        </li>
+                        <li>
+                            <a href="{% url 'payment-stripe-report' %}" class="dropdown-item btn btn-outline-primary btn-sm">Payment &amp; Stripe Report</a>
+                        </li>
+                        <li>
+                            <a href="{% url 'payroll-report' %}" class="dropdown-item btn btn-outline-dark btn-sm">Payroll / Payslip Report</a>
+                        </li>
+                        <li>
+                            <a href="{% url 'admin-security-report' %}" class="dropdown-item btn btn-outline-success btn-sm">Admin / Security Report</a>
+                        </li>
+                    </ul>
+                </div>
+                {% endif %}
+
                 {% if current_user_role == "finance" or current_user_role == "hr" %}
                 <a class="portal-nav-link" href="{% url 'dashboard' %}">Dashboard</a>
                 {% endif %}
