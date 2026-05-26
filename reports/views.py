@@ -459,7 +459,7 @@ def payment_stripe_report(request):
         status=PaymentRecord.STATUS_SUCCEEDED,
     )
 
-    stripe_card_total = 0
+    stripe_card_brand_totals = {}
     stripe_paynow_total = 0
     stripe_unknown_total = 0
     stripe_records = list(
@@ -476,6 +476,7 @@ def payment_stripe_report(request):
     else:
         for record in stripe_records:
             method_type = ""
+            card_brand = ""
             try:
                 payment_intent = stripe.PaymentIntent.retrieve(
                     record.external_transaction_id,
@@ -484,24 +485,47 @@ def payment_stripe_report(request):
                 method_types = list(getattr(payment_intent, "payment_method_types", []) or [])
                 if method_types:
                     method_type = str(method_types[0]).strip().lower()
-                if not method_type:
-                    latest_charge = getattr(payment_intent, "latest_charge", None)
-                    method_details = getattr(latest_charge, "payment_method_details", None)
-                    if method_details is not None:
-                        method_type = (
-                            str(getattr(method_details, "type", "") or method_details.get("type") or "")
-                            .strip()
-                            .lower()
-                        )
+                latest_charge = getattr(payment_intent, "latest_charge", None)
+                method_details = getattr(latest_charge, "payment_method_details", None)
+                if method_details is not None:
+                    details_type_value = getattr(method_details, "type", "")
+                    if not details_type_value and hasattr(method_details, "get"):
+                        details_type_value = method_details.get("type")
+                    details_type = (
+                        str(details_type_value or "")
+                        .strip()
+                        .lower()
+                    )
+                    if details_type:
+                        method_type = details_type
+                    if details_type == "card":
+                        card_details = getattr(method_details, "card", None)
+                        if card_details is None and hasattr(method_details, "get"):
+                            card_details = method_details.get("card")
+                        if card_details is not None:
+                            brand_value = getattr(card_details, "brand", "")
+                            if not brand_value and hasattr(card_details, "get"):
+                                brand_value = card_details.get("brand")
+                            card_brand = (
+                                str(brand_value or "")
+                                .strip()
+                                .lower()
+                            )
             except Exception:
                 method_type = ""
+                card_brand = ""
 
             if method_type == "paynow":
                 stripe_paynow_total += 1
             elif method_type == "card":
-                stripe_card_total += 1
+                if card_brand:
+                    stripe_card_brand_totals[card_brand] = stripe_card_brand_totals.get(card_brand, 0) + 1
+                else:
+                    stripe_unknown_total += 1
             else:
                 stripe_unknown_total += 1
+
+    stripe_card_total = sum(stripe_card_brand_totals.values())
 
     # Successful Stripe records without payment_intent IDs cannot be resolved to method type.
     stripe_unknown_total += max(
@@ -509,22 +533,37 @@ def payment_stripe_report(request):
         0,
     )
 
-    payment_method_table_summary = [
-        {
-            "method": "Card",
-            "available": stripe_card_total > 0,
-            "has_count": True,
-            "count": stripe_card_total,
-            "note": "Successful Stripe card payments used by customers.",
-        },
+    brand_display_map = {
+        "amex": "American Express",
+        "mastercard": "Mastercard",
+        "visa": "Visa",
+        "discover": "Discover",
+        "jcb": "JCB",
+        "diners": "Diners Club",
+        "unionpay": "UnionPay",
+    }
+
+    payment_method_table_summary = []
+    for brand, total in sorted(stripe_card_brand_totals.items(), key=lambda row: (-row[1], row[0])):
+        payment_method_table_summary.append(
+            {
+                "method": brand_display_map.get(brand, brand.replace("_", " ").title()),
+                "available": total > 0,
+                "has_count": True,
+                "count": total,
+                "note": "Successful Stripe card payments used by customers.",
+            }
+        )
+
+    payment_method_table_summary.append(
         {
             "method": "PayNow",
             "available": stripe_paynow_total > 0,
             "has_count": True,
             "count": stripe_paynow_total,
             "note": "Successful Stripe PayNow payments used by customers.",
-        },
-    ]
+        }
+    )
     if stripe_unknown_total > 0:
         payment_method_table_summary.append(
             {
@@ -532,7 +571,7 @@ def payment_stripe_report(request):
                 "available": True,
                 "has_count": True,
                 "count": stripe_unknown_total,
-                "note": "Method could not be determined from stored Stripe details.",
+                "note": "Method could not be determined from stored Stripe details. ",
             }
         )
     if manual_total > 0:
