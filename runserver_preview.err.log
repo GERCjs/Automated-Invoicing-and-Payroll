@@ -1,0 +1,39 @@
+Watching for file changes with StatReloader
+[26/May/2026 22:38:15] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 92702
+C:\Users\me\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\db\models\fields\__init__.py:1611: RuntimeWarning: DateTimeField AuditLog.created_at received a naive datetime (2026-05-01 00:00:00) while time zone support is active.
+  warnings.warn(
+[26/May/2026 22:38:17] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 22:38:19] "GET /reports/admin-security/ HTTP/1.1" 200 40112
+[26/May/2026 22:38:21] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 92702
+[26/May/2026 22:38:22,532] - Broken pipe from ('127.0.0.1', 50976)
+[26/May/2026 22:38:22] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 92702
+[26/May/2026 22:40:22] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 77854
+[26/May/2026 22:41:44] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 13572
+[26/May/2026 22:41:48] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 77854
+[26/May/2026 22:47:14] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 82994
+[26/May/2026 22:48:51] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 77854
+[26/May/2026 22:49:16] "GET /accounts/admin-dashboard/accounts/15/password/ HTTP/1.1" 200 5921
+[26/May/2026 22:49:17] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 77854
+[26/May/2026 22:49:19] "GET /dashboard/ HTTP/1.1" 200 20423
+[26/May/2026 22:49:20] "GET /reports/payroll/ HTTP/1.1" 200 22788
+[26/May/2026 22:49:21] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 77854
+[26/May/2026 22:49:28] "POST /accounts/admin-dashboard/accounts/46/suspend/ HTTP/1.1" 302 0
+[26/May/2026 22:49:28] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 78049
+[26/May/2026 22:49:31] "POST /accounts/admin-dashboard/accounts/46/unsuspend/ HTTP/1.1" 302 0
+[26/May/2026 22:49:32] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 78044
+[26/May/2026 22:50:40] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 89350
+[26/May/2026 22:50:47] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 89350
+[26/May/2026 22:50:50] "GET /payroll/dashboard/ HTTP/1.1" 200 9173
+[26/May/2026 22:50:51] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 89350
+[26/May/2026 22:53:16] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 82006
+[26/May/2026 22:55:59] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 91956
+[26/May/2026 22:56:11] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 91956
+[26/May/2026 22:56:14] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 91746
+[26/May/2026 22:59:40] "GET /accounts/admin-dashboard/ HTTP/1.1" 200 96452
+[26/May/2026 22:59:47] "GET /accounts/admin-dashboard/?role=admin HTTP/1.1" 200 38913
+[26/May/2026 22:59:59] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 96452
+[26/May/2026 23:00:26] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 96452
+[26/May/2026 23:00:41] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 91746
+[26/May/2026 23:01:01] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 91746
+[26/May/2026 23:03:01] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 93494
+[26/May/2026 23:05:26] "GET /accounts/admin-dashboard/? HTTP/1.1" 200 94188

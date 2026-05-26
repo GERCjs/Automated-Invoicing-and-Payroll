@@ -129,13 +129,20 @@
             <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
         </form>
     </div>
-    <div class="table-responsive">
-        <table class="table table-clean table-hover align-middle mb-0">
-            <thead>
+    <div class="table-responsive" style="max-height: 520px;">
+        <table id="admin-accounts-table" class="table table-clean table-hover table-striped table-sm align-middle mb-0" style="--bs-table-cell-padding-y: .45rem; --bs-table-cell-padding-x: .55rem;">
+            <thead class="table-light" style="position: sticky; top: 0; z-index: 1;">
                 <tr>
                     <th>User</th>
-                    <th>Code ID</th>
-                    <th>Role</th>
+                    <th>
+                        <span class="d-inline-flex align-items-center gap-1">
+                            <span>Code ID</span>
+                            <button id="sort-code-id-toggle" type="button" class="btn btn-sm btn-link text-muted p-0 border-0 text-decoration-none" title="Sort Code ID ascending" aria-label="Sort Code ID ascending">
+                                &#9650;
+                            </button>
+                        </span>
+                    </th>
+                    <th>Role Control</th>
                     <th>Status</th>
                     <th>Last Activity</th>
                     <th class="text-end">Actions</th>
@@ -146,10 +153,11 @@
                 <tr>
                     <td>
                         <div class="fw-semibold">{{ managed_user.username }}</div>
-                        <div class="text-muted small">{{ managed_user.email|default:"No email" }}</div>
+                        <div class="text-muted small text-truncate" style="max-width: 240px;" title="{{ managed_user.email|default:'No email' }}">{{ managed_user.email|default:"No email" }}</div>
+                        <div class="text-muted small">{{ managed_user.role_profile.get_role_display }}</div>
                     </td>
                     <td>
-                        <span class="badge text-bg-light border">{{ managed_user.role_profile.code_id|default:"-" }}</span>
+                        <span class="badge text-bg-light border font-monospace small">{{ managed_user.role_profile.code_id|default:"-" }}</span>
                     </td>
                     <td>
                         {% if managed_user.can_be_managed %}
@@ -162,46 +170,55 @@
                         <span class="badge bg-secondary">{{ managed_user.role_profile.get_role_display }}</span>
                         {% endif %}
                     </td>
-                    <td>
+                    <td class="text-nowrap">
                         {% if managed_user.is_suspended %}
-                        <span class="badge bg-danger">Suspended</span>
+                        <span class="badge bg-danger fw-semibold text-center" style="min-width: 96px;">Suspended</span>
                         {% elif managed_user.is_unverified %}
-                        <span class="badge bg-warning text-dark">Unverified</span>
+                        <span class="badge bg-warning text-dark fw-semibold text-center" style="min-width: 96px;">Unverified</span>
                         {% else %}
-                        <span class="badge bg-success">Active</span>
+                        <span class="badge bg-success fw-semibold text-center" style="min-width: 96px;">Active</span>
                         {% endif %}
                     </td>
                     <td>
                         {% if managed_user.last_activity_at %}
-                        {{ managed_user.last_activity_at|date:"Y-m-d H:i" }}
+                        <span class="small text-muted font-monospace">{{ managed_user.last_activity_at|date:"Y-m-d H:i" }}</span>
                         {% else %}
-                        <span class="text-muted">No audit activity</span>
+                        <span class="small text-muted">No audit activity</span>
                         {% endif %}
                     </td>
                     <td class="text-end">
-                        <div class="d-flex justify-content-end gap-1 flex-wrap">
-                            {% if managed_user.can_be_suspended %}
+                        <div class="d-flex flex-column align-items-end gap-1">
+                            <div class="d-flex justify-content-end gap-1 flex-wrap">
+                                {% if managed_user.can_be_suspended %}
+                                {% if managed_user.is_suspended %}
+                                <form method="post" action="{% url 'managed-account-unsuspend' managed_user.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Reactivate</button>
+                                </form>
+                                {% else %}
+                                <form method="post" action="{% url 'managed-account-suspend' managed_user.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-warning">Suspend</button>
+                                </form>
+                                {% endif %}
+                                {% endif %}
+                                {% if managed_user.can_be_managed %}
+                                <a href="{% url 'managed-account-password-update' managed_user.id %}" class="btn btn-sm btn-outline-secondary">Password</a>
+                                <form method="post" action="{% url 'managed-account-delete' managed_user.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                </form>
+                                {% endif %}
+                                {% if not managed_user.can_be_managed and not managed_user.can_be_suspended %}
+                                <span class="text-muted small">Protected</span>
+                                {% endif %}
+                            </div>
                             {% if managed_user.is_suspended %}
-                            <form method="post" action="{% url 'managed-account-unsuspend' managed_user.id %}">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-outline-success">Reactivate</button>
-                            </form>
-                            {% else %}
-                            <form method="post" action="{% url 'managed-account-suspend' managed_user.id %}">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-outline-warning">Suspend</button>
-                            </form>
-                            {% endif %}
-                            {% endif %}
-                            {% if managed_user.can_be_managed %}
-                            <a href="{% url 'managed-account-password-update' managed_user.id %}" class="btn btn-sm btn-outline-secondary">Password</a>
-                            <form method="post" action="{% url 'managed-account-delete' managed_user.id %}">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete (Last Resort)</button>
-                            </form>
-                            {% endif %}
-                            {% if not managed_user.can_be_managed and not managed_user.can_be_suspended %}
-                            <span class="text-muted small">Protected</span>
+                            <span class="small text-muted">Account access is currently blocked</span>
+                            {% elif managed_user.is_unverified %}
+                            <span class="small text-muted">Email verification pending</span>
+                            {% elif not managed_user.can_be_managed and not managed_user.can_be_suspended %}
+                            <span class="small text-muted">Owner account protections enabled</span>
                             {% endif %}
                         </div>
                     </td>
@@ -213,4 +230,50 @@
         </table>
     </div>
 </div>
+<script>
+    (function () {
+        var sortButton = document.getElementById("sort-code-id-toggle");
+        var table = document.getElementById("admin-accounts-table");
+        if (!sortButton || !table || !table.tBodies.length) {
+            return;
+        }
+        var direction = "asc";
+
+        sortButton.addEventListener("click", function () {
+            var tbody = table.tBodies[0];
+            var rows = Array.from(tbody.querySelectorAll("tr"));
+            var sortableRows = rows.filter(function (row) {
+                return row.querySelectorAll("td").length >= 6;
+            });
+
+            sortableRows.sort(function (a, b) {
+                var aValue = a.querySelector("td:nth-child(2)")?.innerText.trim() || "";
+                var bValue = b.querySelector("td:nth-child(2)")?.innerText.trim() || "";
+                if (aValue === "-" || aValue === "") {
+                    return direction === "asc" ? 1 : -1;
+                }
+                if (bValue === "-" || bValue === "") {
+                    return direction === "asc" ? -1 : 1;
+                }
+                var comparison = aValue.localeCompare(bValue, undefined, { numeric: true, sensitivity: "base" });
+                return direction === "asc" ? comparison : -comparison;
+            });
+
+            sortableRows.forEach(function (row) {
+                tbody.appendChild(row);
+            });
+
+            direction = direction === "asc" ? "desc" : "asc";
+            if (direction === "asc") {
+                sortButton.innerHTML = "&#9650;";
+                sortButton.title = "Sort Code ID ascending";
+                sortButton.setAttribute("aria-label", "Sort Code ID ascending");
+            } else {
+                sortButton.innerHTML = "&#9660;";
+                sortButton.title = "Sort Code ID descending";
+                sortButton.setAttribute("aria-label", "Sort Code ID descending");
+            }
+        });
+    })();
+</script>
 {% endblock %}
