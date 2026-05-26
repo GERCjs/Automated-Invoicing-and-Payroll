@@ -122,3 +122,43 @@ C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, 
 Watching for file changes with StatReloader
 C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
 Watching for file changes with StatReloader
+[27/May/2026 00:12:44] "GET /reports/payments/ HTTP/1.1" 200 28287
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+[27/May/2026 00:16:50,422] - Broken pipe from ('127.0.0.1', 54971)
+C:\Users\me\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\db\models\fields\__init__.py:1611: RuntimeWarning: DateTimeField AuditLog.created_at received a naive datetime (2026-05-01 00:00:00) while time zone support is active.
+  warnings.warn(
+[27/May/2026 00:16:52] "GET /dashboard/ HTTP/1.1" 200 20463
+[27/May/2026 00:16:55] "GET /invoices/dashboard/ HTTP/1.1" 200 18166
+[27/May/2026 00:17:03,175] - Broken pipe from ('127.0.0.1', 54972)
+[27/May/2026 00:17:03] "GET /reports/payments/ HTTP/1.1" 200 28765
+[27/May/2026 00:18:28] "GET /reports/payments/ HTTP/1.1" 200 28765
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+C:\Users\me\Documents\Automated-Invoicing-and-Payroll\reports\views.py changed, reloading.
+Watching for file changes with StatReloader
+[27/May/2026 00:22:46] "GET /reports/payments/ HTTP/1.1" 200 28287
+[27/May/2026 00:22:54] "POST /accounts/logout/ HTTP/1.1" 302 0
+[27/May/2026 00:22:54] "GET /accounts/login/ HTTP/1.1" 200 4501
+[27/May/2026 00:22:57] "POST /accounts/login/ HTTP/1.1" 302 0
+[27/May/2026 00:22:57] "GET /dashboard/ HTTP/1.1" 302 0
+[27/May/2026 00:22:57] "GET /invoices/my/dashboard/ HTTP/1.1" 200 11415
+[27/May/2026 00:22:59] "POST /payments/checkout/customer/51/ HTTP/1.1" 302 0
+[27/May/2026 00:23:37] "GET /payments/checkout/success/?session_id=cs_test_a1lgstOMieROfMv3lzJSG3rg4rpDiq5SCzaTsAItvAz8o02QHWwzdH03mV HTTP/1.1" 200 4371
+[27/May/2026 00:23:54] "POST /accounts/logout/ HTTP/1.1" 302 0
+[27/May/2026 00:23:54] "GET /accounts/login/ HTTP/1.1" 200 4501
+[27/May/2026 00:24:01] "POST /accounts/login/ HTTP/1.1" 302 0
+C:\Users\me\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\django\db\models\fields\__init__.py:1611: RuntimeWarning: DateTimeField AuditLog.created_at received a naive datetime (2026-05-01 00:00:00) while time zone support is active.
+  warnings.warn(
+[27/May/2026 00:24:01] "GET /dashboard/ HTTP/1.1" 200 20463
+[27/May/2026 00:24:07] "GET /invoices/dashboard/ HTTP/1.1" 200 18166
+[27/May/2026 00:24:08,316] - Broken pipe from ('127.0.0.1', 55199)
+[27/May/2026 00:24:15] "GET /reports/payments/ HTTP/1.1" 200 28794
+[27/May/2026 00:24:29] "GET /invoices/dashboard/ HTTP/1.1" 200 18166
+[27/May/2026 00:24:31] "GET /dashboard/ HTTP/1.1" 200 20463
+[27/May/2026 00:24:32] "GET /reports/payroll/ HTTP/1.1" 200 22788
+[27/May/2026 00:24:33] "GET /dashboard/ HTTP/1.1" 200 20463
+[27/May/2026 00:24:34] "GET /invoices/dashboard/ HTTP/1.1" 200 18166
+[27/May/2026 00:24:44] "GET /reports/payments/ HTTP/1.1" 200 28794
