@@ -1,6 +1,6 @@
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -615,8 +615,25 @@ def _deserialize_employee_preview_row(row):
     parsed = dict(row)
     for key in ("date_of_birth", "date_of_appointment"):
         if parsed.get(key):
-            parsed[key] = date.fromisoformat(parsed[key])
+            parsed_date = _parse_date_ddmmyyyy(parsed[key])
+            parsed[key] = parsed_date if parsed_date else None
     return parsed
+
+
+def _parse_date_ddmmyyyy(raw_value):
+    if raw_value in (None, ""):
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value.date()
+    if isinstance(raw_value, date):
+        return raw_value
+    raw_text = str(raw_value).strip()
+    if not raw_text:
+        return None
+    try:
+        return datetime.strptime(raw_text, "%d-%m-%Y").date()
+    except ValueError:
+        return None
 
 
 @login_required
@@ -678,7 +695,10 @@ def employee_upload_preview(request):
                 parsed_row = {}
                 for header in required_headers:
                     value = row[index_map[header]]
-                    parsed_row[header] = str(value).strip() if value is not None else ""
+                    if header in ("date_of_birth", "date_of_appointment"):
+                        parsed_row[header] = value
+                    else:
+                        parsed_row[header] = str(value).strip() if value is not None else ""
 
                 if not parsed_row["first_name"]:
                     row_errors.append("First name is required.")
@@ -694,10 +714,11 @@ def employee_upload_preview(request):
                             row_errors.append("Date of appointment is required.")
                         parsed_row[date_field] = ""
                         continue
-                    try:
-                        parsed_row[date_field] = date.fromisoformat(raw_value).isoformat()
-                    except ValueError:
-                        row_errors.append(f"{date_field.replace('_', ' ').title()} must be YYYY-MM-DD.")
+                    parsed_date = _parse_date_ddmmyyyy(raw_value)
+                    if parsed_date is None:
+                        row_errors.append(f"{date_field.replace('_', ' ').title()} must be DD-MM-YYYY.")
+                    else:
+                        parsed_row[date_field] = parsed_date.strftime("%d-%m-%Y")
 
                 for bool_field in ("sdl_exempt", "cpf_exempt"):
                     raw_value = parsed_row[bool_field].lower()
@@ -877,8 +898,8 @@ def employee_template_download(request):
             "S1234567A",
             "Alex",
             "Tan",
-            "1990-01-01",
-            "2024-01-10",
+            "01-01-1990",
+            "10-01-2024",
             "citizen",
             "male",
             "Chinese",
@@ -893,6 +914,9 @@ def employee_template_download(request):
             "001",
         ]
     )
+    # Keep date columns explicitly in DD-MM-YYYY format.
+    worksheet["E2"].number_format = "DD-MM-YYYY"
+    worksheet["F2"].number_format = "DD-MM-YYYY"
 
     output = BytesIO()
     workbook.save(output)
@@ -975,39 +999,123 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     page_width, page_height = A4
 
     pdf.setTitle(f"Payslip-{payslip_record.employee_id}-{payslip_record.payment_date}")
-    pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(20 * mm, page_height - 20 * mm, "Payslip")
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(20 * mm, page_height - 26 * mm, "Automated Invoicing and Payroll System")
+    margin = 12 * mm
+    width = page_width - (2 * margin)
+    top = page_height - margin
 
-    y = page_height - 40 * mm
-    line_gap = 8 * mm
+    basic_salary = payslip_record.basic_salary or Decimal("0.00")
+    physical_products_commission = payslip_record.physical_products_commission or Decimal("0.00")
+    credit_commission = payslip_record.credit_commission or Decimal("0.00")
+    services_commission = payslip_record.services_commission or Decimal("0.00")
+    allowances = payslip_record.allowances or Decimal("0.00")
+    loan_deduction = payslip_record.loan_deduction or Decimal("0.00")
+    other_deductions = payslip_record.other_deductions or Decimal("0.00")
+    deductions = payslip_record.deductions or Decimal("0.00")
+    cpf_contribution = payslip_record.cpf_contribution or Decimal("0.00")
+    net_salary = payslip_record.net_salary or Decimal("0.00")
 
+    if (
+        physical_products_commission == Decimal("0.00")
+        and credit_commission == Decimal("0.00")
+        and services_commission == Decimal("0.00")
+    ):
+        services_commission = allowances
+    if loan_deduction == Decimal("0.00") and other_deductions == Decimal("0.00"):
+        other_deductions = deductions
+
+    total_earnings = basic_salary + allowances
+    total_deductions = deductions + cpf_contribution
     employer_cpf_contribution = _calculate_employer_cpf_for_record(payslip_record)
-    rows = [
-        ("Employee Name", payslip_record.employee_name),
-        ("Employee ID", payslip_record.employee_id),
-        ("Payment Date", payslip_record.payment_date.isoformat()),
-        ("NRIC", payslip_record.nric or "-"),
-        ("Basic Salary", f"SGD {payslip_record.basic_salary:.2f}"),
-        ("Allowances", f"SGD {payslip_record.allowances:.2f}"),
-        ("Deductions", f"SGD {payslip_record.deductions:.2f}"),
-        ("CPF Contribution", f"SGD {payslip_record.cpf_contribution:.2f}"),
-        ("Employer CPF (separate)", f"SGD {employer_cpf_contribution:.2f}"),
-        ("Net Salary", f"SGD {payslip_record.net_salary:.2f}"),
-    ]
+    month_year = payslip_record.payment_date.strftime("%B %Y")
 
-    for label, value in rows:
-        pdf.setFont("Helvetica-Bold", 11)
-        pdf.drawString(20 * mm, y, f"{label}:")
-        pdf.setFont("Helvetica", 11)
-        pdf.drawString(65 * mm, y, str(value))
-        y -= line_gap
+    # Header
+    header_h = 34 * mm
+    pdf.rect(margin, top - header_h, width, header_h)
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(margin + 4 * mm, top - 10 * mm, "Vaniday Pte Ltd - Payslip")
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(margin + 4 * mm, top - 21 * mm, f"{payslip_record.employee_name} for {month_year}")
 
-    pdf.line(20 * mm, y - 2 * mm, page_width - 20 * mm, y - 2 * mm)
-    y -= 12 * mm
-    pdf.setFont("Helvetica-Oblique", 9)
-    pdf.drawString(20 * mm, y, "This is a computer-generated payslip.")
+    # Employee block
+    info_top = top - header_h
+    info_h = 24 * mm
+    pdf.rect(margin, info_top - info_h, width, info_h)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(margin + 4 * mm, info_top - 9 * mm, "Employee:")
+    pdf.setFont("Helvetica", 11)
+    pdf.drawString(margin + 30 * mm, info_top - 9 * mm, payslip_record.employee_name)
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(margin + 4 * mm, info_top - 18 * mm, "Payment date:")
+    pdf.setFont("Helvetica", 11)
+    pdf.drawString(margin + 30 * mm, info_top - 18 * mm, payslip_record.payment_date.strftime("%d-%m-%Y"))
+
+    # Table
+    table_top = info_top - info_h - 4 * mm
+    table_h = 86 * mm
+    half = width / 2
+    pdf.rect(margin, table_top - table_h, width, table_h)
+    pdf.line(margin + half, table_top, margin + half, table_top - table_h)
+    head_h = 14 * mm
+    pdf.line(margin, table_top - head_h, margin + width, table_top - head_h)
+
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(margin + 3 * mm, table_top - 9 * mm, "Earnings")
+    pdf.drawString(margin + half - 28 * mm, table_top - 9 * mm, "Amount")
+    pdf.drawString(margin + half + 3 * mm, table_top - 9 * mm, "Deductions")
+    pdf.drawString(margin + width - 28 * mm, table_top - 9 * mm, "Amount")
+
+    left_amount_x = margin + half - 4 * mm
+    right_amount_x = margin + width - 4 * mm
+    y = table_top - head_h - 7 * mm
+    pdf.setFont("Helvetica", 10.5)
+
+    pdf.drawString(margin + 3 * mm, y, "Basic salary")
+    pdf.drawRightString(left_amount_x, y, f"$ {basic_salary:.2f}")
+    y -= 8 * mm
+    pdf.drawString(margin + 3 * mm, y, "Physical products commission")
+    pdf.drawRightString(left_amount_x, y, f"$ {physical_products_commission:.2f}")
+    y -= 8 * mm
+    pdf.drawString(margin + 3 * mm, y, "Credit commission")
+    pdf.drawRightString(left_amount_x, y, f"$ {credit_commission:.2f}")
+    y -= 8 * mm
+    pdf.drawString(margin + 3 * mm, y, "Services commission")
+    pdf.drawRightString(left_amount_x, y, f"$ {services_commission:.2f}")
+
+    y2 = table_top - head_h - 7 * mm
+    pdf.drawString(margin + half + 3 * mm, y2, "Loan deduction")
+    pdf.drawRightString(right_amount_x, y2, f"$ {loan_deduction:.2f}")
+    y2 -= 8 * mm
+    pdf.drawString(margin + half + 3 * mm, y2, "Other deductions")
+    pdf.drawRightString(right_amount_x, y2, f"$ {other_deductions:.2f}")
+    y2 -= 8 * mm
+    pdf.drawString(margin + half + 3 * mm, y2, "Employee CPF")
+    pdf.drawRightString(right_amount_x, y2, f"$ {cpf_contribution:.2f}")
+
+    totals_line = table_top - table_h + 14 * mm
+    pdf.line(margin, totals_line, margin + width, totals_line)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(margin + 3 * mm, totals_line - 9 * mm, "Total earnings:")
+    pdf.drawRightString(left_amount_x, totals_line - 9 * mm, f"$ {total_earnings:.2f}")
+    pdf.drawString(margin + half + 3 * mm, totals_line - 9 * mm, "Total deductions:")
+    pdf.drawRightString(right_amount_x, totals_line - 9 * mm, f"$ {total_deductions:.2f}")
+
+    # Net pay block
+    net_top = table_top - table_h
+    net_h = 20 * mm
+    pdf.rect(margin, net_top - net_h, width, net_h)
+    pdf.setFont("Helvetica-Bold", 12)
+    pdf.drawString(margin + half + 3 * mm, net_top - 8 * mm, "Net pay")
+    pdf.setFont("Helvetica", 12)
+    pdf.drawRightString(right_amount_x, net_top - 8 * mm, f"$ {net_salary:.2f}")
+    pdf.setFont("Helvetica", 9)
+    pdf.drawRightString(right_amount_x, net_top - 15 * mm, f"Employer CPF: $ {employer_cpf_contribution:.2f}")
+
+    # Note
+    note_top = net_top - net_h
+    note_h = 11 * mm
+    pdf.rect(margin, note_top - note_h, width, note_h)
+    pdf.setFont("Helvetica-Bold", 10)
+    pdf.drawString(margin + 3 * mm, note_top - 7 * mm, "Note:")
 
     pdf.showPage()
     pdf.save()

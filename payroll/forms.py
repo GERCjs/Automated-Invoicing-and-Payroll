@@ -149,6 +149,16 @@ SINGAPORE_BANK_CHOICES = [
 
 class EmployeeForm(forms.ModelForm):
     bank_name = forms.ChoiceField(choices=SINGAPORE_BANK_CHOICES, required=False)
+    date_of_birth = forms.DateField(
+        required=False,
+        input_formats=["%d-%m-%Y"],
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "DD-MM-YYYY"}),
+    )
+    date_of_appointment = forms.DateField(
+        required=True,
+        input_formats=["%d-%m-%Y"],
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "DD-MM-YYYY"}),
+    )
 
     class Meta:
         model = Employee
@@ -177,8 +187,6 @@ class EmployeeForm(forms.ModelForm):
             "nric": forms.TextInput(attrs={"class": "form-control", "maxlength": "9"}),
             "first_name": forms.TextInput(attrs={"class": "form-control"}),
             "last_name": forms.TextInput(attrs={"class": "form-control"}),
-            "date_of_birth": forms.DateInput(attrs={"class": "form-control", "type": "date"}),
-            "date_of_appointment": forms.DateInput(attrs={"class": "form-control", "type": "date"}),
             "legal_status": forms.Select(attrs={"class": "form-select"}),
             "gender": forms.Select(attrs={"class": "form-select"}),
             "race": forms.TextInput(attrs={"class": "form-control"}),
@@ -195,6 +203,11 @@ class EmployeeForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["date_of_appointment"].required = True
+        if self.instance and self.instance.pk:
+            if self.instance.date_of_birth:
+                self.initial["date_of_birth"] = self.instance.date_of_birth.strftime("%d-%m-%Y")
+            if self.instance.date_of_appointment:
+                self.initial["date_of_appointment"] = self.instance.date_of_appointment.strftime("%d-%m-%Y")
 
     def clean(self):
         cleaned_data = super().clean()

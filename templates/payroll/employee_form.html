@@ -59,11 +59,13 @@
                 <div class="col-md-6">
                     <label class="form-label">Date of Birth</label>
                     {{ form.date_of_birth }}
+                    <div class="form-text">Format: DD-MM-YYYY</div>
                     {% for error in form.date_of_birth.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Date of Appointment</label>
                     {{ form.date_of_appointment }}
+                    <div class="form-text">Format: DD-MM-YYYY</div>
                     {% for error in form.date_of_appointment.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
                 <div class="col-md-6">
