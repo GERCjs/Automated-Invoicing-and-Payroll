@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import date
 from pathlib import Path
 
+from openpyxl import Workbook
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -22,7 +23,7 @@ from accounts.roles import ADMIN, HR, STAFF, SUPERADMIN
 from core.audit import get_client_ip, log_event
 from notifications.models import EmailDeliveryLog
 
-from .forms import EmployeeForm, PayrollRecordForm, PayrollUploadForm
+from .forms import EmployeeForm, EmployeeUploadForm, PayrollRecordForm, PayrollUploadForm
 from .models import Employee, PayrollRecord
 from .services import (
     cpf_for_2026,
@@ -140,7 +141,13 @@ def payroll_cpf_preview(request):
 def payroll_dashboard(request):
     total_records = PayrollRecord.objects.count()
     total_net_salary = sum(record.net_salary for record in PayrollRecord.objects.only("net_salary"))
-    recent_payslip_records = PayrollRecord.objects.all()[:8]
+    recent_payslip_records = PayrollRecord.objects.only(
+        "employee_name",
+        "employee_id",
+        "payment_date",
+        "net_salary",
+        "created_at",
+    )[:8]
     return render(
         request,
         "payroll/payroll_dashboard.html",
@@ -208,15 +215,19 @@ def payroll_create(request):
             payslip_record.nric = (employee.nric or "")[:9]
             payslip_record.cpf_exempted = employee.cpf_exempt
             payslip_record.sdl_exempted = employee.sdl_exempt
+            payslip_record.physical_products_commission = (
+                form.cleaned_data.get("physical_products_commission") or Decimal("0")
+            )
+            payslip_record.credit_commission = form.cleaned_data.get("credit_commission") or Decimal("0")
+            payslip_record.services_commission = form.cleaned_data.get("services_commission") or Decimal("0")
+            payslip_record.loan_deduction = form.cleaned_data.get("loan_deduction") or Decimal("0")
+            payslip_record.other_deductions = form.cleaned_data.get("other_deductions") or Decimal("0")
             payslip_record.allowances = (
-                (form.cleaned_data.get("physical_products_commission") or Decimal("0"))
-                + (form.cleaned_data.get("credit_commission") or Decimal("0"))
-                + (form.cleaned_data.get("services_commission") or Decimal("0"))
+                payslip_record.physical_products_commission
+                + payslip_record.credit_commission
+                + payslip_record.services_commission
             )
-            payslip_record.deductions = (
-                (form.cleaned_data.get("loan_deduction") or Decimal("0"))
-                + (form.cleaned_data.get("other_deductions") or Decimal("0"))
-            )
+            payslip_record.deductions = payslip_record.loan_deduction + payslip_record.other_deductions
             total_earnings = payslip_record.basic_salary + payslip_record.allowances
             if employee.cpf_exempt:
                 employee_cpf = Decimal("0")
@@ -277,15 +288,19 @@ def payroll_edit(request, pk):
             payslip_record.nric = (employee.nric or "")[:9]
             payslip_record.cpf_exempted = employee.cpf_exempt
             payslip_record.sdl_exempted = employee.sdl_exempt
+            payslip_record.physical_products_commission = (
+                form.cleaned_data.get("physical_products_commission") or Decimal("0")
+            )
+            payslip_record.credit_commission = form.cleaned_data.get("credit_commission") or Decimal("0")
+            payslip_record.services_commission = form.cleaned_data.get("services_commission") or Decimal("0")
+            payslip_record.loan_deduction = form.cleaned_data.get("loan_deduction") or Decimal("0")
+            payslip_record.other_deductions = form.cleaned_data.get("other_deductions") or Decimal("0")
             payslip_record.allowances = (
-                (form.cleaned_data.get("physical_products_commission") or Decimal("0"))
-                + (form.cleaned_data.get("credit_commission") or Decimal("0"))
-                + (form.cleaned_data.get("services_commission") or Decimal("0"))
+                payslip_record.physical_products_commission
+                + payslip_record.credit_commission
+                + payslip_record.services_commission
             )
-            payslip_record.deductions = (
-                (form.cleaned_data.get("loan_deduction") or Decimal("0"))
-                + (form.cleaned_data.get("other_deductions") or Decimal("0"))
-            )
+            payslip_record.deductions = payslip_record.loan_deduction + payslip_record.other_deductions
             total_earnings = payslip_record.basic_salary + payslip_record.allowances
             if employee.cpf_exempt:
                 employee_cpf = Decimal("0")
@@ -464,7 +479,12 @@ def payroll_upload_confirm_save(request):
                 employee_name=row["employee_name"],
                 employee_id=employee_code,
                 basic_salary=Decimal(row["basic_salary"]),
+                physical_products_commission=Decimal(row["physical_products_commission"]),
+                credit_commission=Decimal(row["credit_commission"]),
+                services_commission=Decimal(row["services_commission"]),
                 allowances=allowances,
+                loan_deduction=Decimal(row["loan_deduction"]),
+                other_deductions=Decimal(row["other_deductions"]),
                 deductions=deductions,
                 cpf_contribution=Decimal(row["cpf_employee_amount"]),
                 net_salary=Decimal(row["net_pay"]),
@@ -565,6 +585,324 @@ def employee_create(request):
     else:
         form = EmployeeForm(initial={"employee_code": _generate_next_employee_code()})
     return render(request, "payroll/employee_form.html", {"form": form, "is_edit": False})
+
+
+def _serialize_employee_preview_row(row):
+    return {
+        "row_number": row["row_number"],
+        "employee_code": row["employee_code"],
+        "nric": row["nric"],
+        "first_name": row["first_name"],
+        "last_name": row["last_name"],
+        "date_of_birth": row["date_of_birth"],
+        "date_of_appointment": row["date_of_appointment"],
+        "legal_status": row["legal_status"],
+        "gender": row["gender"],
+        "race": row["race"],
+        "religion": row["religion"],
+        "sdl_exempt": row["sdl_exempt"],
+        "cpf_exempt": row["cpf_exempt"],
+        "job_title": row["job_title"],
+        "email": row["email"],
+        "payment_method": row["payment_method"],
+        "bank_name": row["bank_name"],
+        "bank_account_number": row["bank_account_number"],
+        "bank_branch_code": row["bank_branch_code"],
+    }
+
+
+def _deserialize_employee_preview_row(row):
+    parsed = dict(row)
+    for key in ("date_of_birth", "date_of_appointment"):
+        if parsed.get(key):
+            parsed[key] = date.fromisoformat(parsed[key])
+    return parsed
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def employee_upload_preview(request):
+    form = EmployeeUploadForm(request.POST or None, request.FILES or None)
+    preview_rows = []
+    invalid_rows = []
+    total_rows = 0
+    valid_count = 0
+    invalid_count = 0
+
+    if request.method == "POST" and form.is_valid():
+        try:
+            uploaded_file = form.cleaned_data["employee_file"]
+            from openpyxl import load_workbook
+
+            worksheet = load_workbook(uploaded_file, data_only=True).active
+            raw_rows = list(worksheet.iter_rows(values_only=True))
+            if not raw_rows:
+                raise ValueError("Uploaded file is empty.")
+
+            headers = [str(h).strip().lower() if h is not None else "" for h in raw_rows[0]]
+            required_headers = [
+                "employee_code",
+                "nric",
+                "first_name",
+                "last_name",
+                "date_of_birth",
+                "date_of_appointment",
+                "legal_status",
+                "gender",
+                "race",
+                "religion",
+                "sdl_exempt",
+                "cpf_exempt",
+                "job_title",
+                "email",
+                "payment_method",
+                "bank_name",
+                "bank_account_number",
+                "bank_branch_code",
+            ]
+            missing = sorted(set(required_headers) - set(headers))
+            if missing:
+                raise ValueError(f"Missing required columns: {', '.join(missing)}")
+
+            index_map = {name: headers.index(name) for name in required_headers}
+            valid_legal_status = {choice[0] for choice in Employee.LEGAL_STATUS_CHOICES}
+            valid_gender = {choice[0] for choice in Employee.GENDER_CHOICES}
+            valid_payment_method = {choice[0] for choice in Employee.PAYMENT_METHOD_CHOICES}
+            used_employee_codes = set(Employee.objects.values_list("employee_code", flat=True))
+
+            for row_number, row in enumerate(raw_rows[1:], start=2):
+                if row is None or all(value in (None, "") for value in row):
+                    continue
+
+                row_errors = []
+                parsed_row = {}
+                for header in required_headers:
+                    value = row[index_map[header]]
+                    parsed_row[header] = str(value).strip() if value is not None else ""
+
+                if not parsed_row["first_name"]:
+                    row_errors.append("First name is required.")
+                if not parsed_row["last_name"]:
+                    row_errors.append("Last name is required.")
+                if not parsed_row["email"]:
+                    row_errors.append("Email is required.")
+
+                for date_field in ("date_of_birth", "date_of_appointment"):
+                    raw_value = parsed_row[date_field]
+                    if not raw_value:
+                        if date_field == "date_of_appointment":
+                            row_errors.append("Date of appointment is required.")
+                        parsed_row[date_field] = ""
+                        continue
+                    try:
+                        parsed_row[date_field] = date.fromisoformat(raw_value).isoformat()
+                    except ValueError:
+                        row_errors.append(f"{date_field.replace('_', ' ').title()} must be YYYY-MM-DD.")
+
+                for bool_field in ("sdl_exempt", "cpf_exempt"):
+                    raw_value = parsed_row[bool_field].lower()
+                    if raw_value in ("true", "1", "yes", "y"):
+                        parsed_row[bool_field] = True
+                    elif raw_value in ("false", "0", "no", "n", ""):
+                        parsed_row[bool_field] = False
+                    else:
+                        row_errors.append(f"{bool_field} must be TRUE/FALSE.")
+
+                if parsed_row["legal_status"] and parsed_row["legal_status"] not in valid_legal_status:
+                    row_errors.append("Invalid legal_status value.")
+                if parsed_row["gender"] and parsed_row["gender"] not in valid_gender:
+                    row_errors.append("Invalid gender value.")
+                if parsed_row["payment_method"] and parsed_row["payment_method"] not in valid_payment_method:
+                    row_errors.append("Invalid payment_method value.")
+                if parsed_row["employee_code"] and Employee.objects.filter(employee_code=parsed_row["employee_code"]).exists():
+                    row_errors.append("Employee code already exists.")
+                if Employee.objects.filter(email__iexact=parsed_row["email"]).exists():
+                    row_errors.append("Email already exists in employee records.")
+
+                if row_errors:
+                    invalid_rows.append(
+                        {
+                            "row_number": row_number,
+                            "employee_code": parsed_row["employee_code"],
+                            "employee_name": f"{parsed_row['first_name']} {parsed_row['last_name']}".strip(),
+                            "errors": row_errors,
+                        }
+                    )
+                    continue
+
+                parsed_row["row_number"] = row_number
+                if not parsed_row["employee_code"]:
+                    generated_code = _generate_next_employee_code()
+                    while generated_code in used_employee_codes:
+                        numeric_part = int(generated_code[1:]) + 1
+                        generated_code = f"E{numeric_part:03d}"
+                    parsed_row["employee_code"] = generated_code
+                used_employee_codes.add(parsed_row["employee_code"])
+                preview_rows.append(parsed_row)
+
+            total_rows = len(preview_rows) + len(invalid_rows)
+            valid_count = len(preview_rows)
+            invalid_count = len(invalid_rows)
+
+            if preview_rows:
+                request.session["employee_upload_preview"] = {
+                    "rows": [_serialize_employee_preview_row(r) for r in preview_rows],
+                }
+
+            log_event(
+                action="employee.upload.previewed",
+                user=request.user,
+                metadata={
+                    "path": request.path,
+                    "row_count": total_rows,
+                    "valid_row_count": valid_count,
+                    "invalid_row_count": invalid_count,
+                    "source_file_name": uploaded_file.name,
+                },
+                ip_address=get_client_ip(request),
+            )
+        except Exception as exc:
+            log_event(
+                action="employee.upload.failed",
+                user=request.user,
+                metadata={"path": request.path, "error_message": str(exc)},
+                ip_address=get_client_ip(request),
+            )
+            messages.error(request, f"Unable to process file: {exc}")
+            return redirect("employee-upload-preview")
+
+    return render(
+        request,
+        "payroll/employee_upload_preview.html",
+        {
+            "form": form,
+            "preview_rows": preview_rows,
+            "invalid_rows": invalid_rows,
+            "total_rows": total_rows,
+            "valid_count": valid_count,
+            "invalid_count": invalid_count,
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def employee_upload_confirm_save(request):
+    if request.method != "POST":
+        return redirect("employee-upload-preview")
+
+    upload_data = request.session.get("employee_upload_preview") or {}
+    serialized_rows = upload_data.get("rows") or []
+    if not serialized_rows:
+        messages.error(request, "No valid employee upload preview found. Please upload and preview first.")
+        return redirect("employee-upload-preview")
+
+    saved_count = 0
+    skipped_count = 0
+    with transaction.atomic():
+        for row in serialized_rows:
+            parsed = _deserialize_employee_preview_row(row)
+            if Employee.objects.filter(employee_code=parsed["employee_code"]).exists() or Employee.objects.filter(
+                email__iexact=parsed["email"]
+            ).exists():
+                skipped_count += 1
+                continue
+
+            employee = Employee(
+                employee_code=parsed["employee_code"],
+                nric=parsed["nric"],
+                first_name=parsed["first_name"],
+                last_name=parsed["last_name"],
+                date_of_birth=parsed["date_of_birth"] or None,
+                date_of_appointment=parsed["date_of_appointment"],
+                legal_status=parsed["legal_status"],
+                gender=parsed["gender"],
+                race=parsed["race"],
+                religion=parsed["religion"],
+                sdl_exempt=parsed["sdl_exempt"],
+                cpf_exempt=parsed["cpf_exempt"],
+                job_title=parsed["job_title"],
+                email=parsed["email"],
+                payment_method=parsed["payment_method"],
+                bank_name=parsed["bank_name"],
+                bank_account_number=parsed["bank_account_number"],
+                bank_branch_code=parsed["bank_branch_code"],
+                hire_date=parsed["date_of_appointment"],
+                status=Employee.STATUS_ACTIVE,
+                created_by=request.user,
+            )
+            employee.save()
+            saved_count += 1
+
+    request.session.pop("employee_upload_preview", None)
+    messages.success(
+        request,
+        f"Employee upload saved. {saved_count} created, {skipped_count} skipped due to duplicates."
+        if skipped_count
+        else f"Employee upload saved. {saved_count} employee record(s) created.",
+    )
+    return redirect("employee-list")
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def employee_template_download(request):
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Employee Template"
+    headers = [
+        "employee_code",
+        "nric",
+        "first_name",
+        "last_name",
+        "date_of_birth",
+        "date_of_appointment",
+        "legal_status",
+        "gender",
+        "race",
+        "religion",
+        "sdl_exempt",
+        "cpf_exempt",
+        "job_title",
+        "email",
+        "payment_method",
+        "bank_name",
+        "bank_account_number",
+        "bank_branch_code",
+    ]
+    worksheet.append(headers)
+    worksheet.append(
+        [
+            "E001",
+            "S1234567A",
+            "Alex",
+            "Tan",
+            "1990-01-01",
+            "2024-01-10",
+            "citizen",
+            "male",
+            "Chinese",
+            "Buddhist",
+            "FALSE",
+            "FALSE",
+            "Therapist",
+            "alex.tan@example.com",
+            "giro",
+            "DBS Bank",
+            "123-456-789",
+            "001",
+        ]
+    )
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="employee_upload_template.xlsx"'
+    return response
 
 
 @login_required

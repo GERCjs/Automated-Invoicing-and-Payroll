@@ -16,6 +16,13 @@ class PayrollUploadForm(forms.Form):
     )
 
 
+class EmployeeUploadForm(forms.Form):
+    employee_file = forms.FileField(
+        label="Employee Excel file",
+        help_text="Upload .xlsx file using the provided template.",
+    )
+
+
 class PayrollRecordForm(forms.ModelForm):
     physical_products_commission = forms.DecimalField(
         required=False,
@@ -107,11 +114,13 @@ class PayrollRecordForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
-            self.fields["physical_products_commission"].initial = self.instance.allowances
-            self.fields["credit_commission"].initial = 0
-            self.fields["services_commission"].initial = 0
-            self.fields["loan_deduction"].initial = self.instance.deductions
-            self.fields["other_deductions"].initial = 0
+            self.fields["physical_products_commission"].initial = (
+                self.instance.physical_products_commission or 0
+            )
+            self.fields["credit_commission"].initial = self.instance.credit_commission or 0
+            self.fields["services_commission"].initial = self.instance.services_commission or 0
+            self.fields["loan_deduction"].initial = self.instance.loan_deduction or 0
+            self.fields["other_deductions"].initial = self.instance.other_deductions or 0
 
 
 SINGAPORE_BANK_CHOICES = [

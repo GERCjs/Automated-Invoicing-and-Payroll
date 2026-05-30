@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Employee Upload & Preview{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Employee Excel Upload</h1>
+        <p class="page-subtitle">Preview employee records before creating them in bulk.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="section-heading">Upload File</h2>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <a href="{% url 'employee-template-download' %}" class="btn btn-outline-primary">Download Employee Template</a>
+            <a href="{% url 'employee-create' %}" class="btn btn-outline-secondary">Back to Add New Employee</a>
+        </div>
+        <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
+            {% csrf_token %}
+            <div class="col-md-8">
+                <label class="form-label" for="id_employee_file">{{ form.employee_file.label }}</label>
+                {{ form.employee_file }}
+                <div class="form-text">{{ form.employee_file.help_text }}</div>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">Upload & Preview</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if total_rows %}
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4"><div class="sub-kpi"><strong>Total rows:</strong> {{ total_rows }}</div></div>
+            <div class="col-md-4"><div class="sub-kpi"><strong>Valid rows:</strong> {{ valid_count }}</div></div>
+            <div class="col-md-4"><div class="sub-kpi"><strong>Invalid rows:</strong> {{ invalid_count }}</div></div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if preview_rows %}
+<div class="card mb-4">
+    <div class="card-header bg-light">
+        <strong>Valid Rows</strong>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-clean mb-0">
+            <thead>
+                <tr>
+                    <th>Row</th>
+                    <th>Employee Code</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Appointment Date</th>
+                    <th>Job Title</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in preview_rows %}
+                <tr>
+                    <td>{{ row.row_number }}</td>
+                    <td>{{ row.employee_code }}</td>
+                    <td>{{ row.first_name }} {{ row.last_name }}</td>
+                    <td>{{ row.email }}</td>
+                    <td>{{ row.date_of_appointment }}</td>
+                    <td>{{ row.job_title|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<form method="post" action="{% url 'employee-upload-confirm-save' %}" class="mb-4">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-success">Confirm Save Valid Rows</button>
+</form>
+{% endif %}
+
+{% if invalid_rows %}
+<div class="card">
+    <div class="card-header bg-danger-subtle">
+        <strong>Invalid Rows</strong>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-clean mb-0">
+            <thead>
+                <tr>
+                    <th>Row</th>
+                    <th>Employee Code</th>
+                    <th>Employee Name</th>
+                    <th>Error Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in invalid_rows %}
+                <tr>
+                    <td>{{ row.row_number }}</td>
+                    <td>{{ row.employee_code }}</td>
+                    <td>{{ row.employee_name }}</td>
+                    <td>{{ row.errors|join:", " }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

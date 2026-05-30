@@ -99,8 +99,26 @@
                 {% endif %}
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
-                <a class="portal-nav-link" href="{% url 'payroll-dashboard' %}">Payroll</a>
-                <a class="portal-nav-link" href="{% url 'employee-list' %}">Employees</a>
+                <div class="dropdown">
+                    <button class="portal-nav-link dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Payroll
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a href="{% url 'payroll-dashboard' %}" class="dropdown-item">Payroll Dashboard</a></li>
+                        <li><a href="{% url 'payroll-create' %}" class="dropdown-item">Create Payroll Record</a></li>
+                        <li><a href="{% url 'payroll-upload-preview' %}" class="dropdown-item">Bulk Add Payroll Record</a></li>
+                    </ul>
+                </div>
+                <div class="dropdown">
+                    <button class="portal-nav-link dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Employees
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a href="{% url 'employee-list' %}" class="dropdown-item">Employee List</a></li>
+                        <li><a href="{% url 'employee-create' %}" class="dropdown-item">Add New Employee</a></li>
+                        <li><a href="{% url 'employee-upload-preview' %}" class="dropdown-item">Bulk Add Employees</a></li>
+                    </ul>
+                </div>
                 {% endif %}
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" %}
