@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Delivery Logs | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Delivery Logs</h1>
+        <p class="page-subtitle">Mass email and payment reminder delivery attempts.</p>
+    </div>
+    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label small">Type</label>
+                <select name="type" class="form-select form-select-sm">
+                    <option value="">Mass and reminders</option>
+                    <option value="mass" {% if selected_type == "mass" %}selected{% endif %}>Mass email</option>
+                    <option value="reminder" {% if selected_type == "reminder" %}selected{% endif %}>Reminder email</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Status</label>
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">All statuses</option>
+                    {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Search</label>
+                <input type="search" name="q" value="{{ search_query }}" class="form-control form-control-sm" placeholder="Recipient, subject, invoice, metadata">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-sm btn-primary w-100">Filter</button>
+            </div>
+        </form>
+    </div>
+    <div class="table-responsive" style="max-height: 520px;">
+        <table class="table table-clean table-hover table-striped table-sm align-middle mb-0" style="--bs-table-cell-padding-y: .45rem; --bs-table-cell-padding-x: .55rem;">
+            <thead class="table-light" style="position: sticky; top: 0; z-index: 1;">
+                <tr>
+                    <th>Attempted</th>
+                    <th>Type</th>
+                    <th>Recipient</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th>Reference</th>
+                    <th>Triggered By</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td class="text-nowrap">{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        {% if log.template_key == "admin_mass_email" %}
+                        Mass Email
+                        {% else %}
+                        Reminder Email
+                        {% endif %}
+                    </td>
+                    <td>{{ log.recipient_email }}</td>
+                    <td>
+                        <div class="fw-semibold">{{ log.subject }}</div>
+                        {% if log.error_message %}
+                        <div class="text-danger small">{{ log.error_message }}</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.status == "sent" %}
+                        <span class="badge bg-success">Sent</span>
+                        {% elif log.status == "failed" %}
+                        <span class="badge bg-danger">Failed</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.template_key == "admin_mass_email" %}
+                        {{ log.metadata.recipient_count|default:"-" }} recipient(s)
+                        {% else %}
+                        {{ log.metadata.invoice_number|default:log.related_object_id }}
+                        {% endif %}
+                    </td>
+                    <td>{{ log.triggered_by.username|default:"System" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center py-4"><div class="empty-state">No delivery logs match the filters.</div></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer">
+        <div class="text-muted small">
+            Showing up to 500 matching delivery logs. Use filters to narrow the list.
+        </div>
+    </div>
+</div>
+{% endblock %}

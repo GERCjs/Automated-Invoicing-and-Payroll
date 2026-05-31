@@ -58,7 +58,7 @@ class CorePhaseOneTests(TestCase):
         self.assertTrue(AuditLog.objects.filter(pk=noisy_log.pk).exists())
         self.assertTrue(AuditLog.objects.filter(pk=important_log.pk).exists())
 
-    def test_audit_log_page_supports_page_size_options(self):
+    def test_audit_log_page_uses_scrollable_list_without_pagination(self):
         admin = User.objects.create_superuser(
             username="auditpager",
             email="auditpager@example.com",
@@ -77,22 +77,14 @@ class CorePhaseOneTests(TestCase):
 
         response = self.client.get(
             reverse("dashboard-audit-logs"),
-            data={"action": "invoice.created", "per_page": "10"},
+            data={"action": "invoice.created"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["selected_per_page"], 10)
-        self.assertEqual(len(response.context["logs"]), 10)
-        self.assertContains(response, "Showing 1-10 of 15")
-
-        second_page = self.client.get(
-            reverse("dashboard-audit-logs"),
-            data={"action": "invoice.created", "per_page": "10", "page": "2"},
-        )
-
-        self.assertEqual(second_page.status_code, 200)
-        self.assertEqual(len(second_page.context["logs"]), 5)
-        self.assertContains(second_page, "Showing 11-15 of 15")
+        self.assertEqual(len(response.context["logs"]), 15)
+        self.assertContains(response, "Showing up to 500 matching audit logs")
+        self.assertNotContains(response, "Previous")
+        self.assertNotContains(response, "Next")
 
     def test_audit_log_page_shows_friendly_label_for_refund_actions(self):
         admin = User.objects.create_superuser(

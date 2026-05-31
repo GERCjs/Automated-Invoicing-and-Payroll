@@ -55,11 +55,12 @@
         <div class="d-flex flex-wrap gap-2">
             <a href="{% url 'managed-account-create' %}" class="btn btn-primary btn-sm">Create Account</a>
             <a href="{% url 'dashboard-audit-logs' %}" class="btn btn-outline-dark btn-sm">Audit Logs</a>
+            <a href="{% url 'dashboard-validation-errors' %}" class="btn btn-outline-warning btn-sm">Validation Errors</a>
             <a href="{% url 'admin-security-report' %}" class="btn btn-outline-success btn-sm">Admin / Security Report</a>
             <a href="{% url 'payment-reminder-settings-update' %}" class="btn btn-outline-primary btn-sm">Reminder Settings</a>
             <a href="{% url 'mass-email-send' %}" class="btn btn-outline-secondary btn-sm">Mass Email</a>
+            <a href="{% url 'email-delivery-log-list' %}" class="btn btn-outline-secondary btn-sm">Delivery Logs</a>
             <a href="{% url 'suspicious-activity-list' %}" class="btn btn-outline-warning btn-sm">Suspicious Activity</a>
-            <a href="{% url 'dashboard' %}" class="btn btn-outline-info btn-sm">Management Dashboard</a>
         </div>
     </div>
 </div>

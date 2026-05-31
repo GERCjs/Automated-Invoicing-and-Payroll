@@ -6,9 +6,9 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Validation Errors</h1>
-        <p class="page-subtitle">Rows rejected during invoice or payroll imports before they were saved.</p>
+        <p class="page-subtitle">Uploaded rows that could not be saved, with the file name, row number, and fix needed.</p>
     </div>
-    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Back</a>
+    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
 </div>
 
 <div class="card">
@@ -32,15 +32,15 @@
             </div>
         </form>
     </div>
-    <div class="table-responsive">
-        <table class="table table-clean table-hover mb-0">
-            <thead>
+    <div class="table-responsive" style="max-height: 520px;">
+        <table class="table table-clean table-hover table-striped table-sm align-middle mb-0" style="--bs-table-cell-padding-y: .45rem; --bs-table-cell-padding-x: .55rem;">
+            <thead class="table-light" style="position: sticky; top: 0; z-index: 1;">
                 <tr>
                     <th>Module</th>
                     <th>Source</th>
                     <th>Row</th>
                     <th>Field</th>
-                    <th>Error</th>
+                    <th>What To Fix</th>
                     <th>Created</th>
                 </tr>
             </thead>
@@ -51,7 +51,22 @@
                     <td>{{ error.import_job.source_file_name }}</td>
                     <td>{{ error.row_number }}</td>
                     <td>{{ error.field_name|default:"-" }}</td>
-                    <td>{{ error.error_message }}</td>
+                    <td>
+                        {% if "Missing merchant/customer identity" in error.error_message %}
+                        Add a shop title, customer name, or email for this row.
+                        {% elif "Missing numeric amount" in error.error_message %}
+                        Enter a valid amount in Vaniday share, commission, or total revenue.
+                        {% elif "Amount must be zero or positive" in error.error_message %}
+                        Change the amount to zero or a positive value.
+                        {% elif "Quantity must be greater than zero" in error.error_message %}
+                        Change the quantity to a number greater than zero.
+                        {% elif "bookedDate format is invalid" in error.error_message %}
+                        Fix the booked date format, for example 2026-05-26 or 26/05/2026.
+                        {% else %}
+                        {{ error.error_message }}
+                        {% endif %}
+                        <div class="text-muted small">{{ error.error_message }}</div>
+                    </td>
                     <td>{{ error.created_at|date:"Y-m-d H:i" }}</td>
                 </tr>
                 {% empty %}

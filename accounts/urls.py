@@ -5,6 +5,7 @@ from .views import (
     UserLogoutView,
     admin_dashboard,
     create_admin_account,
+    email_delivery_log_list,
     login_security_policy_update,
     managed_account_create,
     managed_account_delete,
@@ -80,5 +81,6 @@ urlpatterns = [
         name="payment-reminder-run-check",
     ),
     path("admin-dashboard/mass-email/", mass_email_send, name="mass-email-send"),
+    path("admin-dashboard/delivery-logs/", email_delivery_log_list, name="email-delivery-log-list"),
     path("admin-dashboard/suspicious-activity/", suspicious_activity_list, name="suspicious-activity-list"),
 ]

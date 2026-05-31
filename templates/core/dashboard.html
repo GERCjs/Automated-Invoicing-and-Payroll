@@ -93,44 +93,6 @@
     </div>
 </div>
 
-<div class="row g-3 mb-3">
-    <div class="col-md-3 col-sm-6">
-        <a href="{% url 'dashboard-audit-logs' %}" class="text-decoration-none text-reset">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Audit Events</div>
-                <div class="display-6 fw-semibold">{{ total_audit_logs }}</div>
-            </div>
-        </div>
-        </a>
-    </div>
-    <div class="col-md-3 col-sm-6">
-        <a href="{% url 'dashboard-validation-errors' %}" class="text-decoration-none text-reset">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Validation Errors</div>
-                <div class="display-6 fw-semibold text-warning">{{ import_error_total }}</div>
-            </div>
-        </div>
-        </a>
-    </div>
-    <div class="col-md-3 col-sm-6">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Failed Imports</div>
-                <div class="display-6 fw-semibold text-danger">{{ import_failed_count }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 col-sm-6">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Email Failures</div>
-                <div class="display-6 fw-semibold text-info">{{ email_failed_count }}</div>
-            </div>
-        </div>
-    </div>
-</div>
 {% endif %}
 
 <div class="row g-3 mb-3">

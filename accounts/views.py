@@ -724,6 +724,43 @@ def mass_email_send(request):
 
 @login_required
 @role_required(SUPERADMIN, ADMIN)
+def email_delivery_log_list(request):
+    selected_type = request.GET.get("type", "").strip()
+    selected_status = request.GET.get("status", "").strip()
+    search_query = request.GET.get("q", "").strip()
+
+    logs = EmailDeliveryLog.objects.select_related("triggered_by").filter(
+        Q(template_key="admin_mass_email") | Q(template_key__startswith="payment_reminder_")
+    )
+    if selected_type == "mass":
+        logs = logs.filter(template_key="admin_mass_email")
+    elif selected_type == "reminder":
+        logs = logs.filter(template_key__startswith="payment_reminder_")
+    if selected_status:
+        logs = logs.filter(status=selected_status)
+    if search_query:
+        logs = logs.filter(
+            Q(recipient_email__icontains=search_query)
+            | Q(subject__icontains=search_query)
+            | Q(related_object_id__icontains=search_query)
+            | Q(metadata__icontains=search_query)
+        )
+
+    return render(
+        request,
+        "accounts/email_delivery_log_list.html",
+        {
+            "logs": logs.order_by("-attempted_at")[:500],
+            "selected_type": selected_type,
+            "selected_status": selected_status,
+            "search_query": search_query,
+            "status_choices": EmailDeliveryLog.STATUS_CHOICES,
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
 def suspicious_activity_list(request):
     selected_role = request.GET.get("role", "").strip()
     search_query = request.GET.get("q", "").strip()
