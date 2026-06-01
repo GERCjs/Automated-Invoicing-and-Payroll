@@ -15,8 +15,8 @@
     <div class="card mb-3">
         <div class="card-body">
             <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Employee Name</label>{{ form.employee_name }}</div>
                 <div class="col-md-6"><label class="form-label">Employee ID</label>{{ form.employee_id }}</div>
+                <div class="col-md-6"><label class="form-label">Employee Name</label>{{ form.employee_name }}</div>
                 <div class="col-md-3"><label class="form-label">Basic Salary</label>{{ form.basic_salary }}</div>
                 <div class="col-md-3"><label class="form-label">Physical Products Commission</label>{{ form.physical_products_commission }}</div>
                 <div class="col-md-3"><label class="form-label">Credit Commission</label>{{ form.credit_commission }}</div>
@@ -50,6 +50,7 @@
 <script>
 (() => {
     const employeeIdInput = document.getElementById("id_employee_id");
+    const employeeNameInput = document.getElementById("id_employee_name");
     const basicSalaryInput = document.getElementById("id_basic_salary");
     const physicalProductsInput = document.getElementById("id_physical_products_commission");
     const creditCommissionInput = document.getElementById("id_credit_commission");
@@ -63,7 +64,29 @@
     employerCpfInput.readOnly = true;
 
     let debounceTimer = null;
+    let lookupDebounceTimer = null;
     const previewUrl = "{% url 'payroll-cpf-preview' %}";
+    const lookupUrl = "{% url 'payroll-employee-lookup' %}";
+
+    const refreshEmployeeName = () => {
+        if (!employeeNameInput) return;
+        const employeeId = (employeeIdInput.value || "").trim();
+        if (!employeeId) {
+            employeeNameInput.value = "";
+            return;
+        }
+        const params = new URLSearchParams({ employee_id: employeeId });
+        fetch(`${lookupUrl}?${params.toString()}`, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+            .then((r) => r.json())
+            .then((data) => {
+                if (data && data.ok && data.employee_name !== undefined) {
+                    employeeNameInput.value = data.employee_name;
+                } else if (data && data.reason === "employee_not_found") {
+                    employeeNameInput.value = "";
+                }
+            })
+            .catch(() => {});
+    };
 
     const refreshCpf = () => {
         const employeeId = (employeeIdInput.value || "").trim();
@@ -106,14 +129,26 @@
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(refreshCpf, 220);
     };
+    const scheduleEmployeeLookup = () => {
+        if (lookupDebounceTimer) clearTimeout(lookupDebounceTimer);
+        lookupDebounceTimer = setTimeout(refreshEmployeeName, 220);
+    };
 
     basicSalaryInput.addEventListener("input", scheduleRefresh);
     physicalProductsInput?.addEventListener("input", scheduleRefresh);
     creditCommissionInput?.addEventListener("input", scheduleRefresh);
     servicesCommissionInput?.addEventListener("input", scheduleRefresh);
-    employeeIdInput.addEventListener("input", scheduleRefresh);
+    employeeIdInput.addEventListener("input", () => {
+        scheduleEmployeeLookup();
+        scheduleRefresh();
+    });
+    employeeIdInput.addEventListener("change", () => {
+        scheduleEmployeeLookup();
+        scheduleRefresh();
+    });
     paymentDateInput.addEventListener("input", scheduleRefresh);
     paymentDateInput.addEventListener("change", scheduleRefresh);
+    refreshEmployeeName();
     refreshCpf();
 })();
 </script>

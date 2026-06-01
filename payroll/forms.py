@@ -90,7 +90,7 @@ class PayrollRecordForm(forms.ModelForm):
         ]
         widgets = {
             "employee_name": forms.TextInput(attrs={"class": "form-control"}),
-            "employee_id": forms.TextInput(attrs={"class": "form-control"}),
+            "employee_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "STF-00000"}),
             "basic_salary": forms.NumberInput(attrs={"class": "form-control", "step": "0.01"}),
             "cpf_contribution": forms.NumberInput(
                 attrs={
@@ -178,6 +178,7 @@ class EmployeeForm(forms.ModelForm):
             "job_title",
             "email",
             "payment_method",
+            "status",
             "bank_name",
             "bank_account_number",
             "bank_branch_code",
@@ -196,6 +197,7 @@ class EmployeeForm(forms.ModelForm):
             "job_title": forms.TextInput(attrs={"class": "form-control"}),
             "email": forms.EmailInput(attrs={"class": "form-control"}),
             "payment_method": forms.Select(attrs={"class": "form-select"}),
+            "status": forms.Select(attrs={"class": "form-select"}),
             "bank_account_number": forms.TextInput(attrs={"class": "form-control"}),
             "bank_branch_code": forms.TextInput(attrs={"class": "form-control"}),
         }

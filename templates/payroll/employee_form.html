@@ -8,11 +8,6 @@
         <h1 class="page-title">{% if is_edit %}Edit Employee{% else %}Add New Employee{% endif %}</h1>
         <p class="page-subtitle">Maintain employee profile, payroll eligibility, and bank payout details.</p>
     </div>
-    {% if not is_edit %}
-    <div class="d-flex gap-2">
-        <a href="{% url 'employee-upload-preview' %}" class="btn btn-outline-primary">Bulk Add Employees</a>
-    </div>
-    {% endif %}
 </div>
 
 <div class="card">
@@ -108,6 +103,13 @@
                     {{ form.payment_method }}
                     {% for error in form.payment_method.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
+                {% if is_edit %}
+                <div class="col-md-4">
+                    <label class="form-label">Status</label>
+                    {{ form.status }}
+                    {% for error in form.status.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
             </div>
 
             <h2 class="section-heading mt-4">Bank Account Details</h2>
@@ -136,6 +138,16 @@
             <div class="d-flex gap-2 mt-4">
                 <a href="{% url 'employee-list' %}" class="btn btn-outline-secondary">Cancel</a>
                 <button type="submit" class="btn btn-primary">Save</button>
+                {% if is_edit %}
+                <button
+                    type="submit"
+                    class="btn btn-outline-danger"
+                    formaction="{% url 'employee-delete' employee.pk %}"
+                    formmethod="post"
+                    formnovalidate
+                    onclick="return confirm('When deleted, you can no longer recover it. Delete this employee?');"
+                >Delete</button>
+                {% endif %}
             </div>
         </form>
     </div>

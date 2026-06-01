@@ -6,7 +6,7 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Employee Excel Upload</h1>
-        <p class="page-subtitle">Preview employee records before creating them in bulk.</p>
+        <p class="page-subtitle">Preview employee records before creating them in bulk. Employee code must be in STF-000000 format.</p>
     </div>
 </div>
 
@@ -15,7 +15,6 @@
         <h2 class="section-heading">Upload File</h2>
         <div class="d-flex flex-wrap gap-2 mb-3">
             <a href="{% url 'employee-template-download' %}" class="btn btn-outline-primary">Download Employee Template</a>
-            <a href="{% url 'employee-create' %}" class="btn btn-outline-secondary">Back to Add New Employee</a>
         </div>
         <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end">
             {% csrf_token %}

@@ -104,6 +104,7 @@
                         Payroll
                     </button>
                     <ul class="dropdown-menu">
+                        <li><a href="{% url 'payroll-list' %}" class="dropdown-item">View Payroll List</a></li>
                         <li><a href="{% url 'payroll-dashboard' %}" class="dropdown-item">Payroll Dashboard</a></li>
                         <li><a href="{% url 'payroll-create' %}" class="dropdown-item">Create Payroll Record</a></li>
                         <li><a href="{% url 'payroll-upload-preview' %}" class="dropdown-item">Bulk Add Payroll Record</a></li>

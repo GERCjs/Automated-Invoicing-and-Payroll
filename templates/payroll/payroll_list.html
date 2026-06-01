@@ -67,6 +67,10 @@
                             <a href="{% url 'payroll-detail' payslip_record.pk %}" class="btn btn-sm btn-outline-primary">View</a>
                             <a href="{% url 'payslip-pdf-download' payslip_record.pk %}" class="btn btn-sm btn-outline-success">PDF</a>
                             <a href="{% url 'payroll-edit' payslip_record.pk %}" class="btn btn-sm btn-outline-dark">Edit</a>
+                            <form method="post" action="{% url 'payroll-delete' payslip_record.pk %}" onsubmit="return confirm('When deleted, you can no longer recover it. Delete this payroll record?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                            </form>
                         </div>
                     </td>
                 </tr>

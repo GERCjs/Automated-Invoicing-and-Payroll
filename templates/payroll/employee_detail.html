@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Employee {{ employee.employee_code }} | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Employee {{ employee.employee_code }}</h1>
+        <p class="page-subtitle">Full employee profile details.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{% url 'employee-edit' employee.pk %}" class="btn btn-primary">Edit</a>
+        <a href="{% url 'employee-list' %}" class="btn btn-outline-secondary">Back to Employee List</a>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="section-heading">Profile</h2>
+        <div class="row g-3">
+            <div class="col-md-6"><strong>Employee Code:</strong> {{ employee.employee_code }}</div>
+            <div class="col-md-6"><strong>NRIC:</strong> {{ employee.nric|default:"-" }}</div>
+            <div class="col-md-6"><strong>First Name:</strong> {{ employee.first_name }}</div>
+            <div class="col-md-6"><strong>Last Name:</strong> {{ employee.last_name }}</div>
+            <div class="col-md-6"><strong>Email:</strong> {{ employee.email }}</div>
+            <div class="col-md-6"><strong>Job Title:</strong> {{ employee.job_title|default:"-" }}</div>
+            <div class="col-md-6"><strong>Legal Status:</strong> {{ employee.get_legal_status_display|default:"-" }}</div>
+            <div class="col-md-6"><strong>Gender:</strong> {{ employee.get_gender_display|default:"-" }}</div>
+            <div class="col-md-6"><strong>Race:</strong> {{ employee.race|default:"-" }}</div>
+            <div class="col-md-6"><strong>Religion:</strong> {{ employee.religion|default:"-" }}</div>
+            <div class="col-md-6"><strong>Date of Birth:</strong> {{ employee.date_of_birth|date:"d-m-Y"|default:"-" }}</div>
+            <div class="col-md-6"><strong>Date of Appointment:</strong> {{ employee.date_of_appointment|date:"d-m-Y"|default:"-" }}</div>
+            <div class="col-md-6"><strong>SDL Exempt:</strong> {% if employee.sdl_exempt %}Yes{% else %}No{% endif %}</div>
+            <div class="col-md-6"><strong>CPF Exempt:</strong> {% if employee.cpf_exempt %}Yes{% else %}No{% endif %}</div>
+            <div class="col-md-6"><strong>Status:</strong> {{ employee.get_status_display }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h2 class="section-heading">Payment & Bank</h2>
+        <div class="row g-3">
+            <div class="col-md-6"><strong>Payment Method:</strong> {{ employee.get_payment_method_display|default:"-" }}</div>
+            <div class="col-md-6"><strong>Bank:</strong> {{ employee.bank_name|default:"-" }}</div>
+            <div class="col-md-6"><strong>Bank Account Number:</strong> {{ employee.bank_account_number|default:"-" }}</div>
+            <div class="col-md-6"><strong>Bank Branch Code:</strong> {{ employee.bank_branch_code|default:"-" }}</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

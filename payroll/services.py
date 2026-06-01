@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from datetime import date
+from datetime import date, datetime
 from typing import Any
+import re
 
 from openpyxl import load_workbook
 
@@ -13,8 +14,7 @@ MONEY_PLACES = Decimal("0.01")
 TEMPLATE_HEADERS = [
     "employee_code",
     "employee_name",
-    "employee_age",
-    "primary_work_location",
+    "employee_birthofdate",
     "working_days",
     "no_pay_leave_days",
     "basic_salary",
@@ -25,6 +25,8 @@ TEMPLATE_HEADERS = [
     "other_deductions",
     "notes",
 ]
+
+EMPLOYEE_CODE_PATTERN = re.compile(r"^STF-[0-9]{6}$")
 
 
 @dataclass
@@ -100,7 +102,7 @@ def employee_cpf_contribution_2026_from_basic_salary(
     return cpf.employee_amount
 
 
-def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:
+def parse_payroll_excel(uploaded_file, payment_date: date) -> list[dict[str, Any]]:
     workbook = load_workbook(uploaded_file, data_only=True)
     sheet = workbook.active
     rows = list(sheet.iter_rows(values_only=True))
@@ -122,20 +124,16 @@ def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:
         employee_code = str(row[index_map["employee_code"]] or "").strip()
         employee_name = str(row[index_map["employee_name"]] or "").strip()
 
-        age_decimal = _parse_decimal_field(
-            row[index_map["employee_age"]],
-            "Employee age",
+        employee_birthofdate = _parse_date_field(
+            row[index_map["employee_birthofdate"]],
+            "Employee birthofdate",
             row_errors,
-            default="0",
         )
         age = None
-        if age_decimal is not None:
-            if age_decimal != age_decimal.to_integral_value():
-                row_errors.append("Employee age must be a whole number.")
-            elif age_decimal < 0:
-                row_errors.append("Employee age cannot be negative.")
-            else:
-                age = int(age_decimal)
+        if employee_birthofdate is not None:
+            age = calculate_age_on(employee_birthofdate, payment_date)
+            if age < 0:
+                row_errors.append("Employee birthofdate cannot be after payment date.")
 
         working_days = _parse_decimal_field(
             row[index_map["working_days"]],
@@ -197,8 +195,7 @@ def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:
                 "row_number": row_number,
                 "employee_code": employee_code,
                 "employee_name": employee_name,
-                "employee_age": age,
-                "primary_work_location": row[index_map["primary_work_location"]] or "",
+                "employee_birthofdate": employee_birthofdate.strftime("%d-%m-%Y"),
                 "working_days": working_days,
                 "no_pay_leave_days": no_pay_leave_days,
                 "basic_salary": money(basic_salary),
@@ -220,15 +217,18 @@ def parse_payroll_excel(uploaded_file) -> list[dict[str, Any]]:
     return parsed
 
 
-def parse_and_validate_payroll_excel(uploaded_file) -> dict[str, Any]:
-    parsed_rows = parse_payroll_excel(uploaded_file)
+def parse_and_validate_payroll_excel(uploaded_file, payment_date: date) -> dict[str, Any]:
+    parsed_rows = parse_payroll_excel(uploaded_file, payment_date)
     invalid_rows: list[dict[str, Any]] = []
     valid_rows: list[dict[str, Any]] = []
 
     for row in parsed_rows:
         reasons: list[str] = list(row.get("__parse_errors", []))
-        if not str(row.get("employee_code") or "").strip():
+        employee_code = str(row.get("employee_code") or "").strip()
+        if not employee_code:
             reasons.append("Employee code is required.")
+        elif not EMPLOYEE_CODE_PATTERN.fullmatch(employee_code):
+            reasons.append("Employee code must follow STF-000000 format.")
         if not str(row.get("employee_name") or "").strip():
             reasons.append("Employee name is required.")
         if row.get("basic_salary") is not None and row.get("basic_salary", Decimal("0")) < 0:
@@ -263,10 +263,9 @@ def parse_and_validate_payroll_excel(uploaded_file) -> dict[str, Any]:
 
 def default_template_row() -> list[Any]:
     return [
-        "EMP001",
+        "STF-000001",
         "Alex Tan",
-        34,
-        "Raffles",
+        "01-01-1990",
         27,
         0,
         3000,
@@ -287,3 +286,21 @@ def _parse_decimal_field(value: Any, label: str, row_errors: list[str], default:
     except (InvalidOperation, ValueError):
         row_errors.append(f"{label} must be a valid number.")
         return None
+
+
+def _parse_date_field(value: Any, label: str, row_errors: list[str]) -> date | None:
+    if value in (None, ""):
+        row_errors.append(f"{label} is required.")
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    raw = str(value).strip()
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    row_errors.append(f"{label} must be DD-MM-YYYY.")
+    return None

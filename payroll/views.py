@@ -2,6 +2,7 @@ from io import BytesIO
 from decimal import Decimal, InvalidOperation
 from datetime import date, datetime
 from pathlib import Path
+import re
 
 from openpyxl import Workbook
 from django.contrib import messages
@@ -30,19 +31,36 @@ from .services import (
     parse_and_validate_payroll_excel,
 )
 
+EMPLOYEE_CODE_PATTERN = re.compile(r"^STF-[0-9]{6}$")
+
 
 def _generate_next_employee_code():
     latest_code = (
-        Employee.objects.filter(employee_code__regex=r"^E[0-9]+$")
-        .order_by("-employee_code")
+        Employee.objects.filter(employee_code__regex=r"^STF-[0-9]{6}$")
+        .order_by("-id")
         .values_list("employee_code", flat=True)
         .first()
     )
     if not latest_code:
-        return "E001"
+        return "STF-000001"
 
-    number = int(latest_code[1:]) + 1
-    return f"E{number:03d}"
+    number = int(latest_code.split("-")[1]) + 1
+    return f"STF-{number:06d}"
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def payroll_employee_lookup(request):
+    employee_id = (request.GET.get("employee_id") or "").strip()
+    if not employee_id:
+        return JsonResponse({"ok": False, "employee_name": "", "reason": "missing_employee_id"})
+
+    employee = Employee.objects.filter(employee_code=employee_id).first()
+    if employee is None:
+        return JsonResponse({"ok": False, "employee_name": "", "reason": "employee_not_found"})
+
+    employee_name = f"{employee.first_name} {employee.last_name}".strip()
+    return JsonResponse({"ok": True, "employee_name": employee_name, "reason": "found"})
 
 
 @login_required
@@ -354,6 +372,28 @@ def payroll_detail(request, pk):
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
+def payroll_delete(request, pk):
+    if request.method != "POST":
+        return redirect("payroll-detail", pk=pk)
+
+    payslip_record = get_object_or_404(PayrollRecord, pk=pk)
+    record_id = payslip_record.id
+    employee_id = payslip_record.employee_id
+    payslip_record.delete()
+    log_event(
+        action="payroll.record.deleted",
+        user=request.user,
+        target_type="payroll_record",
+        target_id=str(record_id),
+        metadata={"employee_id": employee_id},
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, "Payslip record deleted permanently.")
+    return redirect("payroll-list")
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
 def payroll_upload_preview(request):
     form = PayrollUploadForm(request.POST or None, request.FILES or None)
     preview_rows = []
@@ -364,7 +404,10 @@ def payroll_upload_preview(request):
 
     if request.method == "POST" and form.is_valid():
         try:
-            upload_result = parse_and_validate_payroll_excel(form.cleaned_data["payroll_file"])
+            upload_result = parse_and_validate_payroll_excel(
+                form.cleaned_data["payroll_file"],
+                form.cleaned_data["payment_date"],
+            )
             preview_rows = upload_result["valid_rows"]
             invalid_rows = upload_result["invalid_rows"]
             filtered_valid_rows = []
@@ -461,10 +504,14 @@ def payroll_upload_confirm_save(request):
     payment_date = date.fromisoformat(payment_date_raw)
     saved_count = 0
     skipped_count = 0
+    invalid_format_count = 0
 
     with transaction.atomic():
         for row in serialized_rows:
             employee_code = str(row["employee_code"]).strip()
+            if not EMPLOYEE_CODE_PATTERN.fullmatch(employee_code):
+                invalid_format_count += 1
+                continue
             if PayrollRecord.objects.filter(employee_id=employee_code, payment_date=payment_date).exists():
                 skipped_count += 1
                 continue
@@ -524,6 +571,11 @@ def payroll_upload_confirm_save(request):
         )
     else:
         messages.warning(request, "No payroll records were created from this upload.")
+    if invalid_format_count:
+        messages.warning(
+            request,
+            f"{invalid_format_count} row(s) were skipped because employee code was not in STF-000000 format.",
+        )
     return redirect("payroll-list")
 
 
@@ -735,6 +787,8 @@ def employee_upload_preview(request):
                     row_errors.append("Invalid gender value.")
                 if parsed_row["payment_method"] and parsed_row["payment_method"] not in valid_payment_method:
                     row_errors.append("Invalid payment_method value.")
+                if parsed_row["employee_code"] and not EMPLOYEE_CODE_PATTERN.fullmatch(parsed_row["employee_code"]):
+                    row_errors.append("Employee code must follow STF-000000 format.")
                 if parsed_row["employee_code"] and Employee.objects.filter(employee_code=parsed_row["employee_code"]).exists():
                     row_errors.append("Employee code already exists.")
                 if Employee.objects.filter(email__iexact=parsed_row["email"]).exists():
@@ -755,8 +809,8 @@ def employee_upload_preview(request):
                 if not parsed_row["employee_code"]:
                     generated_code = _generate_next_employee_code()
                     while generated_code in used_employee_codes:
-                        numeric_part = int(generated_code[1:]) + 1
-                        generated_code = f"E{numeric_part:03d}"
+                        numeric_part = int(generated_code.split("-")[1]) + 1
+                        generated_code = f"STF-{numeric_part:06d}"
                     parsed_row["employee_code"] = generated_code
                 used_employee_codes.add(parsed_row["employee_code"])
                 preview_rows.append(parsed_row)
@@ -820,9 +874,13 @@ def employee_upload_confirm_save(request):
 
     saved_count = 0
     skipped_count = 0
+    invalid_format_count = 0
     with transaction.atomic():
         for row in serialized_rows:
             parsed = _deserialize_employee_preview_row(row)
+            if not EMPLOYEE_CODE_PATTERN.fullmatch(parsed["employee_code"]):
+                invalid_format_count += 1
+                continue
             if Employee.objects.filter(employee_code=parsed["employee_code"]).exists() or Employee.objects.filter(
                 email__iexact=parsed["email"]
             ).exists():
@@ -856,6 +914,11 @@ def employee_upload_confirm_save(request):
             saved_count += 1
 
     request.session.pop("employee_upload_preview", None)
+    if invalid_format_count:
+        messages.warning(
+            request,
+            f"{invalid_format_count} row(s) were skipped because employee code was not in STF-000000 format.",
+        )
     messages.success(
         request,
         f"Employee upload saved. {saved_count} created, {skipped_count} skipped due to duplicates."
@@ -894,7 +957,7 @@ def employee_template_download(request):
     worksheet.append(headers)
     worksheet.append(
         [
-            "E001",
+            "STF-000001",
             "S1234567A",
             "Alex",
             "Tan",
@@ -931,6 +994,13 @@ def employee_template_download(request):
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
+def employee_detail(request, pk):
+    employee = get_object_or_404(Employee, pk=pk)
+    return render(request, "payroll/employee_detail.html", {"employee": employee})
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
 def employee_edit(request, pk):
     employee = get_object_or_404(Employee, pk=pk)
     if request.method == "POST":
@@ -951,7 +1021,29 @@ def employee_edit(request, pk):
             return redirect("employee-list")
     else:
         form = EmployeeForm(instance=employee)
-    return render(request, "payroll/employee_form.html", {"form": form, "is_edit": True})
+    return render(request, "payroll/employee_form.html", {"form": form, "is_edit": True, "employee": employee})
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def employee_delete(request, pk):
+    if request.method != "POST":
+        return redirect("employee-list")
+
+    employee = get_object_or_404(Employee, pk=pk)
+    employee_id = employee.id
+    employee_code = employee.employee_code
+    employee.delete()
+    log_event(
+        action="payroll.employee.deleted",
+        user=request.user,
+        target_type="employee",
+        target_id=str(employee_id),
+        metadata={"employee_code": employee_code},
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, "Employee deleted permanently.")
+    return redirect("employee-list")
 
 
 @login_required
@@ -1040,14 +1132,16 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     info_top = top - header_h
     info_h = 24 * mm
     pdf.rect(margin, info_top - info_h, width, info_h)
+    label_x = margin + 4 * mm
+    value_x = margin + 32 * mm
+    employee_y = info_top - 8.5 * mm
+    payment_y = info_top - 17 * mm
     pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(margin + 4 * mm, info_top - 9 * mm, "Employee:")
+    pdf.drawString(label_x, employee_y, "Employee:")
+    pdf.drawString(label_x, payment_y, "Payment Date:")
     pdf.setFont("Helvetica", 11)
-    pdf.drawString(margin + 30 * mm, info_top - 9 * mm, payslip_record.employee_name)
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawString(margin + 4 * mm, info_top - 18 * mm, "Payment date:")
-    pdf.setFont("Helvetica", 11)
-    pdf.drawString(margin + 30 * mm, info_top - 18 * mm, payslip_record.payment_date.strftime("%d-%m-%Y"))
+    pdf.drawString(value_x, employee_y, payslip_record.employee_name)
+    pdf.drawString(value_x, payment_y, payslip_record.payment_date.strftime("%d-%m-%Y"))
 
     # Table
     table_top = info_top - info_h - 4 * mm

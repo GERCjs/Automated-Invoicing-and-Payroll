@@ -9,7 +9,6 @@
         <p class="page-subtitle">Manage employee records linked to payroll and staff access.</p>
     </div>
     <div class="d-flex gap-2">
-        <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-dark">Payroll Dashboard</a>
         <a href="{% url 'employee-upload-preview' %}" class="btn btn-outline-primary">Bulk Add Employees</a>
         <a href="{% url 'employee-create' %}" class="btn btn-primary">Add New Employee</a>
     </div>
@@ -51,7 +50,16 @@
                     <td>{{ employee.job_title|default:"-" }}</td>
                     <td>{{ employee.get_legal_status_display|default:"-" }}</td>
                     <td>{{ employee.get_payment_method_display|default:"-" }}</td>
-                    <td class="text-end"><a href="{% url 'employee-edit' employee.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+                    <td class="text-end">
+                        <div class="d-flex justify-content-end gap-1 flex-wrap">
+                            <a href="{% url 'employee-detail' employee.pk %}" class="btn btn-sm btn-outline-secondary">View</a>
+                            <a href="{% url 'employee-edit' employee.pk %}" class="btn btn-sm btn-outline-primary">Edit</a>
+                            <form method="post" action="{% url 'employee-delete' employee.pk %}" onsubmit="return confirm('When deleted, you can no longer recover it. Delete this employee?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                            </form>
+                        </div>
+                    </td>
                 </tr>
                 {% empty %}
                 <tr><td colspan="7" class="text-center py-4"><div class="empty-state">No employees found.</div></td></tr>
