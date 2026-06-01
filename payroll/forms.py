@@ -11,8 +11,9 @@ class PayrollUploadForm(forms.Form):
     )
     payment_date = forms.DateField(
         label="Payment Date",
-        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
-        help_text="This date will be used for all saved payroll records in this upload.",
+        input_formats=["%d-%m-%Y", "%Y-%m-%d"],
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "DD-MM-YYYY"}),
+        help_text="Format: DD-MM-YYYY. This date will be used for all saved payroll records in this upload.",
     )
 
 
@@ -24,6 +25,10 @@ class EmployeeUploadForm(forms.Form):
 
 
 class PayrollRecordForm(forms.ModelForm):
+    payment_date = forms.DateField(
+        input_formats=["%d-%m-%Y", "%Y-%m-%d"],
+        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "DD-MM-YYYY"}),
+    )
     physical_products_commission = forms.DecimalField(
         required=False,
         min_value=0,

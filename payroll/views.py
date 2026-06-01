@@ -98,9 +98,8 @@ def payroll_cpf_preview(request):
             }
         )
 
-    try:
-        payment_date = date.fromisoformat(payment_date_raw)
-    except ValueError:
+    payment_date = _parse_date_ddmmyyyy(payment_date_raw)
+    if payment_date is None:
         return JsonResponse(
             {
                 "ok": False,

@@ -34,7 +34,11 @@
                     {{ form.employer_cpf_contribution }}
                     <div class="form-text">Employer CPF is shown for reference only and is not deducted from employee net pay.</div>
                 </div>
-                <div class="col-md-4"><label class="form-label">Payment Date</label>{{ form.payment_date }}</div>
+                <div class="col-md-4">
+                    <label class="form-label">Payment Date</label>
+                    {{ form.payment_date }}
+                    <div class="form-text">Format: DD-MM-YYYY</div>
+                </div>
             </div>
             {% if form.errors %}
             <div class="alert alert-danger mt-3 mb-0">Please correct the highlighted fields.</div>
