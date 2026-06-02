@@ -794,3 +794,42 @@ class AccountsPhaseOneTests(TestCase):
         ).first()
         self.assertIsNotNone(log)
         self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)
+
+    def test_run_reminder_check_send_after_simulation_marks_log_sent(self):
+        admin = User.objects.create_user(username="reminder_sim_then_send_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+
+        customer = Customer.objects.create(name="Sim Then Send Customer", email="sim_then_send@example.com")
+        invoice = Invoice.objects.create(
+            invoice_number="INV-REM-0003",
+            customer=customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate(),
+            total_amount=300,
+        )
+
+        settings_obj = PaymentReminderSettings.load()
+        settings_obj.before_due_reminders_enabled = False
+        settings_obj.due_date_reminders_enabled = True
+        settings_obj.after_due_reminders_enabled = False
+        settings_obj.overdue_repeat_enabled = False
+        settings_obj.save()
+
+        self.client.login(username="reminder_sim_then_send_admin", password="TempPass123!")
+        simulate_response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "simulate"})
+        self.assertEqual(simulate_response.status_code, 302)
+        send_response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "send"})
+        self.assertEqual(send_response.status_code, 302)
+
+        logs = EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            related_object_id=str(invoice.id),
+            template_key="payment_reminder_due_date",
+        ).order_by("attempted_at")
+        self.assertEqual(logs.count(), 2)
+        self.assertEqual(logs[0].status, EmailDeliveryLog.STATUS_PENDING)
+        self.assertTrue(logs[0].metadata.get("simulate"))
+        self.assertEqual(logs[1].status, EmailDeliveryLog.STATUS_SENT)
+        self.assertFalse(logs[1].metadata.get("simulate"))

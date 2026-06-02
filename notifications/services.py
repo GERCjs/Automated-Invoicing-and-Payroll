@@ -7,6 +7,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -740,8 +741,13 @@ def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulat
                 if invoice.id not in candidates:
                     candidates[invoice.id] = (invoice, "overdue_repeat")
 
+    real_attempt_today_filter = Q(status=EmailDeliveryLog.STATUS_SENT) | Q(
+        status=EmailDeliveryLog.STATUS_PENDING,
+        metadata__simulate=False,
+    )
     existing_today = set(
         EmailDeliveryLog.objects.filter(
+            real_attempt_today_filter,
             related_object_type="invoice",
             template_key__startswith="payment_reminder_",
             attempted_at__date=today,
@@ -756,6 +762,15 @@ def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulat
         if existing_key in existing_today:
             skipped_already_logged += 1
             continue
+        if not simulate and EmailDeliveryLog.objects.filter(
+            real_attempt_today_filter,
+            related_object_type="invoice",
+            related_object_id=str(invoice.id),
+            template_key=template_key,
+            attempted_at__date=today,
+        ).exists():
+            skipped_already_logged += 1
+            continue
         reminder_logs.append(
             _send_payment_reminder(
                 invoice=invoice,
@@ -765,6 +780,8 @@ def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulat
                 simulate=simulate,
             )
         )
+        if not simulate:
+            existing_today.add(existing_key)
 
     sent_count = sum(1 for log in reminder_logs if log.status == EmailDeliveryLog.STATUS_SENT)
     failed_count = sum(1 for log in reminder_logs if log.status == EmailDeliveryLog.STATUS_FAILED)
