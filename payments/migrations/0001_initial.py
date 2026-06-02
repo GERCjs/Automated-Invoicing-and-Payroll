@@ -8,13 +8,16 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
+    # This is the first database migration for the payments app.
     initial = True
 
+    # These apps/tables must exist before this payment table can be created.
     dependencies = [
         ('invoicing', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
+    # These operations create the first PaymentRecord database table.
     operations = [
         migrations.CreateModel(
             name='PaymentRecord',

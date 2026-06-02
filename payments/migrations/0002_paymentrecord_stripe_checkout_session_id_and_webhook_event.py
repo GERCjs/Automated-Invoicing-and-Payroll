@@ -6,16 +6,20 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
+    # This migration runs after the initial payment table is created.
     dependencies = [
         ("payments", "0001_initial"),
     ]
 
+    # These operations add Stripe Checkout/webhook tracking to the database.
     operations = [
+        # Store the Stripe Checkout session ID on each payment record.
         migrations.AddField(
             model_name="paymentrecord",
             name="stripe_checkout_session_id",
             field=models.CharField(blank=True, max_length=255, null=True, unique=True),
         ),
+        # Create a table for storing webhook events sent by Stripe.
         migrations.CreateModel(
             name="StripeWebhookEvent",
             fields=[
@@ -65,6 +69,7 @@ class Migration(migrations.Migration):
                 "ordering": ["-created_at"],
             },
         ),
+        # Add indexes so filtering webhook events by type, status, and time is faster.
         migrations.AddIndex(
             model_name="stripewebhookevent",
             index=models.Index(fields=["event_type"], name="payments_st_event_t_802e5e_idx"),

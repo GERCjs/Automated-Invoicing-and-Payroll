@@ -5,10 +5,12 @@ from django.db import migrations
 
 class Migration(migrations.Migration):
 
+    # This migration runs after Stripe checkout and webhook fields are added.
     dependencies = [
         ('payments', '0002_paymentrecord_stripe_checkout_session_id_and_webhook_event'),
     ]
 
+    # These operations rename database indexes and set the table name to "payment".
     operations = [
         migrations.RenameIndex(
             model_name='paymentrecord',
