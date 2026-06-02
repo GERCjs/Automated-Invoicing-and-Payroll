@@ -35,6 +35,12 @@ from .services import (
 )
 
 CSV_IMPORT_SESSION_KEY_PREFIX = "invoice_csv_import_preview_"
+BATCH_INVOICE_EMAIL_ALLOWED_STATUSES = {
+    Invoice.STATUS_DRAFT,
+    Invoice.STATUS_SENT,
+    Invoice.STATUS_VIEWED,
+    Invoice.STATUS_OVERDUE,
+}
 
 
 def _invoice_reminder_context(invoice: Invoice) -> dict:
@@ -87,6 +93,66 @@ def _append_customer_query(url: str, customer_id: int) -> str:
     query = dict(parse_qsl(split.query, keep_blank_values=True))
     query["customer"] = str(customer_id)
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
+
+
+def _get_batch_invoice_email_block_reason(invoice: Invoice) -> str:
+    if invoice.status not in BATCH_INVOICE_EMAIL_ALLOWED_STATUSES:
+        if invoice.status == Invoice.STATUS_PAID:
+            return "Paid invoices are excluded from batch email sending."
+        if invoice.status == Invoice.STATUS_REFUNDED:
+            return "Refunded invoices are excluded from batch email sending."
+        return f"{invoice.get_status_display()} invoices are excluded from batch email sending."
+    return ""
+
+
+def _send_invoice_email_with_audit(request, invoice: Invoice) -> tuple[bool, EmailDeliveryLog]:
+    public_invoice_url = request.build_absolute_uri(
+        reverse("invoice-public-view", args=[invoice.public_view_token])
+    )
+    success, delivery_log = send_invoice_email(
+        invoice=invoice,
+        public_invoice_url=public_invoice_url,
+        triggered_by=request.user,
+    )
+
+    if success:
+        log_event(
+            action="invoice.email.sent",
+            user=request.user,
+            target_type="invoice",
+            target_id=str(invoice.id),
+            metadata={
+                "invoice_number": invoice.invoice_number,
+                "delivery_log_id": delivery_log.id,
+                "recipient_email": invoice.customer.email,
+            },
+            ip_address=get_client_ip(request),
+        )
+    else:
+        log_event(
+            action="invoice.email.failed",
+            user=request.user,
+            target_type="invoice",
+            target_id=str(invoice.id),
+            metadata={
+                "invoice_number": invoice.invoice_number,
+                "delivery_log_id": delivery_log.id,
+                "recipient_email": invoice.customer.email,
+                "error_message": delivery_log.error_message,
+            },
+            ip_address=get_client_ip(request),
+        )
+    return success, delivery_log
+
+
+def _format_invoice_batch_feedback(entries: list[str], *, max_items: int = 5) -> str:
+    if not entries:
+        return ""
+    visible_entries = entries[:max_items]
+    suffix = ""
+    if len(entries) > max_items:
+        suffix = f" and {len(entries) - max_items} more"
+    return "; ".join(visible_entries) + suffix
 
 
 @login_required
@@ -400,18 +466,24 @@ def invoice_list(request):
     }
     active_filter_label = filter_label_map.get(selected_filter, "All invoices")
 
+    invoice_rows = list(invoices)
+    for invoice in invoice_rows:
+        invoice.batch_email_block_reason = _get_batch_invoice_email_block_reason(invoice)
+        invoice.can_batch_send_email = not invoice.batch_email_block_reason
+
     return render(
         request,
         "invoicing/invoice_list.html",
         {
-            "invoices": invoices,
+            "invoices": invoice_rows,
             "selected_filter": selected_filter,
             "search_query": search_query,
             "active_filter_label": active_filter_label,
             "status_summary": status_summary,
-            "result_count": invoices.count(),
+            "result_count": len(invoice_rows),
             "issue_date_from": issue_date_from.isoformat() if issue_date_from else "",
             "issue_date_to": issue_date_to.isoformat() if issue_date_to else "",
+            "batch_email_next_url": request.get_full_path(),
         },
     )
 
@@ -648,6 +720,49 @@ def invoice_edit(request, pk):
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_delete_draft(request, pk):
+    invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
+    if invoice.status != Invoice.STATUS_DRAFT:
+        messages.error(request, "Only Draft invoices can be deleted.")
+        return redirect("invoice-detail", pk=invoice.pk)
+
+    next_url = _resolve_next_url(request, request.GET.get("next", "") or request.POST.get("next", ""), "")
+    cancel_url = next_url or reverse("invoice-detail", args=[invoice.pk])
+
+    if request.method == "POST":
+        invoice_id = invoice.id
+        invoice_number = invoice.invoice_number
+        customer_id = invoice.customer_id
+        customer_name = invoice.customer.name
+        invoice.delete()
+        log_event(
+            action="invoice.deleted",
+            user=request.user,
+            target_type="invoice",
+            target_id=str(invoice_id),
+            metadata={
+                "invoice_number": invoice_number,
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+            },
+            ip_address=get_client_ip(request),
+        )
+        messages.success(request, f"Draft invoice {invoice_number} deleted.")
+        return redirect(next_url or reverse("invoice-list"))
+
+    return render(
+        request,
+        "invoicing/invoice_confirm_delete.html",
+        {
+            "invoice": invoice,
+            "cancel_url": cancel_url,
+            "next_url": next_url,
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_detail(request, pk):
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
     apply_overdue_status(invoice)
@@ -781,45 +896,73 @@ def invoice_send_email(request, pk):
         raise Http404()
 
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
-    public_invoice_url = request.build_absolute_uri(
-        reverse("invoice-public-view", args=[invoice.public_view_token])
-    )
-    success, delivery_log = send_invoice_email(
-        invoice=invoice,
-        public_invoice_url=public_invoice_url,
-        triggered_by=request.user,
-    )
+    success, delivery_log = _send_invoice_email_with_audit(request, invoice)
 
     if success:
-        log_event(
-            action="invoice.email.sent",
-            user=request.user,
-            target_type="invoice",
-            target_id=str(invoice.id),
-            metadata={
-                "invoice_number": invoice.invoice_number,
-                "delivery_log_id": delivery_log.id,
-                "recipient_email": invoice.customer.email,
-            },
-            ip_address=get_client_ip(request),
-        )
         messages.success(request, f"Invoice emailed to {invoice.customer.email}.")
     else:
-        log_event(
-            action="invoice.email.failed",
-            user=request.user,
-            target_type="invoice",
-            target_id=str(invoice.id),
-            metadata={
-                "invoice_number": invoice.invoice_number,
-                "delivery_log_id": delivery_log.id,
-                "recipient_email": invoice.customer.email,
-                "error_message": delivery_log.error_message,
-            },
-            ip_address=get_client_ip(request),
-        )
         messages.error(
             request,
             "Failed to send invoice email. Invoice status remains unchanged.",
         )
     return redirect("invoice-detail", pk=invoice.pk)
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_send_email_batch(request):
+    if request.method != "POST":
+        raise Http404()
+
+    next_url = _resolve_next_url(request, request.POST.get("next", ""), reverse("invoice-list"))
+    selected_invoice_ids = [value for value in request.POST.getlist("selected_invoice_ids") if value.isdigit()]
+    if not selected_invoice_ids:
+        messages.warning(request, "Select at least one invoice to send.")
+        return redirect(next_url)
+
+    selected_ids = [int(value) for value in selected_invoice_ids]
+    invoices = {
+        invoice.id: invoice
+        for invoice in Invoice.objects.select_related("customer").filter(id__in=selected_ids)
+    }
+
+    sent_count = 0
+    failed_count = 0
+    skipped_reasons = []
+    failed_reasons = []
+
+    for invoice_id in selected_ids:
+        invoice = invoices.get(invoice_id)
+        if invoice is None:
+            skipped_reasons.append(f"Invoice #{invoice_id} (record not found)")
+            continue
+
+        block_reason = _get_batch_invoice_email_block_reason(invoice)
+        if block_reason:
+            skipped_reasons.append(f"{invoice.invoice_number} ({block_reason})")
+            continue
+
+        success, delivery_log = _send_invoice_email_with_audit(request, invoice)
+        if success:
+            sent_count += 1
+        else:
+            failed_count += 1
+            failure_reason = delivery_log.error_message or "Email delivery failed."
+            failed_reasons.append(f"{invoice.invoice_number} ({failure_reason})")
+
+    if sent_count:
+        messages.success(request, f"Invoice emails sent: {sent_count}.")
+    if skipped_reasons:
+        messages.warning(
+            request,
+            f"Skipped {len(skipped_reasons)} invoice(s): {_format_invoice_batch_feedback(skipped_reasons)}.",
+        )
+    if failed_reasons:
+        messages.error(
+            request,
+            f"Failed to send {failed_count} invoice email(s): {_format_invoice_batch_feedback(failed_reasons)}.",
+        )
+    if not sent_count and not skipped_reasons and not failed_reasons:
+        messages.warning(request, "No invoice emails were sent.")
+
+    return redirect(next_url)

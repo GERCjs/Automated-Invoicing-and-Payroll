@@ -46,11 +46,18 @@ class InvoicingMvpTests(TestCase):
             created_by=self.finance_user,
         )
 
-    def _create_invoice_with_item(self):
+    def _create_invoice_with_item(
+        self,
+        *,
+        invoice_number="INV-2099-2001",
+        status=Invoice.STATUS_DRAFT,
+        customer=None,
+    ):
+        customer = customer or self.customer
         invoice = Invoice.objects.create(
-            invoice_number="INV-2099-2001",
-            customer=self.customer,
-            status=Invoice.STATUS_DRAFT,
+            invoice_number=invoice_number,
+            customer=customer,
+            status=status,
             issue_date=timezone.localdate(),
             due_date=timezone.localdate() + timedelta(days=10),
             currency="SGD",
@@ -343,6 +350,67 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Only Draft invoices can be edited.")
 
+    def test_draft_invoice_detail_shows_delete_button(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-detail", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("invoice-delete-draft", args=[invoice.pk]))
+
+    def test_non_draft_invoice_detail_hides_delete_button(self):
+        invoice = self._create_invoice_with_item()
+        invoice.status = Invoice.STATUS_SENT
+        invoice.save(update_fields=["status", "updated_at"])
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-detail", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("invoice-delete-draft", args=[invoice.pk]))
+
+    def test_finance_can_delete_draft_invoice_with_confirmation(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        confirm_response = self.client.get(reverse("invoice-delete-draft", args=[invoice.pk]))
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertContains(confirm_response, "Delete Draft Invoice")
+        self.assertContains(confirm_response, invoice.invoice_number)
+
+        delete_response = self.client.post(reverse("invoice-delete-draft", args=[invoice.pk]))
+
+        self.assertRedirects(delete_response, reverse("invoice-list"))
+        self.assertFalse(Invoice.objects.filter(pk=invoice.pk).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="invoice.deleted",
+                target_type="invoice",
+                target_id=str(invoice.id),
+            ).exists()
+        )
+
+    def test_non_draft_invoice_cannot_be_deleted(self):
+        invoice = self._create_invoice_with_item()
+        invoice.status = Invoice.STATUS_SENT
+        invoice.save(update_fields=["status", "updated_at"])
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.post(reverse("invoice-delete-draft", args=[invoice.pk]), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Only Draft invoices can be deleted.")
+        self.assertTrue(Invoice.objects.filter(pk=invoice.pk).exists())
+
+    def test_staff_cannot_delete_draft_invoice(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="staff_u", password="TempPass123!")
+
+        response = self.client.post(reverse("invoice-delete-draft", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 403)
+
     def test_invoice_detail_shows_resend_email_button_and_last_email_label(self):
         invoice = self._create_invoice_with_item()
         self.client.login(username="finance_u", password="TempPass123!")
@@ -352,6 +420,8 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Send / Resend Invoice Email")
         self.assertContains(response, "Last Invoice Email Sent:")
+        self.assertContains(response, "GST %")
+        self.assertContains(response, "GST</th>", html=False)
 
     def test_invoice_list_shows_visible_issue_date_labels_and_pending_payment_status(self):
         invoice = self._create_invoice_with_item()
@@ -365,6 +435,23 @@ class InvoicingMvpTests(TestCase):
         self.assertContains(response, "Issue Date From")
         self.assertContains(response, "Issue Date To")
         self.assertContains(response, "Pending Payment")
+
+    def test_invoice_list_shows_batch_email_controls(self):
+        eligible_invoice = self._create_invoice_with_item(invoice_number="INV-2099-2101", status=Invoice.STATUS_SENT)
+        ineligible_invoice = self._create_invoice_with_item(invoice_number="INV-2099-2102", status=Invoice.STATUS_PAID)
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Send Selected Invoice Emails")
+        self.assertContains(response, 'name="selected_invoice_ids"', html=False)
+        self.assertContains(response, f'aria-label="Select {eligible_invoice.invoice_number}"', html=False)
+        self.assertContains(
+            response,
+            f'aria-label="{ineligible_invoice.invoice_number} cannot be batch emailed"',
+            html=False,
+        )
 
     def test_finance_can_download_invoice_pdf(self):
         invoice = self._create_invoice_with_item()
@@ -393,7 +480,9 @@ class InvoicingMvpTests(TestCase):
         wb = load_workbook(BytesIO(response.content))
         ws = wb["Invoice"]
         self.assertEqual(ws["F1"].value, invoice.invoice_number)
+        self.assertEqual(ws["D11"].value, "GST %")
         self.assertAlmostEqual(float(ws["E14"].value), float(invoice.subtotal), places=2)
+        self.assertEqual(ws["D15"].value, "GST")
         self.assertAlmostEqual(float(ws["E15"].value), float(invoice.tax_amount), places=2)
         self.assertAlmostEqual(float(ws["E16"].value), float(invoice.total_amount), places=2)
 
@@ -406,6 +495,96 @@ class InvoicingMvpTests(TestCase):
 
         self.assertEqual(pdf_response.status_code, 403)
         self.assertEqual(excel_response.status_code, 403)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    def test_finance_can_batch_send_selected_invoice_emails_and_skip_paid_invoice(self):
+        draft_invoice = self._create_invoice_with_item(invoice_number="INV-2099-2201", status=Invoice.STATUS_DRAFT)
+        sent_invoice = self._create_invoice_with_item(invoice_number="INV-2099-2202", status=Invoice.STATUS_SENT)
+        paid_invoice = self._create_invoice_with_item(invoice_number="INV-2099-2203", status=Invoice.STATUS_PAID)
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("invoice-send-email-batch"),
+            data={
+                "selected_invoice_ids": [str(draft_invoice.id), str(sent_invoice.id), str(paid_invoice.id)],
+                "next": reverse("invoice-list"),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        draft_invoice.refresh_from_db()
+        sent_invoice.refresh_from_db()
+        paid_invoice.refresh_from_db()
+        self.assertEqual(draft_invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(sent_invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(paid_invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertGreaterEqual(len(mail.outbox[0].attachments), 1)
+        self.assertGreaterEqual(len(mail.outbox[1].attachments), 1)
+        sent_logs = EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            template_key="invoice_email_v1",
+            status=EmailDeliveryLog.STATUS_SENT,
+        )
+        self.assertEqual(sent_logs.count(), 2)
+        self.assertTrue(
+            AuditLog.objects.filter(action="invoice.email.sent", target_id=str(draft_invoice.id)).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(action="invoice.email.sent", target_id=str(sent_invoice.id)).exists()
+        )
+        self.assertContains(response, "Invoice emails sent: 2.")
+        self.assertContains(response, "Skipped 1 invoice(s):")
+        self.assertContains(response, paid_invoice.invoice_number)
+        self.assertContains(response, "Paid invoices are excluded from batch email sending.")
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    def test_batch_send_reports_missing_customer_email_failure(self):
+        ok_invoice = self._create_invoice_with_item(invoice_number="INV-2099-2301", status=Invoice.STATUS_SENT)
+        missing_email_customer = Customer.objects.create(
+            name="No Email Customer",
+            email="temp-no-email@example.com",
+            created_by=self.finance_user,
+        )
+        failing_invoice = self._create_invoice_with_item(
+            invoice_number="INV-2099-2302",
+            status=Invoice.STATUS_SENT,
+            customer=missing_email_customer,
+        )
+        missing_email_customer.email = ""
+        missing_email_customer.save(update_fields=["email", "updated_at"])
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("invoice-send-email-batch"),
+            data={
+                "selected_invoice_ids": [str(ok_invoice.id), str(failing_invoice.id)],
+                "next": reverse("invoice-list"),
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        failed_log = EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            related_object_id=str(failing_invoice.id),
+        ).latest("attempted_at")
+        self.assertEqual(failed_log.status, EmailDeliveryLog.STATUS_FAILED)
+        self.assertIn("Customer email is missing", failed_log.error_message)
+        self.assertTrue(
+            AuditLog.objects.filter(action="invoice.email.failed", target_id=str(failing_invoice.id)).exists()
+        )
+        self.assertContains(response, "Invoice emails sent: 1.")
+        self.assertContains(response, "Failed to send 1 invoice email(s):")
+        self.assertContains(response, failing_invoice.invoice_number)
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
@@ -482,6 +661,17 @@ class InvoicingMvpTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_staff_cannot_batch_send_invoice_email(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="staff_u", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("invoice-send-email-batch"),
+            data={"selected_invoice_ids": [str(invoice.id)], "next": reverse("invoice-list")},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
         DEFAULT_FROM_EMAIL="billing@example.com",
@@ -542,8 +732,19 @@ class InvoicingMvpTests(TestCase):
 
         self.assertEqual(detail_response.status_code, 200)
         self.assertContains(detail_response, own_invoice.invoice_number)
+        self.assertContains(detail_response, "GST %")
+        self.assertContains(detail_response, "GST</th>", html=False)
         self.assertEqual(pdf_response.status_code, 200)
         self.assertEqual(pdf_response["Content-Type"], "application/pdf")
+
+    def test_public_invoice_view_uses_gst_wording(self):
+        invoice = self._create_invoice_with_item()
+
+        response = self.client.get(reverse("invoice-public-view", args=[invoice.public_view_token]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "GST %")
+        self.assertContains(response, "GST</th>", html=False)
 
     def test_customer_invoice_detail_shows_reminder_history_empty_state(self):
         own_invoice = self._create_invoice_with_item()

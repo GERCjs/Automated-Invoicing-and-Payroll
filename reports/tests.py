@@ -368,6 +368,48 @@ class InvoiceCustomerReportTests(TestCase):
         self.assertContains(response, "Recent Invoices Created")
         self.assertContains(response, "Recent Invoices Paid")
         self.assertContains(response, "Recent Invoice Emails Sent")
+        self.assertContains(response, "Filter / Drill-down")
+        self.assertContains(response, 'name="status"', html=False)
+        self.assertContains(response, 'name="customer"', html=False)
+        self.assertContains(response, 'name="month"', html=False)
+        self.assertContains(response, "Detailed Invoice Drill-down")
+        self.assertContains(response, "Follow-up Focus")
+
+    def test_invoice_customer_report_filters_by_status_customer_and_month(self):
+        user = self._make_user("invoice_report_filter_finance", FINANCE)
+        self.client.force_login(user)
+        selected_month = self.invoice_overdue.issue_date.strftime("%Y-%m")
+
+        response = self.client.get(
+            reverse("invoice-customer-report"),
+            data={
+                "status": Invoice.STATUS_OVERDUE,
+                "customer": str(self.customer_1.id),
+                "month": selected_month,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Showing: Status = Overdue")
+        self.assertContains(response, f"Customer = {self.customer_1.name} ({self.customer_1.email})")
+        self.assertContains(response, self.invoice_overdue.invoice_number)
+        self.assertNotContains(response, self.invoice_pending.invoice_number)
+        self.assertNotContains(response, self.invoice_paid.invoice_number)
+
+    def test_invoice_customer_report_shows_empty_state_for_no_matches(self):
+        user = self._make_user("invoice_report_empty_finance", FINANCE)
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("invoice-customer-report"),
+            data={"status": Invoice.STATUS_REFUNDED, "month": "2099-01"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No data found for the selected filters.")
+        self.assertNotContains(response, self.invoice_paid.invoice_number)
+        self.assertNotContains(response, self.invoice_overdue.invoice_number)
+        self.assertNotContains(response, self.invoice_pending.invoice_number)
 
     def test_invoice_dashboard_has_invoice_customer_report_link_for_finance(self):
         user = self._make_user("invoice_report_link_finance", FINANCE)

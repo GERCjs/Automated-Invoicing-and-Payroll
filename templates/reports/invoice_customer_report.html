@@ -11,12 +11,65 @@
     </div>
 </div>
 
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="section-heading mb-0">Filter / Drill-down</h2>
+            {% if has_active_filters %}
+            <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Reset Filters</a>
+            {% endif %}
+        </div>
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-lg-4 col-md-6">
+                <label for="reportStatus" class="form-label">Invoice Status</label>
+                <select id="reportStatus" name="status" class="form-select">
+                    {% for option in status_filter_options %}
+                    <option value="{{ option.value }}" {% if selected_status == option.value %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <label for="reportCustomer" class="form-label">Customer</label>
+                <select id="reportCustomer" name="customer" class="form-select">
+                    <option value="" {% if not selected_customer_id %}selected{% endif %}>All customers</option>
+                    {% for option in customer_filter_options %}
+                    <option value="{{ option.customer_id }}" {% if selected_customer_id == option.customer_id|stringformat:"s" %}selected{% endif %}>
+                        {{ option.customer__name }} ({{ option.customer__email }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <label for="reportMonth" class="form-label">Month</label>
+                <select id="reportMonth" name="month" class="form-select">
+                    <option value="" {% if not selected_month %}selected{% endif %}>All months</option>
+                    {% for option in month_filter_options %}
+                    <option value="{{ option.value }}" {% if selected_month == option.value %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Available months come from invoice issue dates and payment activity.</div>
+            </div>
+            <div class="col-12">
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="submit" class="btn btn-primary">Apply Filters</button>
+                    <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary">Reset Filters</a>
+                </div>
+            </div>
+        </form>
+        <p class="text-muted mb-0 mt-3">{{ selected_filter_text }}</p>
+    </div>
+</div>
+
+{% if not filtered_invoice_count %}
+<div class="alert alert-info">No data found for the selected filters.</div>
+{% endif %}
+
 <h2 class="section-heading mb-3">Invoice Summary</h2>
 <div class="row g-3 mb-3">
     <div class="col-md-3">
         <div class="dashboard-card h-100">
             <div class="card-body">
-                <div class="text-muted small">Collected This Month</div>
+                <div class="text-muted small">{{ collection_month_label }}</div>
                 <div class="h4 mb-0">SGD {{ total_amount_collected_month|floatformat:2 }}</div>
             </div>
         </div>
@@ -24,7 +77,7 @@
     <div class="col-md-3">
         <div class="dashboard-card h-100">
             <div class="card-body">
-                <div class="text-muted small">Collected This Year</div>
+                <div class="text-muted small">{{ collection_year_label }}</div>
                 <div class="h4 mb-0">SGD {{ total_amount_collected_year|floatformat:2 }}</div>
             </div>
         </div>
@@ -43,6 +96,7 @@
                 <div class="text-muted small">Reporting Window</div>
                 <div class="small">Month start: {{ month_start }}</div>
                 <div class="small">Year start: {{ year_start }}</div>
+                <div class="small">Filtered invoices: {{ filtered_invoice_count }}</div>
             </div>
         </div>
     </div>
@@ -116,8 +170,104 @@
     <div class="col-md-3">
         <div class="dashboard-card h-100">
             <div class="card-body">
-                <div class="text-muted small">Draft Invoices</div>
-                <div class="display-6 mb-0">{{ draft_count }}</div>
+                <div class="text-muted small">Draft / Refunded</div>
+                <div class="display-6 mb-0">{{ draft_count }} / {{ refunded_count }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">Follow-up Focus</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Customer</th>
+                            <th>Status</th>
+                            <th>Next Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for invoice in follow_up_invoices %}
+                        <tr>
+                            <td>{{ invoice.invoice_number }}</td>
+                            <td>{{ invoice.customer.name }}</td>
+                            <td>{{ invoice.get_status_display }}</td>
+                            <td>
+                                {% if invoice.status == "overdue" %}
+                                Send overdue reminder
+                                {% elif invoice.status == "viewed" %}
+                                Follow up after customer view
+                                {% elif invoice.status == "sent" %}
+                                Monitor payment / remind if needed
+                                {% elif invoice.status == "draft" %}
+                                Review and send invoice
+                                {% else %}
+                                Check invoice record
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No follow-up invoices for the selected filters.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header">Detailed Invoice Drill-down</div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Customer</th>
+                            <th>Status</th>
+                            <th>Issue Date</th>
+                            <th>Due Date</th>
+                            <th class="text-end">Total</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for invoice in detailed_invoices %}
+                        <tr>
+                            <td>{{ invoice.invoice_number }}</td>
+                            <td>
+                                <div>{{ invoice.customer.name }}</div>
+                                <div class="small text-muted">{{ invoice.customer.email }}</div>
+                            </td>
+                            <td>{{ invoice.get_status_display }}</td>
+                            <td>{{ invoice.issue_date }}</td>
+                            <td>{{ invoice.due_date }}</td>
+                            <td class="text-end">SGD {{ invoice.total_amount|floatformat:2 }}</td>
+                            <td>
+                                {% if invoice.status == "overdue" %}
+                                Customer needs urgent follow-up
+                                {% elif invoice.status == "viewed" %}
+                                Customer has seen invoice
+                                {% elif invoice.status == "sent" %}
+                                Pending payment
+                                {% elif invoice.status == "draft" %}
+                                Internal draft only
+                                {% elif invoice.status == "paid" %}
+                                No follow-up needed
+                                {% else %}
+                                Refund completed / review closure
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="7" class="text-center py-3">No data found for the selected filters.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>

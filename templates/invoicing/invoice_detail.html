@@ -8,9 +8,10 @@
         <h1 class="page-title">Invoice {{ invoice.invoice_number }}</h1>
         <p class="page-subtitle">Invoice details, activity, reminders, and download actions.</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
         {% if invoice.status == "draft" %}
         <a href="{% url 'invoice-edit' invoice.pk %}" class="btn btn-primary">Edit</a>
+        <a href="{% url 'invoice-delete-draft' invoice.pk %}?next={{ request.path|urlencode }}" class="btn btn-outline-danger">Delete Draft</a>
         {% endif %}
         <form method="post" action="{% url 'invoice-send-email' invoice.pk %}" class="d-inline">
             {% csrf_token %}
@@ -107,7 +108,7 @@
                     <th>Description</th>
                     <th class="text-end">Qty</th>
                     <th class="text-end">Unit Price</th>
-                    <th class="text-end">Tax %</th>
+                    <th class="text-end">GST %</th>
                     <th class="text-end">Line Total</th>
                 </tr>
             </thead>
@@ -130,7 +131,7 @@
                     <th class="text-end">{{ invoice.currency }} {{ invoice.subtotal }}</th>
                 </tr>
                 <tr>
-                    <th colspan="4" class="text-end">Tax</th>
+                    <th colspan="4" class="text-end">GST</th>
                     <th class="text-end">{{ invoice.currency }} {{ invoice.tax_amount }}</th>
                 </tr>
                 <tr>

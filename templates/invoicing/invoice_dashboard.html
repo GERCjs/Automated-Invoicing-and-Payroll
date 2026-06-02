@@ -8,10 +8,12 @@
         <h1 class="page-title">Finance Officer Dashboard</h1>
         <p class="page-subtitle">Action-focused invoice monitoring for collections and follow-up.</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 flex-wrap">
         <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary">Upload CSV</a>
         <a href="{% url 'invoice-create' %}" class="btn btn-primary">Create Invoice</a>
         <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark">View Invoice List</a>
+        <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary">Invoice / Customer Report</a>
+        <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-info">Payment &amp; Stripe Report</a>
     </div>
 </div>
 
@@ -91,6 +93,8 @@
             <a href="{% url 'invoice-create' %}" class="btn btn-primary btn-sm">Create Invoice</a>
             <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark btn-sm">View All Invoices</a>
             <a href="{% url 'invoice-list' %}?status=outstanding" class="btn btn-outline-secondary btn-sm">View Outstanding</a>
+            <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Invoice / Customer Report</a>
+            <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-info btn-sm">Payment &amp; Stripe Report</a>
         </div>
     </div>
 </div>
@@ -127,6 +131,9 @@
                             <a href="{% url 'invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View</a>
                             <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-sm btn-outline-secondary">PDF</a>
                             <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-sm btn-outline-success">Excel</a>
+                            {% if invoice.status == "draft" %}
+                            <a href="{% url 'invoice-delete-draft' invoice.pk %}" class="btn btn-sm btn-outline-danger">Delete Draft</a>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>

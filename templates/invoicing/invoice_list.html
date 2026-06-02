@@ -99,10 +99,23 @@
 </div>
 
 <div class="card">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div>
+            <div class="fw-semibold">Invoice Results</div>
+            <div class="small text-muted">Batch email supports Draft, Pending Payment, Viewed, and Overdue invoices on this page.</div>
+        </div>
+        <div class="small text-muted">Paid and Refunded invoices are disabled for batch send.</div>
+    </div>
+    <form method="post" action="{% url 'invoice-send-email-batch' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ batch_email_next_url }}">
     <div class="table-responsive">
         <table class="table table-clean table-hover mb-0">
             <thead>
                 <tr>
+                    <th class="text-center" style="width: 56px;">
+                        <input type="checkbox" id="selectAllInvoices" class="form-check-input" aria-label="Select all eligible invoices">
+                    </th>
                     <th>Invoice #</th>
                     <th>Customer</th>
                     <th>Status</th>
@@ -115,6 +128,24 @@
             <tbody>
                 {% for invoice in invoices %}
                 <tr {% if invoice.status == "overdue" %}class="table-danger"{% elif invoice.status == "draft" %}class="table-warning"{% endif %}>
+                    <td class="text-center align-middle">
+                        {% if invoice.can_batch_send_email %}
+                        <input
+                            type="checkbox"
+                            class="form-check-input js-invoice-batch-checkbox"
+                            name="selected_invoice_ids"
+                            value="{{ invoice.id }}"
+                            aria-label="Select {{ invoice.invoice_number }}"
+                        >
+                        {% else %}
+                        <input
+                            type="checkbox"
+                            class="form-check-input"
+                            disabled
+                            aria-label="{{ invoice.invoice_number }} cannot be batch emailed"
+                        >
+                        {% endif %}
+                    </td>
                     <td>{{ invoice.invoice_number }}</td>
                     <td>
                         <div>{{ invoice.customer.name }}</div>
@@ -143,16 +174,59 @@
                             <a href="{% url 'invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View</a>
                             <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-sm btn-outline-secondary">PDF</a>
                             <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-sm btn-outline-success">Excel</a>
+                            {% if invoice.status == "draft" %}
+                            <a href="{% url 'invoice-delete-draft' invoice.pk %}" class="btn btn-sm btn-outline-danger">Delete Draft</a>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="7" class="text-center py-4"><div class="empty-state">No invoices found.</div></td>
+                    <td colspan="8" class="text-center py-4"><div class="empty-state">No invoices found.</div></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+    <div class="card-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="small text-muted">Select the invoices that need customer delivery from the current result set.</div>
+        <button type="submit" class="btn btn-outline-dark">Send Selected Invoice Emails</button>
+    </div>
+    </form>
 </div>
+<script>
+    (function () {
+        var selectAll = document.getElementById("selectAllInvoices");
+        if (!selectAll) {
+            return;
+        }
+
+        var checkboxes = Array.from(document.querySelectorAll(".js-invoice-batch-checkbox"));
+        if (!checkboxes.length) {
+            selectAll.disabled = true;
+            return;
+        }
+
+        var syncSelectAll = function () {
+            var checkedCount = checkboxes.filter(function (checkbox) {
+                return checkbox.checked;
+            }).length;
+            selectAll.checked = checkedCount > 0 && checkedCount === checkboxes.length;
+            selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+        };
+
+        selectAll.addEventListener("change", function () {
+            checkboxes.forEach(function (checkbox) {
+                checkbox.checked = selectAll.checked;
+            });
+            syncSelectAll();
+        });
+
+        checkboxes.forEach(function (checkbox) {
+            checkbox.addEventListener("change", syncSelectAll);
+        });
+
+        syncSelectAll();
+    })();
+</script>
 {% endblock %}

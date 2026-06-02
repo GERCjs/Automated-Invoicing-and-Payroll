@@ -1,6 +1,6 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Q, Sum
+from django.db.models import Case, Count, IntegerField, Q, Sum, Value, When
 from django.db.models.functions import TruncDate, TruncMonth
 from django.shortcuts import render
 from django.utils import timezone
@@ -42,6 +42,24 @@ def _recent_month_starts(today, total_months=6):
     return month_starts
 
 
+def _next_month_start(month_start):
+    if month_start.month == 12:
+        return month_start.replace(year=month_start.year + 1, month=1, day=1)
+    return month_start.replace(month=month_start.month + 1, day=1)
+
+
+def _parse_month_filter(raw_value: str):
+    value = (raw_value or "").strip()
+    if not value:
+        return "", None, None
+    try:
+        month_start = timezone.datetime.strptime(f"{value}-01", "%Y-%m-%d").date()
+    except ValueError:
+        return "", None, None
+    month_end = _next_month_start(month_start) - timezone.timedelta(days=1)
+    return value, month_start, month_end
+
+
 def _month_bounds(selected_month: str, today):
     if selected_month:
         try:
@@ -65,21 +83,89 @@ def _month_bounds(selected_month: str, today):
 @role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_customer_report(request):
     today = timezone.localdate()
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
+    current_month_start = today.replace(day=1)
+    current_year_start = today.replace(month=1, day=1)
+    status_filter_options = [{"value": "", "label": "All"}] + [
+        {"value": value, "label": label} for value, label in Invoice.STATUS_CHOICES
+    ]
+    valid_status_values = {option["value"] for option in status_filter_options if option["value"]}
+    selected_status = (request.GET.get("status") or "").strip().lower()
+    if selected_status not in valid_status_values:
+        selected_status = ""
 
-    invoice_queryset = Invoice.objects.select_related("customer")
+    all_invoices = Invoice.objects.select_related("customer")
+    customer_filter_options = list(
+        all_invoices.values("customer_id", "customer__name", "customer__email")
+        .annotate(invoice_count=Count("id"))
+        .order_by("customer__name", "customer__email")
+    )
+    selected_customer_raw = (request.GET.get("customer") or "").strip()
+    selected_customer_id = ""
+    selected_customer_option = None
+    if selected_customer_raw.isdigit():
+        for option in customer_filter_options:
+            if option["customer_id"] == int(selected_customer_raw):
+                selected_customer_id = selected_customer_raw
+                selected_customer_option = option
+                break
+
+    selected_month, filter_month_start, filter_month_end = _parse_month_filter(request.GET.get("month", ""))
+    month_label_map = {}
+    invoice_month_rows = list(
+        all_invoices.annotate(month=TruncMonth("issue_date"))
+        .values_list("month", flat=True)
+        .distinct()
+    )
+    payment_month_rows = list(
+        PaymentRecord.objects.filter(invoice__isnull=False, paid_at__isnull=False)
+        .annotate(month=TruncMonth("paid_at"))
+        .values_list("month", flat=True)
+        .distinct()
+    )
+    for month_value in invoice_month_rows + payment_month_rows:
+        if not month_value:
+            continue
+        month_key = month_value.strftime("%Y-%m")
+        month_label_map[month_key] = month_value.strftime("%b %Y")
+    if selected_month and selected_month not in month_label_map and filter_month_start:
+        month_label_map[selected_month] = filter_month_start.strftime("%b %Y")
+    month_filter_options = [
+        {"value": month_key, "label": month_label_map[month_key]}
+        for month_key in sorted(month_label_map.keys(), reverse=True)
+    ]
+
+    invoice_queryset = all_invoices
+    if selected_status:
+        invoice_queryset = invoice_queryset.filter(status=selected_status)
+    if selected_customer_id:
+        invoice_queryset = invoice_queryset.filter(customer_id=int(selected_customer_id))
+    if filter_month_start and filter_month_end:
+        invoice_queryset = invoice_queryset.filter(
+            issue_date__gte=filter_month_start,
+            issue_date__lte=filter_month_end,
+        )
+
     paid_invoices = invoice_queryset.filter(status=Invoice.STATUS_PAID)
     outstanding_invoices = invoice_queryset.filter(
         status__in=[Invoice.STATUS_DRAFT, Invoice.STATUS_SENT, Invoice.STATUS_VIEWED, Invoice.STATUS_OVERDUE]
     )
+    filtered_invoice_ids = list(invoice_queryset.values_list("id", flat=True))
+
+    collection_month_start = filter_month_start or current_month_start
+    collection_month_end = filter_month_end or today
+    collection_year_start = (
+        filter_month_start.replace(month=1, day=1) if filter_month_start else current_year_start
+    )
+    collection_year_end = (
+        filter_month_end if filter_month_end else today
+    )
 
     total_amount_collected_month = _safe_sum(
-        paid_invoices.filter(updated_at__date__gte=month_start, updated_at__date__lte=today),
+        paid_invoices.filter(updated_at__date__gte=collection_month_start, updated_at__date__lte=collection_month_end),
         "total_amount",
     )
     total_amount_collected_year = _safe_sum(
-        paid_invoices.filter(updated_at__date__gte=year_start, updated_at__date__lte=today),
+        paid_invoices.filter(updated_at__date__gte=collection_year_start, updated_at__date__lte=collection_year_end),
         "total_amount",
     )
     outstanding_amount = _safe_sum(outstanding_invoices, "total_amount")
@@ -89,6 +175,7 @@ def invoice_customer_report(request):
     viewed_count = invoice_queryset.filter(status=Invoice.STATUS_VIEWED).count()
     overdue_count = invoice_queryset.filter(status=Invoice.STATUS_OVERDUE).count()
     paid_count = invoice_queryset.filter(status=Invoice.STATUS_PAID).count()
+    refunded_count = invoice_queryset.filter(status=Invoice.STATUS_REFUNDED).count()
 
     status_summary = [
         {"label": "Draft", "count": draft_count},
@@ -96,6 +183,7 @@ def invoice_customer_report(request):
         {"label": "Viewed", "count": viewed_count},
         {"label": "Overdue", "count": overdue_count},
         {"label": "Paid", "count": paid_count},
+        {"label": "Refunded", "count": refunded_count},
     ]
 
     total_customers_with_invoices = (
@@ -127,13 +215,17 @@ def invoice_customer_report(request):
         .order_by("-outstanding_amount", "customer__name")[:8]
     )
 
-    month_starts = _recent_month_starts(today, total_months=6)
-    monthly_collection_labels = [month.strftime("%b %Y") for month in month_starts]
-    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+    if filter_month_start:
+        chart_month_starts = [filter_month_start]
+    else:
+        chart_month_starts = _recent_month_starts(today, total_months=6)
+    monthly_collection_labels = [month.strftime("%b %Y") for month in chart_month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in chart_month_starts]
 
     succeeded_payments = PaymentRecord.objects.filter(
         status=PaymentRecord.STATUS_SUCCEEDED,
         paid_at__isnull=False,
+        invoice_id__in=filtered_invoice_ids,
     )
     if succeeded_payments.exists():
         collection_rows = list(
@@ -179,26 +271,74 @@ def invoice_customer_report(request):
         elif days_overdue > 30:
             overdue_ageing_values[3] += amount
 
+    action_rank = Case(
+        When(status=Invoice.STATUS_OVERDUE, then=Value(0)),
+        When(status=Invoice.STATUS_VIEWED, then=Value(1)),
+        When(status=Invoice.STATUS_SENT, then=Value(2)),
+        When(status=Invoice.STATUS_DRAFT, then=Value(3)),
+        When(status=Invoice.STATUS_REFUNDED, then=Value(4)),
+        default=Value(5),
+        output_field=IntegerField(),
+    )
+    detailed_invoice_queryset = invoice_queryset.annotate(action_rank=action_rank).order_by(
+        "action_rank",
+        "due_date",
+        "-issue_date",
+        "-created_at",
+    )
+    follow_up_invoices = detailed_invoice_queryset.filter(
+        status__in=[Invoice.STATUS_DRAFT, Invoice.STATUS_SENT, Invoice.STATUS_VIEWED, Invoice.STATUS_OVERDUE]
+    )[:10]
+    detailed_invoices = detailed_invoice_queryset[:25]
     recent_invoices_created = invoice_queryset.order_by("-created_at")[:10]
     recent_invoices_paid = paid_invoices.order_by("-updated_at")[:10]
     recent_invoice_emails_sent = EmailDeliveryLog.objects.filter(
-        template_key="invoice_email_v1"
+        template_key="invoice_email_v1",
+        related_object_type="invoice",
+        related_object_id__in=[str(invoice_id) for invoice_id in filtered_invoice_ids],
     ).order_by("-attempted_at")[:10]
+
+    selected_status_label = next(
+        (option["label"] for option in status_filter_options if option["value"] == selected_status),
+        "All",
+    )
+    selected_customer_label = (
+        f'{selected_customer_option["customer__name"]} ({selected_customer_option["customer__email"]})'
+        if selected_customer_option
+        else "All customers"
+    )
+    selected_month_label = month_label_map.get(selected_month, "All months") if selected_month else "All months"
+    selected_filter_text = (
+        f"Showing: Status = {selected_status_label}, "
+        f"Customer = {selected_customer_label}, "
+        f"Month = {selected_month_label}"
+    )
+    has_active_filters = bool(selected_status or selected_customer_id or selected_month)
+    filtered_invoice_count = invoice_queryset.count()
+    collection_month_label = (
+        "Collected in Selected Month" if filter_month_start else "Collected This Month"
+    )
+    collection_year_label = (
+        "Collected in Selected Year" if filter_month_start else "Collected This Year"
+    )
 
     return render(
         request,
         "reports/invoice_customer_report.html",
         {
             "today": today,
-            "month_start": month_start,
-            "year_start": year_start,
+            "month_start": current_month_start,
+            "year_start": current_year_start,
             "total_amount_collected_month": total_amount_collected_month,
             "total_amount_collected_year": total_amount_collected_year,
+            "collection_month_label": collection_month_label,
+            "collection_year_label": collection_year_label,
             "outstanding_amount": outstanding_amount,
             "overdue_count": overdue_count,
             "pending_payment_count": pending_payment_count,
             "paid_count": paid_count,
             "draft_count": draft_count,
+            "refunded_count": refunded_count,
             "status_summary": status_summary,
             "total_customers_with_invoices": total_customers_with_invoices,
             "top_customers_by_total": top_customers_by_total,
@@ -208,6 +348,17 @@ def invoice_customer_report(request):
             "monthly_collection_values": monthly_collection_values,
             "overdue_ageing_labels": overdue_ageing_labels,
             "overdue_ageing_values": overdue_ageing_values,
+            "status_filter_options": status_filter_options,
+            "customer_filter_options": customer_filter_options,
+            "month_filter_options": month_filter_options,
+            "selected_status": selected_status,
+            "selected_customer_id": selected_customer_id,
+            "selected_month": selected_month,
+            "selected_filter_text": selected_filter_text,
+            "has_active_filters": has_active_filters,
+            "filtered_invoice_count": filtered_invoice_count,
+            "detailed_invoices": detailed_invoices,
+            "follow_up_invoices": follow_up_invoices,
             "recent_invoices_created": recent_invoices_created,
             "recent_invoices_paid": recent_invoices_paid,
             "recent_invoice_emails_sent": recent_invoice_emails_sent,

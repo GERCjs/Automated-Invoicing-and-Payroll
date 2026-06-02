@@ -22,6 +22,9 @@ class InvoiceItemForm(forms.ModelForm):
     class Meta:
         model = InvoiceItem
         fields = ["description", "quantity", "unit_price", "tax_rate"]
+        labels = {
+            "tax_rate": "GST %",
+        }
         widgets = {
             "description": forms.TextInput(attrs={"class": "form-control"}),
             "quantity": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0.01"}),

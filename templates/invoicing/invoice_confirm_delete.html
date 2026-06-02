@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Delete Draft Invoice {{ invoice.invoice_number }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Delete Draft Invoice</h1>
+        <p class="page-subtitle">Review the draft invoice details before permanently deleting it.</p>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card border-danger">
+            <div class="card-header bg-danger-subtle text-danger-emphasis">Confirm draft deletion</div>
+            <div class="card-body">
+                <p class="mb-3">
+                    You are about to permanently delete draft invoice <strong>{{ invoice.invoice_number }}</strong>.
+                    This will also remove its draft line items and it cannot be undone.
+                </p>
+                <dl class="row mb-4">
+                    <dt class="col-sm-4">Customer</dt>
+                    <dd class="col-sm-8">{{ invoice.customer.name }}</dd>
+                    <dt class="col-sm-4">Issue Date</dt>
+                    <dd class="col-sm-8">{{ invoice.issue_date }}</dd>
+                    <dt class="col-sm-4">Due Date</dt>
+                    <dd class="col-sm-8">{{ invoice.due_date }}</dd>
+                    <dt class="col-sm-4">Total</dt>
+                    <dd class="col-sm-8">{{ invoice.currency }} {{ invoice.total_amount }}</dd>
+                    <dt class="col-sm-4">Status</dt>
+                    <dd class="col-sm-8"><span class="badge bg-warning text-dark">{{ invoice.get_status_display }}</span></dd>
+                </dl>
+                <form method="post" class="d-flex flex-wrap gap-2">
+                    {% csrf_token %}
+                    {% if next_url %}
+                    <input type="hidden" name="next" value="{{ next_url }}">
+                    {% endif %}
+                    <button type="submit" class="btn btn-danger">Delete Draft Invoice</button>
+                    <a href="{{ cancel_url }}" class="btn btn-outline-secondary">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

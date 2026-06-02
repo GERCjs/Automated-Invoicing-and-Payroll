@@ -195,6 +195,7 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     amount_due = invoice.total_amount - amount_paid
     totals = [
         ["Subtotal", f"{invoice.subtotal:.2f}"],
+        ["GST", f"{invoice.tax_amount:.2f}"],
         [f"TOTAL {invoice.currency}", f"{invoice.total_amount:.2f}"],
         ["Less Amount Paid", f"{amount_paid:.2f}"],
         [f"AMOUNT DUE {invoice.currency}", f"{amount_due:.2f}"],
@@ -205,9 +206,9 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
             [
                 ("ALIGN", (0, 0), (0, -1), "RIGHT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+                ("FONTNAME", (0, 2), (-1, 2), "Helvetica-Bold"),
                 ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-                ("LINEABOVE", (0, 1), (-1, 1), 0.8, colors.black),
+                ("LINEABOVE", (0, 2), (-1, 2), 0.8, colors.black),
                 ("LINEABOVE", (0, -1), (-1, -1), 0.8, colors.black),
                 ("LEFTPADDING", (0, 0), (-1, -1), 3),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 3),
@@ -285,7 +286,7 @@ def generate_invoice_excel(invoice: Invoice) -> bytes:
     ws["A8"] = invoice.customer.billing_address or "-"
     ws["A9"] = invoice.customer.email
 
-    headers = ["Description", "Qty", "Unit Price", "Tax %", "Line Total"]
+    headers = ["Description", "Qty", "Unit Price", "GST %", "Line Total"]
     row = 11
     for idx, title in enumerate(headers, start=1):
         cell = ws.cell(row=row, column=idx, value=title)
@@ -310,7 +311,7 @@ def generate_invoice_excel(invoice: Invoice) -> bytes:
     ws.cell(row=row, column=4, value="Subtotal").font = Font(bold=True)
     ws.cell(row=row, column=5, value=float(invoice.subtotal))
     row += 1
-    ws.cell(row=row, column=4, value="Tax").font = Font(bold=True)
+    ws.cell(row=row, column=4, value="GST").font = Font(bold=True)
     ws.cell(row=row, column=5, value=float(invoice.tax_amount))
     row += 1
     ws.cell(row=row, column=4, value="Total").font = Font(bold=True)
