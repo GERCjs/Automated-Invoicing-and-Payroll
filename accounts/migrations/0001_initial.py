@@ -7,12 +7,15 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
+    # This is the first database migration for the accounts app.
     initial = True
 
+    # The user table must exist before a UserRole can point to it.
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
+    # Create the UserRole table used to store each user's role.
     operations = [
         migrations.CreateModel(
             name='UserRole',

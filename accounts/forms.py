@@ -14,15 +14,19 @@ from .roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
 
 User = get_user_model()
 
+# Internal roles can be created/managed by admins.
 MANAGED_INTERNAL_ROLES = {ADMIN, FINANCE, HR, STAFF}
+# Default email domain treated as a company staff email.
 DEFAULT_COMPANY_EMAIL_DOMAINS = {"vaniday.com"}
 
 
 def _email_domain(email: str) -> str:
+    # Return the part after @, lowercased.
     return (email or "").strip().lower().rsplit("@", 1)[-1]
 
 
 def get_company_email_domains() -> set[str]:
+    # Build the list of company domains from settings plus the default.
     configured = (getattr(settings, "COMPANY_EMAIL_DOMAINS", "") or "").strip()
     domains = {domain.strip().lower() for domain in configured.split(",") if domain.strip()}
     company_email = (getattr(settings, "COMPANY_EMAIL", "") or "").strip().lower()
@@ -32,6 +36,7 @@ def get_company_email_domains() -> set[str]:
     return domains
 
 
+# Login form used by the login page.
 class LoginForm(AuthenticationForm):
     username = forms.CharField(
         widget=forms.TextInput(
@@ -52,22 +57,26 @@ class LoginForm(AuthenticationForm):
     )
 
     def clean(self):
+        # Keep the entered username/email so we can show clearer errors.
         identifier = str(self.data.get("username", "")).strip()
         try:
             return super().clean()
         except forms.ValidationError:
             if identifier:
+                # Try to find the user by username or email.
                 user = (
                     User.objects.select_related("role_profile")
                     .filter(Q(username__iexact=identifier) | Q(email__iexact=identifier))
                     .order_by("id")
                     .first()
                 )
+                # Show a clear message for suspended accounts.
                 if user and getattr(user.role_profile, "is_suspended", False):
                     raise forms.ValidationError(
                         "Your account is suspended. Please contact an administrator.",
                         code="account_suspended",
                     )
+                # Show a clear message for accounts waiting on email verification.
                 if user and not user.is_active:
                     pending_verification = EmailVerificationToken.objects.filter(
                         user=user,
@@ -81,6 +90,7 @@ class LoginForm(AuthenticationForm):
             raise
 
 
+# Public registration form.
 class RegistrationForm(UserCreationForm):
     email = forms.EmailField(
         required=True,
@@ -106,6 +116,7 @@ class RegistrationForm(UserCreationForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Default role is staff unless email rules decide customer.
         self._resolved_role = STAFF
         self.fields["password1"].widget.attrs.update({"class": "form-control", "placeholder": "Password"})
         self.fields["password2"].widget.attrs.update(
@@ -113,16 +124,19 @@ class RegistrationForm(UserCreationForm):
         )
 
     def clean_email(self):
+        # Normalize email and reject duplicates.
         email = self.cleaned_data["email"].strip().lower()
         if User.objects.filter(email__iexact=email).exists():
             raise forms.ValidationError("This email is already in use.")
 
+        # Company email addresses register as staff.
         company_domains = get_company_email_domains()
         is_company_email = _email_domain(email) in company_domains
         if is_company_email:
             self._resolved_role = STAFF
             return email
 
+        # Non-company emails must match an existing invoice customer.
         has_customer_invoice_profile = InvoiceCustomer.objects.filter(email__iexact=email).exists()
         if not has_customer_invoice_profile:
             raise forms.ValidationError(
@@ -132,9 +146,11 @@ class RegistrationForm(UserCreationForm):
         return email
 
     def get_registration_role(self):
+        # Views call this after validation to know which role to assign.
         return getattr(self, "_resolved_role", STAFF)
 
     def save(self, commit=True):
+        # New self-registered accounts must verify email before logging in.
         user = super().save(commit=False)
         user.email = self.cleaned_data["email"]
         user.is_active = False
@@ -147,6 +163,7 @@ class AdminAccountCreationForm(RegistrationForm):
     """Admin-only form used to create project Admin role accounts."""
 
     def save(self, commit=True):
+        # Create a normal registered user, then upgrade it to an Admin account.
         user = super().save(commit=commit)
         if commit:
             user.is_staff = True
@@ -156,6 +173,7 @@ class AdminAccountCreationForm(RegistrationForm):
         return user
 
 
+# Form used by admins to create internal accounts.
 class ManagedAccountCreationForm(RegistrationForm):
     code_id = forms.CharField(
         required=False,
@@ -173,10 +191,12 @@ class ManagedAccountCreationForm(RegistrationForm):
 
     def __init__(self, *args, actor=None, **kwargs):
         super().__init__(*args, **kwargs)
+        # actor is the admin/superadmin performing the action.
         self.actor = actor
         self.fields["role"].choices = self._allowed_role_choices()
 
     def _allowed_role_choices(self):
+        # SuperAdmin can create Admin accounts; Admin cannot create other Admins.
         actor_role = getattr(getattr(self.actor, "role_profile", None), "role", None)
         if getattr(self.actor, "is_superuser", False):
             actor_role = SUPERADMIN
@@ -186,6 +206,7 @@ class ManagedAccountCreationForm(RegistrationForm):
         return roles
 
     def clean_email(self):
+        # Internal managed accounts must use company email addresses.
         email = self.cleaned_data["email"].strip().lower()
         role = self.cleaned_data.get("role")
         if role in MANAGED_INTERNAL_ROLES and not email.endswith("@vaniday.com"):
@@ -195,12 +216,14 @@ class ManagedAccountCreationForm(RegistrationForm):
         return email
 
     def clean_code_id(self):
+        # Optional manual Code ID must be unique.
         code_id = self.cleaned_data.get("code_id", "").strip().upper()
         if code_id and User.objects.filter(role_profile__code_id__iexact=code_id).exists():
             raise forms.ValidationError("This Code ID is already in use.")
         return code_id
 
     def save(self, commit=True):
+        # Save the user and then set role/code ID on the role profile.
         user = UserCreationForm.save(self, commit=False)
         user.email = self.cleaned_data["email"]
         if commit:
@@ -211,28 +234,33 @@ class ManagedAccountCreationForm(RegistrationForm):
         return user
 
 
+# Form for changing a managed user's role.
 class ManagedRoleUpdateForm(forms.Form):
     role = forms.ChoiceField(widget=forms.Select(attrs={"class": "form-select form-select-sm"}))
 
     def __init__(self, *args, actor=None, target_user=None, **kwargs):
         super().__init__(*args, **kwargs)
+        # actor is the admin doing the change; target_user is the account being changed.
         self.actor = actor
         self.target_user = target_user
         self.fields["role"].choices = self._allowed_role_choices()
 
     def _allowed_role_choices(self):
+        # Admin users cannot assign the Admin role; only SuperAdmin can.
         choices = [choice for choice in ROLE_CHOICES if choice[0] in MANAGED_INTERNAL_ROLES]
         if not getattr(self.actor, "is_superuser", False):
             choices = [choice for choice in choices if choice[0] != ADMIN]
         return choices
 
     def clean_role(self):
+        # Users cannot change their own role through this form.
         role = self.cleaned_data["role"]
         if self.target_user and self.target_user == self.actor:
             raise forms.ValidationError("You cannot change your own role.")
         return role
 
 
+# Form for admins to set another user's password.
 class ManagedPasswordUpdateForm(SetPasswordForm):
     def __init__(self, user, *args, **kwargs):
         super().__init__(user, *args, **kwargs)
@@ -240,6 +268,7 @@ class ManagedPasswordUpdateForm(SetPasswordForm):
         self.fields["new_password2"].widget.attrs.update({"class": "form-control"})
 
 
+# Form for editing automatic payment reminder settings from the admin dashboard.
 class PaymentReminderSettingsForm(forms.ModelForm):
     class Meta:
         model = PaymentReminderSettings
@@ -265,6 +294,7 @@ class PaymentReminderSettingsForm(forms.ModelForm):
         }
 
     def clean(self):
+        # If a reminder type is enabled, its number-of-days field must be filled.
         cleaned_data = super().clean()
         if cleaned_data.get("before_due_reminders_enabled") and not cleaned_data.get("reminder_days_before_due"):
             self.add_error("reminder_days_before_due", "Enter number of days before due date.")
@@ -275,6 +305,7 @@ class PaymentReminderSettingsForm(forms.ModelForm):
         return cleaned_data
 
 
+# Form for sending one email message to selected role groups.
 class MassEmailForm(forms.Form):
     recipients = forms.MultipleChoiceField(
         choices=[],
@@ -286,6 +317,7 @@ class MassEmailForm(forms.Form):
 
     def __init__(self, *args, role_counts=None, **kwargs):
         super().__init__(*args, **kwargs)
+        # Show each role with the current number of users in that role.
         role_counts = role_counts or {}
         self.fields["recipients"].choices = [
             (role, f"{label} ({role_counts.get(role, 0)})")
@@ -294,6 +326,7 @@ class MassEmailForm(forms.Form):
         ]
 
 
+# Form for changing failed-login limits by role.
 class LoginSecurityPolicyForm(forms.ModelForm):
     class Meta:
         model = LoginSecurityPolicy
@@ -306,6 +339,7 @@ class LoginSecurityPolicyForm(forms.ModelForm):
         }
 
     def clean_max_failed_login_attempts(self):
+        # Keep the setting in a safe range.
         value = self.cleaned_data["max_failed_login_attempts"]
         if value < 1 or value > 20:
             raise forms.ValidationError("Allowed range is 1 to 20 attempts.")

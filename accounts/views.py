@@ -32,11 +32,14 @@ from .permissions import get_user_role, role_required
 from .roles import ADMIN, CUSTOMER, ROLE_CHOICES, STAFF, SUPERADMIN
 
 User = get_user_model()
+# Template key used when saving verification email logs.
 VERIFICATION_EMAIL_TEMPLATE_KEY = "account_verification_email_v1"
 
 
 def _send_verification_email(request, user, *, triggered_by=None):
+    # Create a new verification token for this user.
     verification = EmailVerificationToken.issue_for_user(user)
+    # Build the full clickable verification URL.
     verify_url = request.build_absolute_uri(reverse("verify-email", args=[verification.token]))
     subject = "Verify your account"
     body = (
@@ -45,6 +48,7 @@ def _send_verification_email(request, user, *, triggered_by=None):
         f"{verify_url}\n\n"
         "This link expires in 48 hours."
     )
+    # Save an email log before sending so failures are still recorded.
     recipient = (user.email or "").strip().lower()
     email_log = EmailDeliveryLog.objects.create(
         recipient_email=recipient,
@@ -62,12 +66,14 @@ def _send_verification_email(request, user, *, triggered_by=None):
     )
 
     if not recipient:
+        # Cannot send email when the user has no email address.
         email_log.status = EmailDeliveryLog.STATUS_FAILED
         email_log.error_message = "User email address is missing."
         email_log.save(update_fields=["status", "error_message"])
         return False, verification, email_log
 
     try:
+        # Send the actual verification email.
         sent_count = send_mail(
             subject=subject,
             message=body,
@@ -78,11 +84,13 @@ def _send_verification_email(request, user, *, triggered_by=None):
         if sent_count < 1:
             raise RuntimeError("Email backend returned zero deliveries.")
     except Exception as exc:
+        # Record email sending failure.
         email_log.status = EmailDeliveryLog.STATUS_FAILED
         email_log.error_message = str(exc)
         email_log.save(update_fields=["status", "error_message"])
         return False, verification, email_log
 
+    # Mark the email log as sent after successful delivery.
     email_log.status = EmailDeliveryLog.STATUS_SENT
     email_log.sent_at = timezone.now()
     email_log.save(update_fields=["status", "sent_at"])
@@ -90,22 +98,28 @@ def _send_verification_email(request, user, *, triggered_by=None):
 
 
 class UserLoginView(LoginView):
+    # Login page that uses the custom LoginForm.
     template_name = "accounts/login.html"
     authentication_form = LoginForm
+    # Already-logged-in users are redirected instead of seeing the login page.
     redirect_authenticated_user = True
 
 
 class UserLogoutView(LogoutView):
+    # After logout, send the user back to the login page.
     next_page = reverse_lazy("login")
 
 
 def register(request):
+    # Logged-in users do not need the registration page.
     if request.user.is_authenticated:
         return redirect("dashboard")
 
     if request.method == "POST":
+        # Validate submitted registration data.
         form = RegistrationForm(request.POST)
         if form.is_valid():
+            # Save the inactive user, assign role, and send verification email.
             user = form.save()
             role = form.get_registration_role()
             user.role_profile.role = role
@@ -115,6 +129,7 @@ def register(request):
                 user,
                 triggered_by=user,
             )
+            # Audit the registration event.
             log_event(
                 action="auth.registered",
                 user=user,
@@ -138,30 +153,36 @@ def register(request):
                 )
             return redirect("login")
     else:
+        # Empty form for first page load.
         form = RegistrationForm()
 
     return render(request, "accounts/register.html", {"form": form})
 
 
 def verify_email(request, token):
+    # Look up the verification token from the URL.
     verification = (
         EmailVerificationToken.objects.select_related("user", "user__role_profile")
         .filter(token=token)
         .first()
     )
     if verification is None:
+        # Unknown token.
         messages.error(request, "Invalid verification link.")
         return redirect("login")
     if not verification.is_valid:
+        # Token exists but is expired or already used.
         messages.error(request, "This verification link is expired or already used.")
         return redirect("login")
 
+    # Activate the account and mark the token as used.
     user = verification.user
     user.is_active = True
     user.save(update_fields=["is_active"])
     verification.used_at = timezone.now()
     verification.save(update_fields=["used_at"])
 
+    # Audit successful email verification.
     log_event(
         action="auth.email_verified",
         user=user,
@@ -175,40 +196,49 @@ def verify_email(request, token):
 
 
 def _get_role_counts():
+    # Count how many users are in each role.
     rows = User.objects.values("role_profile__role").annotate(total=Count("id"))
     counts = {row["role_profile__role"]: row["total"] for row in rows}
     return {role: counts.get(role, 0) for role, _label in ROLE_CHOICES}
 
 
 def _can_manage_target(actor, target_user):
+    # Prevent users from managing themselves.
     if actor == target_user:
         return False
     target_role = get_user_role(target_user)
+    # Customer and SuperAdmin accounts are protected from this management flow.
     if target_role == CUSTOMER:
         return False
     if target_role == SUPERADMIN:
         return False
+    # Admins cannot manage other Admin accounts.
     if get_user_role(actor) == ADMIN and target_role == ADMIN:
         return False
     return True
 
 
 def _can_suspend_target(actor, target_user):
+    # Prevent users from suspending themselves.
     if actor == target_user:
         return False
     target_role = get_user_role(target_user)
+    # SuperAdmin accounts cannot be suspended through this flow.
     if target_role == SUPERADMIN:
         return False
+    # Admins cannot suspend other Admin accounts.
     if get_user_role(actor) == ADMIN and target_role == ADMIN:
         return False
     return True
 
 
 def _dashboard_context(request, account_form=None, reminder_form=None, mass_email_form=None):
+    # Collect filters from the admin dashboard URL.
     selected_role = request.GET.get("role", "").strip()
     selected_action = request.GET.get("action", "").strip()
     search_query = request.GET.get("q", "").strip()
 
+    # Start with all users, then apply filters/search.
     users = User.objects.select_related("role_profile").order_by("username")
     if selected_role == "suspended":
         users = users.filter(role_profile__suspended_at__isnull=False)
@@ -222,12 +252,14 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
             | Q(last_name__icontains=search_query)
         )
 
+    # Start with all audit logs, then apply filters/search.
     audit_logs = AuditLog.objects.select_related("user", "user__role_profile")
     if selected_role and selected_role != "suspended":
         audit_logs = audit_logs.filter(user__role_profile__role=selected_role)
     if selected_action:
         audit_logs = audit_logs.filter(action__icontains=selected_action)
 
+    # Build the summary cards shown on the admin dashboard.
     role_counts = _get_role_counts()
     role_count_cards = [
         {"role": role, "label": label, "count": role_counts.get(role, 0)}
@@ -235,6 +267,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
     ]
     suspended_count = User.objects.filter(role_profile__suspended_at__isnull=False).count()
     role_count_cards.append({"role": "suspended", "label": "Suspended", "count": suspended_count})
+    # Find each user's most recent audit activity.
     last_seen = {
         row["user_id"]: row["last_activity"]
         for row in AuditLog.objects.exclude(user_id=None)
@@ -242,10 +275,12 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         .annotate(last_activity=Max("created_at"))
     }
     users_with_activity = []
+    # Used to label users who still need to verify email.
     pending_verification_user_ids = set(
         EmailVerificationToken.objects.filter(used_at__isnull=True).values_list("user_id", flat=True)
     )
     for managed_user in users:
+        # Attach extra values used directly by the dashboard template.
         managed_user.last_activity_at = last_seen.get(managed_user.id)
         managed_user.role_update_form = ManagedRoleUpdateForm(
             actor=request.user,
@@ -270,6 +305,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
     for role, label in ROLE_CHOICES:
         if role == SUPERADMIN:
             continue
+        # Show one failed-login policy form per role.
         policy = LoginSecurityPolicy.objects.filter(role=role).first() or LoginSecurityPolicy(role=role)
         policy_rows.append(
             {
@@ -280,6 +316,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
             }
         )
 
+    # Find recent suspicious accounts based on denied permissions or failed login logs.
     suspicious_since = timezone.now() - timezone.timedelta(days=7)
     suspicious_users = (
         User.objects.filter(
@@ -292,6 +329,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         .order_by("-flag_count", "username")[:8]
     )
 
+    # Return all data needed by the admin dashboard template.
     reminder_settings = PaymentReminderSettings.load()
     return {
         "users": users_with_activity,
@@ -318,12 +356,14 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def admin_dashboard(request):
+    # Main admin dashboard page.
     return render(request, "accounts/admin_dashboard.html", _dashboard_context(request))
 
 
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def managed_account_create(request):
+    # Show the account creation form on GET.
     if request.method != "POST":
         return render(
             request,
@@ -332,6 +372,7 @@ def managed_account_create(request):
         )
     form = ManagedAccountCreationForm(request.POST, actor=request.user)
     if form.is_valid():
+        # Save the new managed account and audit the action.
         user = form.save()
         log_event(
             action="admin.account.created",
@@ -349,6 +390,7 @@ def managed_account_create(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def managed_account_role_update(request, user_id):
+    # Role changes must be submitted by POST.
     if request.method != "POST":
         return redirect("admin-dashboard")
     target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
@@ -358,6 +400,7 @@ def managed_account_role_update(request, user_id):
     previous_role = get_user_role(target_user)
     form = ManagedRoleUpdateForm(request.POST, actor=request.user, target_user=target_user)
     if form.is_valid():
+        # Save the new role and audit the old/new values.
         target_user.role_profile.role = form.cleaned_data["role"]
         target_user.role_profile.save(update_fields=["role", "updated_at"])
         log_event(
@@ -381,6 +424,7 @@ def managed_account_role_update(request, user_id):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def managed_account_password_update(request, user_id):
+    # Admin password reset page for a managed user.
     target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
     if not _can_manage_target(request.user, target_user):
         messages.error(request, "You cannot update this account's password.")
@@ -388,6 +432,7 @@ def managed_account_password_update(request, user_id):
     if request.method == "POST":
         form = ManagedPasswordUpdateForm(target_user, request.POST)
         if form.is_valid():
+            # Save the new password and audit the update.
             form.save()
             log_event(
                 action="admin.account.password_updated",
@@ -400,6 +445,7 @@ def managed_account_password_update(request, user_id):
             messages.success(request, f"Updated password for {target_user.username}.")
             return redirect("admin-dashboard")
     else:
+        # Empty password form for first page load.
         form = ManagedPasswordUpdateForm(target_user)
     return render(
         request,
@@ -411,6 +457,7 @@ def managed_account_password_update(request, user_id):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def managed_account_delete(request, user_id):
+    # Deleting accounts must be submitted by POST.
     if request.method != "POST":
         return redirect("admin-dashboard")
     target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
@@ -419,6 +466,7 @@ def managed_account_delete(request, user_id):
         return redirect("admin-dashboard")
     username = target_user.username
     target_role = get_user_role(target_user)
+    # Delete the user account, then log what was deleted.
     target_user.delete()
     log_event(
         action="admin.account.deleted",
@@ -435,6 +483,7 @@ def managed_account_delete(request, user_id):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def managed_account_suspend(request, user_id):
+    # Suspending accounts must be submitted by POST.
     if request.method != "POST":
         return redirect("admin-dashboard")
     target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
@@ -446,6 +495,7 @@ def managed_account_suspend(request, user_id):
         return redirect("admin-dashboard")
 
     reason = request.POST.get("reason", "")
+    # Suspend the account, then write an audit log.
     target_user.role_profile.suspend(by=request.user, reason=reason)
     log_event(
         action="admin.account.suspended",
@@ -466,6 +516,7 @@ def managed_account_suspend(request, user_id):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def managed_account_unsuspend(request, user_id):
+    # Unsuspending accounts must be submitted by POST.
     if request.method != "POST":
         return redirect("admin-dashboard")
     target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
@@ -476,6 +527,7 @@ def managed_account_unsuspend(request, user_id):
         messages.info(request, f"{target_user.username} is not suspended.")
         return redirect("admin-dashboard")
 
+    # Unsuspend the account, then write an audit log.
     target_user.role_profile.unsuspend()
     log_event(
         action="admin.account.unsuspended",
@@ -492,9 +544,11 @@ def managed_account_unsuspend(request, user_id):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def managed_account_resend_verification(request, user_id):
+    # Resending verification emails must be submitted by POST.
     if request.method != "POST":
         return redirect("admin-dashboard")
 
+    # Check whether the user still needs verification.
     target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
     has_pending_verification = EmailVerificationToken.objects.filter(
         user=target_user,
@@ -507,6 +561,7 @@ def managed_account_resend_verification(request, user_id):
         messages.error(request, "Cannot resend verification email for a suspended account.")
         return redirect("admin-dashboard")
 
+    # Send a new verification email and log success/failure.
     success, _verification, email_log = _send_verification_email(
         request,
         target_user,
@@ -543,6 +598,7 @@ def managed_account_resend_verification(request, user_id):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def login_security_policy_update(request, role=None):
+    # Login security settings are updated as one POST from the dashboard.
     if request.method != "POST":
         return redirect("admin-dashboard")
 
@@ -551,6 +607,7 @@ def login_security_policy_update(request, role=None):
     for role, label in ROLE_CHOICES:
         if role == SUPERADMIN:
             continue
+        # Validate each role's failed-login policy form.
         policy = LoginSecurityPolicy.get_for_role(role)
         form = LoginSecurityPolicyForm(request.POST, instance=policy, prefix=f"policy_{role}")
         policy_forms.append((role, form))
@@ -563,6 +620,7 @@ def login_security_policy_update(request, role=None):
 
     updated = []
     with transaction.atomic():
+        # Save all valid policy updates together.
         for role, form in policy_forms:
             policy = form.save(commit=False)
             policy.updated_by = request.user
@@ -576,6 +634,7 @@ def login_security_policy_update(request, role=None):
                 }
             )
 
+    # Audit the bulk update.
     log_event(
         action="admin.login_security_policy.updated.bulk",
         user=request.user,
@@ -590,6 +649,7 @@ def login_security_policy_update(request, role=None):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def payment_reminder_settings_update(request):
+    # Page for editing automatic payment reminder settings.
     reminder_settings = PaymentReminderSettings.load()
     if request.method != "POST":
         return render(
@@ -599,6 +659,7 @@ def payment_reminder_settings_update(request):
         )
     form = PaymentReminderSettingsForm(request.POST, instance=reminder_settings)
     if form.is_valid():
+        # Save reminder settings and record who updated them.
         settings_obj = form.save(commit=False)
         settings_obj.updated_by = request.user
         settings_obj.save()
@@ -627,9 +688,11 @@ def payment_reminder_settings_update(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def payment_reminder_run_check(request):
+    # Manual reminder check must be submitted by POST.
     if request.method != "POST":
         return redirect("payment-reminder-settings-update")
 
+    # "send" sends real emails; every other mode simulates only.
     mode = request.POST.get("mode", "simulate").strip().lower()
     simulate = mode != "send"
     summary = run_payment_reminder_check(
@@ -637,6 +700,7 @@ def payment_reminder_run_check(request):
         base_url=request.build_absolute_uri("/").rstrip("/"),
         simulate=simulate,
     )
+    # Audit the reminder run summary.
     log_event(
         action="admin.payment_reminders.run_check",
         user=request.user,
@@ -668,6 +732,7 @@ def payment_reminder_run_check(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def mass_email_send(request):
+    # Page/action for sending one message to selected role groups.
     role_counts = _get_role_counts()
     if request.method != "POST":
         return render(
@@ -681,6 +746,7 @@ def mass_email_send(request):
         messages.error(request, "Mass email sending is disabled in reminder settings.")
         return redirect("admin-dashboard")
     if form.is_valid():
+        # Find users whose roles were selected and who have email addresses.
         recipients = User.objects.filter(
             role_profile__role__in=form.cleaned_data["recipients"],
             email__isnull=False,
@@ -689,6 +755,7 @@ def mass_email_send(request):
         if not recipient_emails:
             messages.error(request, "No users with email addresses matched the selected roles.")
             return redirect("admin-dashboard")
+        # Send one email to the matched recipients.
         sent_count = send_mail(
             subject=form.cleaned_data["subject"],
             message=form.cleaned_data["message"],
@@ -696,6 +763,7 @@ def mass_email_send(request):
             recipient_list=recipient_emails,
             fail_silently=False,
         )
+        # Store a delivery log for the mass email.
         EmailDeliveryLog.objects.create(
             recipient_email=settings.DEFAULT_FROM_EMAIL,
             subject=form.cleaned_data["subject"],
@@ -707,6 +775,7 @@ def mass_email_send(request):
             sent_at=timezone.now(),
             metadata={"recipient_count": len(recipient_emails), "sent_count": sent_count},
         )
+        # Audit the mass email action.
         log_event(
             action="admin.mass_email.sent",
             user=request.user,
@@ -725,10 +794,12 @@ def mass_email_send(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def email_delivery_log_list(request):
+    # List recent admin mass-email and payment-reminder email logs.
     selected_type = request.GET.get("type", "").strip()
     selected_status = request.GET.get("status", "").strip()
     search_query = request.GET.get("q", "").strip()
 
+    # Only show admin mass email and payment reminder logs here.
     logs = EmailDeliveryLog.objects.select_related("triggered_by").filter(
         Q(template_key="admin_mass_email") | Q(template_key__startswith="payment_reminder_")
     )
@@ -739,6 +810,7 @@ def email_delivery_log_list(request):
     if selected_status:
         logs = logs.filter(status=selected_status)
     if search_query:
+        # Search email logs by recipient, subject, related object, or metadata.
         logs = logs.filter(
             Q(recipient_email__icontains=search_query)
             | Q(subject__icontains=search_query)
@@ -762,14 +834,17 @@ def email_delivery_log_list(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def suspicious_activity_list(request):
+    # Page showing recent failed-login and permission-denied activity.
     selected_role = request.GET.get("role", "").strip()
     search_query = request.GET.get("q", "").strip()
     selected_reason = request.GET.get("reason", "").strip()
     recent_since = timezone.now() - timezone.timedelta(days=7)
 
+    # Suspicious activity is limited to the most recent 7 days.
     suspicious_action_filter = Q(audit_logs__action="auth.permission_denied") | Q(
         audit_logs__action="auth.login.failed"
     )
+    # Build one row per account with suspicious activity counts.
     account_rows = (
         User.objects.select_related("role_profile")
         .filter(suspicious_action_filter, audit_logs__created_at__gte=recent_since)
@@ -815,6 +890,7 @@ def suspicious_activity_list(request):
     elif selected_reason == "permission_denied":
         account_rows = account_rows.filter(permission_denied_7d__gt=0)
     if search_query:
+        # Search suspicious accounts by username, email, or code ID.
         account_rows = account_rows.filter(
             Q(username__icontains=search_query)
             | Q(email__icontains=search_query)
@@ -822,6 +898,7 @@ def suspicious_activity_list(request):
         )
     account_rows = list(account_rows.order_by("-failed_attempts_7d", "-last_flagged_at", "username")[:200])
 
+    # Get current failed-login limits for the roles shown.
     policy_by_role = {
         policy.role: policy.max_failed_login_attempts
         for policy in LoginSecurityPolicy.objects.filter(
@@ -829,6 +906,7 @@ def suspicious_activity_list(request):
         )
     }
     for account in account_rows:
+        # Attach display fields used by the template.
         account.max_failed_login_attempts = policy_by_role.get(account.role_profile.role, 5)
         account.failed_attempts_current = account.role_profile.failed_login_attempts
         account.is_suspended = account.role_profile.is_suspended
@@ -837,6 +915,7 @@ def suspicious_activity_list(request):
         if not account.is_suspended and account.failed_attempts_current >= account.max_failed_login_attempts:
             account.status_label = "Threshold reached"
 
+    # Build the detailed event log list for the page.
     event_logs = AuditLog.objects.select_related("user", "user__role_profile").filter(
         Q(action="auth.permission_denied") | Q(action="auth.login.failed"),
         created_at__gte=recent_since,
@@ -848,6 +927,7 @@ def suspicious_activity_list(request):
     elif selected_reason == "permission_denied":
         event_logs = event_logs.filter(action="auth.permission_denied")
     if search_query:
+        # Search event logs by user and target details.
         event_logs = event_logs.filter(
             Q(user__username__icontains=search_query)
             | Q(user__email__icontains=search_query)
@@ -872,9 +952,11 @@ def suspicious_activity_list(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def create_admin_account(request):
+    # Older/simple page for creating Admin role accounts.
     if request.method == "POST":
         form = AdminAccountCreationForm(request.POST)
         if form.is_valid():
+            # Save the Admin account and audit the creation.
             user = form.save()
             log_event(
                 action="auth.admin_account.created",
@@ -887,6 +969,7 @@ def create_admin_account(request):
             messages.success(request, f"Admin account {user.username} created.")
             return redirect("create-admin-account")
     else:
+        # Empty form for first page load.
         form = AdminAccountCreationForm()
 
     return render(request, "accounts/create_admin_account.html", {"form": form})

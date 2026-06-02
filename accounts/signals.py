@@ -11,15 +11,18 @@ from .models import LoginSecurityPolicy, UserRole
 from .roles import ADMIN, SUPERADMIN
 
 User = get_user_model()
+# Name of the Django group that gives Admin users admin-console permissions.
 ADMIN_CONSOLE_GROUP_NAME = "RoleAdminConsole"
 
 
 @receiver(post_save, sender=User)
 def create_or_update_user_role(sender, instance, created, **kwargs):
+    # When a User is created, automatically create its UserRole profile.
     if created:
         role = SUPERADMIN if instance.is_superuser else UserRole._meta.get_field("role").default
         UserRole.objects.create(user=instance, role=role)
         return
+    # If an existing superuser is saved, make sure their app role is SuperAdmin.
     role_profile, _ = UserRole.objects.get_or_create(user=instance)
     if instance.is_superuser and role_profile.role != SUPERADMIN:
         role_profile.role = SUPERADMIN
@@ -28,6 +31,7 @@ def create_or_update_user_role(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=UserRole)
 def sync_user_staff_flag_from_role(sender, instance, **kwargs):
+    # Keep Django's is_staff/is_superuser flags in sync with the app role.
     user = instance.user
     expected_superuser = instance.role == SUPERADMIN
     expected_staff = instance.role in {SUPERADMIN, ADMIN}
@@ -42,9 +46,11 @@ def sync_user_staff_flag_from_role(sender, instance, **kwargs):
     if fields_to_update:
         user.save(update_fields=fields_to_update)
 
+    # Admin role users get all permissions through this group.
     admin_group, _ = Group.objects.get_or_create(name=ADMIN_CONSOLE_GROUP_NAME)
     admin_group.permissions.set(Permission.objects.all())
 
+    # Only Admin users are placed in this group.
     if instance.role == ADMIN:
         user.groups.add(admin_group)
     else:
@@ -53,12 +59,14 @@ def sync_user_staff_flag_from_role(sender, instance, **kwargs):
 
 @receiver(user_logged_in)
 def log_user_logged_in(sender, request, user, **kwargs):
+    # Reset failed login count after a successful login.
     role_profile = getattr(user, "role_profile", None)
     had_failed_attempts = bool(role_profile and role_profile.failed_login_attempts)
     if had_failed_attempts:
         role_profile.failed_login_attempts = 0
         role_profile.save(update_fields=["failed_login_attempts", "updated_at"])
 
+    # Save a login audit record.
     log_event(
         action="auth.login",
         user=user,
@@ -72,6 +80,7 @@ def log_user_logged_in(sender, request, user, **kwargs):
 
 @receiver(user_logged_out)
 def log_user_logged_out(sender, request, user, **kwargs):
+    # Save a logout audit record, if there is a user.
     if user is None:
         return
     log_event(
@@ -83,6 +92,7 @@ def log_user_logged_out(sender, request, user, **kwargs):
 
 
 def _resolve_user_from_failed_credentials(credentials: dict):
+    # Try to find which user failed login by username or email.
     username_field = User.USERNAME_FIELD
     username = (
         credentials.get(username_field)
@@ -103,6 +113,7 @@ def _resolve_user_from_failed_credentials(credentials: dict):
 
 @receiver(user_login_failed)
 def handle_user_login_failed(sender, credentials, request, **kwargs):
+    # This runs whenever Django detects a failed login.
     user = _resolve_user_from_failed_credentials(credentials or {})
     ip_address = get_client_ip(request) if request is not None else None
     if user is None:
@@ -113,6 +124,7 @@ def handle_user_login_failed(sender, credentials, request, **kwargs):
         return
 
     if role_profile.is_suspended:
+        # Suspended accounts are logged but not counted again.
         log_event(
             action="auth.login.failed",
             user=user,
@@ -125,11 +137,14 @@ def handle_user_login_failed(sender, credentials, request, **kwargs):
         )
         return
 
+    # Count this failed login attempt.
     role_profile.failed_login_attempts += 1
     role_profile.save(update_fields=["failed_login_attempts", "updated_at"])
     policy = LoginSecurityPolicy.get_for_role(role_profile.role)
+    # Decide whether the user has reached the auto-suspension limit.
     auto_suspended = role_profile.failed_login_attempts >= policy.max_failed_login_attempts
 
+    # Save an audit record for the failed login.
     log_event(
         action="auth.login.failed",
         user=user,
@@ -144,6 +159,7 @@ def handle_user_login_failed(sender, credentials, request, **kwargs):
     )
 
     if auto_suspended:
+        # Disable the account when the failed-login limit is reached.
         role_profile.suspend(
             by=None,
             reason=(

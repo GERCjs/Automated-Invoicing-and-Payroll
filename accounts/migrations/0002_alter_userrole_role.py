@@ -5,10 +5,12 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
+    # This migration runs after the first UserRole table is created.
     dependencies = [
         ('accounts', '0001_initial'),
     ]
 
+    # Update the allowed role choices to include SuperAdmin and Customer.
     operations = [
         migrations.AlterField(
             model_name='userrole',

@@ -7,11 +7,13 @@ import django.db.models.deletion
 
 class Migration(migrations.Migration):
 
+    # This migration runs after login security fields are added.
     dependencies = [
         ("accounts", "0006_userrole_failed_login_attempts_userrole_suspended_at_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
+    # Create the email verification token table.
     operations = [
         migrations.CreateModel(
             name="EmailVerificationToken",

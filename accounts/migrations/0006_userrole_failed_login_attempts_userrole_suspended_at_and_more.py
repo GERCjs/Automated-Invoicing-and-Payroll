@@ -7,32 +7,39 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
+    # This migration runs after code IDs are added.
     dependencies = [
         ('accounts', '0005_userrole_code_id'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
+    # Add login security/suspension fields and the LoginSecurityPolicy table.
     operations = [
+        # Count failed login attempts on each role profile.
         migrations.AddField(
             model_name='userrole',
             name='failed_login_attempts',
             field=models.PositiveIntegerField(default=0),
         ),
+        # Store when an account was suspended.
         migrations.AddField(
             model_name='userrole',
             name='suspended_at',
             field=models.DateTimeField(blank=True, null=True),
         ),
+        # Store which admin suspended the account.
         migrations.AddField(
             model_name='userrole',
             name='suspended_by',
             field=models.ForeignKey(blank=True, db_constraint=False, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='suspended_accounts', to=settings.AUTH_USER_MODEL),
         ),
+        # Store the suspension reason.
         migrations.AddField(
             model_name='userrole',
             name='suspended_reason',
             field=models.CharField(blank=True, max_length=255),
         ),
+        # Create per-role failed-login policy rows.
         migrations.CreateModel(
             name='LoginSecurityPolicy',
             fields=[

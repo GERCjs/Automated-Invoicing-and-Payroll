@@ -14,8 +14,10 @@ from .roles import CUSTOMER
 User = get_user_model()
 
 
+# This widget hides the password hash and shows a reset/set password button instead.
 class PasswordResetOnlyWidget(forms.Widget):
     def render(self, name, value, attrs=None, renderer=None):
+        # Django stores unusable passwords with a special prefix.
         usable_password = value and not str(value).startswith(UNUSABLE_PASSWORD_PREFIX)
         button_label = _("Reset password") if usable_password else _("Set password")
         return format_html(
@@ -24,9 +26,11 @@ class PasswordResetOnlyWidget(forms.Widget):
         )
 
     def id_for_label(self, id_):
+        # No label is needed because this widget is only a button area.
         return None
 
 
+# This form replaces the confusing password hash field in Django admin.
 class UserChangeFormWithoutPasswordHash(UserChangeForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -35,29 +39,38 @@ class UserChangeFormWithoutPasswordHash(UserChangeForm):
 
 
 try:
+    # Remove Django's default User admin so we can register our customized version.
     admin.site.unregister(User)
 except NotRegistered:
+    # If it was already unregistered, there is nothing to do.
     pass
 
 
+# Register the customized User admin.
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
     form = UserChangeFormWithoutPasswordHash
 
 
+# Register UserRole so admins can view and search user roles.
 @admin.register(UserRole)
 class UserRoleAdmin(admin.ModelAdmin):
+    # Columns shown in the UserRole admin list.
     list_display = ("user", "code_id", "role", "updated_at")
+    # Sidebar filters.
     list_filter = ("role",)
+    # Search box fields.
     search_fields = ("user__username", "user__email", "code_id")
 
     def get_readonly_fields(self, request, obj=None):
+        # Customer roles are protected from being changed in Django admin.
         readonly_fields = list(super().get_readonly_fields(request, obj))
         if obj and obj.role == CUSTOMER:
             readonly_fields.append("role")
         return readonly_fields
 
     def save_model(self, request, obj, form, change):
+        # Extra safety: keep customer role as customer even if someone tries to alter it.
         if change and obj.pk:
             original = UserRole.objects.get(pk=obj.pk)
             if original.role == CUSTOMER:

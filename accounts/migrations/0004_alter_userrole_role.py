@@ -5,10 +5,12 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
+    # This migration runs after superuser roles are backfilled.
     dependencies = [
         ('accounts', '0003_backfill_superadmin_role'),
     ]
 
+    # Update role display labels, such as Finance Officer and Payroll Officer.
     operations = [
         migrations.AlterField(
             model_name='userrole',
