@@ -8,6 +8,21 @@ User = get_user_model()
 
 
 class CorePhaseOneTests(TestCase):
+    def test_customer_entry_page_is_public(self):
+        response = self.client.get(reverse("customer-entry"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Welcome to Vaniday")
+        self.assertContains(response, "Access Invoice Portal")
+        self.assertContains(response, reverse("login"))
+
+    def test_login_page_has_customer_invoice_access_link(self):
+        response = self.client.get(reverse("login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Customer Invoice Access")
+        self.assertContains(response, reverse("customer-entry"))
+
     def test_dashboard_requires_authentication(self):
         response = self.client.get(reverse("dashboard"))
         self.assertEqual(response.status_code, 302)

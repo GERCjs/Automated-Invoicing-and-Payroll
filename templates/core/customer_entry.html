@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vaniday Customer Entry | Invoice Portal Prototype</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --vaniday-top: #4b3138;
+            --vaniday-header: #242424;
+            --vaniday-nav: #2e2e2e;
+            --vaniday-accent: #ff7d72;
+            --vaniday-accent-deep: #f06c61;
+            --vaniday-page: #ffffff;
+            --vaniday-muted: #767676;
+            --vaniday-border: #ececec;
+            --vaniday-soft: #fff4f1;
+            --vaniday-gold: #d7b46a;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            color: #222;
+            background: var(--vaniday-page);
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .page-shell {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #ffffff 0%, #fbfbfb 100%);
+        }
+
+        .top-browser-strip {
+            background: var(--vaniday-top);
+            height: 20px;
+        }
+
+        .public-top-links {
+            background: var(--vaniday-header);
+            color: rgba(255, 255, 255, 0.85);
+            font-size: 0.9rem;
+        }
+
+        .public-top-links .inner {
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .top-link-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .top-link-group .divider {
+            opacity: 0.55;
+        }
+
+        .social-pills {
+            display: inline-flex;
+            gap: 6px;
+        }
+
+        .social-pill {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+        }
+
+        .public-main-header {
+            background: var(--vaniday-header);
+            color: #fff;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .public-main-header .inner {
+            min-height: 128px;
+            display: grid;
+            grid-template-columns: 220px minmax(300px, 1fr) 230px;
+            align-items: center;
+            gap: 28px;
+        }
+
+        .logo-mark {
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: clamp(2.7rem, 4vw, 4rem);
+            letter-spacing: -0.05em;
+            color: #fff;
+            line-height: 1;
+        }
+
+        .logo-mark .dot {
+            color: var(--vaniday-accent);
+        }
+
+        .public-search-wrap {
+            display: flex;
+            align-items: stretch;
+            width: 100%;
+            max-width: 560px;
+            margin: 0 auto;
+            border-radius: 3px;
+            overflow: hidden;
+            background: #fff;
+        }
+
+        .public-search-wrap .search-icon {
+            width: 46px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--vaniday-accent);
+            font-size: 1rem;
+            background: #fff;
+        }
+
+        .public-search-wrap input {
+            flex: 1;
+            border: 0;
+            outline: 0;
+            padding: 13px 10px;
+            font-size: 1rem;
+        }
+
+        .public-search-wrap button {
+            border: 0;
+            min-width: 108px;
+            background: var(--vaniday-accent);
+            color: #fff;
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .public-search-wrap button:hover {
+            background: var(--vaniday-accent-deep);
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 18px;
+        }
+
+        .header-action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            color: #fff;
+            min-width: 42px;
+        }
+
+        .header-action-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+        }
+
+        .header-action-label {
+            font-size: 0.74rem;
+            color: rgba(255, 255, 255, 0.82);
+        }
+
+        .public-nav-row {
+            background: var(--vaniday-nav);
+            color: #f6f6f6;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+        }
+
+        .public-nav-row .inner {
+            min-height: 46px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+        }
+
+        .menu-entry {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.98rem;
+        }
+
+        .menu-bars {
+            display: inline-grid;
+            gap: 4px;
+        }
+
+        .menu-bars span {
+            display: block;
+            width: 25px;
+            height: 2px;
+            background: #fff;
+            border-radius: 4px;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 26px;
+            flex-wrap: wrap;
+            font-size: 0.98rem;
+        }
+
+        .nav-links a {
+            color: #f6f6f6;
+        }
+
+        .nav-links .invoice-link {
+            color: #fff;
+            background: rgba(255, 125, 114, 0.18);
+            border: 1px solid rgba(255, 125, 114, 0.52);
+            border-radius: 999px;
+            padding: 7px 14px;
+            font-weight: 600;
+        }
+
+        .help-link {
+            color: #f6f6f6;
+            font-size: 0.95rem;
+            white-space: nowrap;
+        }
+
+        .content-width {
+            width: min(1120px, calc(100vw - 32px));
+            margin: 0 auto;
+        }
+
+        .hero-area {
+            padding: 0 0 28px;
+        }
+
+        .hero-banner {
+            position: relative;
+            min-height: 280px;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 12% 76%, rgba(215, 180, 106, 0.33), transparent 20%),
+                radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.72), transparent 18%),
+                linear-gradient(135deg, #fff2ed 0%, #ffe4de 56%, #fff6f2 100%);
+            border-bottom: 1px solid #f3ddd7;
+        }
+
+        .hero-banner::before,
+        .hero-banner::after {
+            content: "";
+            position: absolute;
+            inset: auto;
+            background:
+                radial-gradient(circle, rgba(215, 180, 106, 0.7) 0 1.2px, transparent 1.3px);
+            background-size: 18px 18px;
+            opacity: 0.4;
+        }
+
+        .hero-banner::before {
+            width: 360px;
+            height: 120px;
+            left: 0;
+            bottom: 0;
+            transform: rotate(-8deg);
+        }
+
+        .hero-banner::after {
+            width: 260px;
+            height: 120px;
+            right: 22px;
+            top: 10px;
+            transform: rotate(14deg);
+        }
+
+        .hero-inner {
+            position: relative;
+            padding: 34px 34px 26px;
+            min-height: 280px;
+            display: grid;
+            grid-template-columns: 1.1fr 0.95fr;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .polaroid-strip {
+            display: flex;
+            align-items: flex-end;
+            gap: 18px;
+            flex-wrap: nowrap;
+        }
+
+        .polaroid {
+            width: 152px;
+            height: 178px;
+            background: #fff;
+            border-radius: 4px;
+            padding: 10px 10px 28px;
+            box-shadow: 0 14px 28px rgba(0, 0, 0, 0.08);
+        }
+
+        .polaroid:nth-child(1) {
+            transform: rotate(-10deg) translateY(12px);
+        }
+
+        .polaroid:nth-child(2) {
+            transform: rotate(-4deg);
+        }
+
+        .polaroid:nth-child(3) {
+            transform: rotate(8deg) translateY(8px);
+        }
+
+        .polaroid-photo {
+            width: 100%;
+            height: 100%;
+            border-radius: 2px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.15), rgba(255,255,255,0)),
+                linear-gradient(135deg, #d7a58c 0%, #f7d7c8 50%, #eab3a0 100%);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .polaroid-photo::before {
+            content: "";
+            position: absolute;
+            inset: 18px 24px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.55);
+            filter: blur(10px);
+        }
+
+        .polaroid-photo::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 26%;
+            width: 56px;
+            height: 76px;
+            transform: translateX(-50%);
+            border-radius: 48% 48% 40% 40%;
+            background:
+                radial-gradient(circle at 50% 20%, #3c2d2d 0 18px, transparent 19px),
+                linear-gradient(180deg, #f9d8c6 0%, #efbea7 100%);
+            box-shadow:
+                0 66px 0 -16px rgba(248, 205, 186, 0.98),
+                0 92px 0 -34px rgba(255, 255, 255, 0.72);
+        }
+
+        .hero-copy {
+            text-align: left;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-logo {
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: clamp(2.6rem, 4vw, 4rem);
+            line-height: 0.95;
+            color: #161616;
+            margin-bottom: 8px;
+        }
+
+        .hero-logo .dot {
+            color: var(--vaniday-accent);
+        }
+
+        .hero-tagline {
+            font-size: clamp(1.6rem, 3vw, 3.05rem);
+            line-height: 1.04;
+            font-weight: 700;
+            color: #ff8a81;
+            margin-bottom: 18px;
+        }
+
+        .hero-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 28px;
+            border-radius: 999px;
+            background: linear-gradient(180deg, #f4dc9d 0%, #d8b25f 100%);
+            color: #191919;
+            font-weight: 700;
+            font-size: 1.05rem;
+            box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        .slider-dots {
+            position: absolute;
+            left: 50%;
+            bottom: 12px;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+        }
+
+        .slider-dots span {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #2f2f2f;
+            opacity: 0.35;
+        }
+
+        .slider-dots span.active {
+            opacity: 1;
+        }
+
+        .journey-card {
+            margin-top: -34px;
+            position: relative;
+            z-index: 2;
+            background: #ffffff;
+            border: 1px solid var(--vaniday-border);
+            border-radius: 18px;
+            box-shadow: 0 18px 36px rgba(34, 34, 34, 0.08);
+            padding: 22px 24px;
+        }
+
+        .journey-card .eyebrow {
+            color: var(--vaniday-accent);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-size: 0.82rem;
+            margin-bottom: 8px;
+        }
+
+        .journey-card h1 {
+            font-size: clamp(1.65rem, 2vw, 2.2rem);
+            margin-bottom: 10px;
+        }
+
+        .journey-card p {
+            color: #5d5d5d;
+            margin-bottom: 14px;
+        }
+
+        .journey-flow {
+            font-size: 0.95rem;
+            color: #333;
+            font-weight: 600;
+            background: var(--vaniday-soft);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+        }
+
+        .invoice-cta {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--vaniday-accent);
+            color: #fff;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: 12px 22px;
+        }
+
+        .invoice-cta:hover {
+            background: var(--vaniday-accent-deep);
+        }
+
+        .journey-meta {
+            color: #6c6c6c;
+            font-size: 0.92rem;
+            margin-top: 12px;
+        }
+
+        .feature-strip {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0;
+            padding: 30px 0 10px;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            padding: 18px 18px;
+            border-right: 1px solid var(--vaniday-border);
+        }
+
+        .feature-item:last-child {
+            border-right: 0;
+        }
+
+        .feature-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            border: 2px solid rgba(255, 125, 114, 0.68);
+            color: var(--vaniday-accent);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .feature-title {
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .feature-text {
+            color: var(--vaniday-muted);
+            font-size: 0.95rem;
+        }
+
+        .salon-section {
+            padding: 28px 0 48px;
+        }
+
+        .section-title {
+            font-size: 2rem;
+            color: var(--vaniday-accent);
+            font-weight: 700;
+            margin-bottom: 22px;
+        }
+
+        .salon-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 22px;
+        }
+
+        .salon-card {
+            background: #fff;
+        }
+
+        .salon-photo {
+            height: 255px;
+            border-radius: 2px;
+            margin-bottom: 12px;
+            border: 1px solid #f1f1f1;
+            background-size: cover;
+            background-position: center;
+            overflow: hidden;
+        }
+
+        .salon-photo.one {
+            background:
+                linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0)),
+                linear-gradient(135deg, #2d2525 0%, #704f41 36%, #d6ab63 100%);
+        }
+
+        .salon-photo.two {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0)),
+                linear-gradient(135deg, #8d6f5f 0%, #d0ad95 45%, #3c3a40 100%);
+        }
+
+        .salon-photo.three {
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.2), rgba(255,255,255,0)),
+                linear-gradient(135deg, #d4efe9 0%, #99c1bb 48%, #f4dcc9 100%);
+        }
+
+        .salon-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .salon-location {
+            color: #7a7a7a;
+            margin-bottom: 8px;
+        }
+
+        .salon-rating {
+            color: var(--vaniday-accent);
+            font-weight: 700;
+        }
+
+        .salon-stars {
+            color: #f6b400;
+            letter-spacing: 0.04em;
+        }
+
+        .notes-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+            padding-bottom: 46px;
+        }
+
+        .note-card {
+            border: 1px solid var(--vaniday-border);
+            background: #fff;
+            border-radius: 16px;
+            padding: 20px;
+        }
+
+        .note-card h3 {
+            font-size: 1.06rem;
+            margin-bottom: 10px;
+        }
+
+        .note-card p {
+            color: #666;
+            margin-bottom: 0;
+        }
+
+        @media (max-width: 1100px) {
+            .public-main-header .inner {
+                grid-template-columns: 1fr;
+                padding: 24px 0;
+            }
+
+            .logo-mark {
+                text-align: center;
+            }
+
+            .header-actions {
+                justify-content: center;
+            }
+
+            .public-nav-row .inner {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 12px 0;
+            }
+
+            .hero-inner {
+                grid-template-columns: 1fr;
+            }
+
+            .polaroid-strip {
+                justify-content: center;
+            }
+
+            .hero-copy {
+                text-align: center;
+            }
+
+            .feature-strip,
+            .salon-grid,
+            .notes-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @media (max-width: 767.98px) {
+            .public-top-links .inner {
+                padding: 10px 0;
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .public-search-wrap {
+                max-width: none;
+            }
+
+            .public-main-header .inner {
+                gap: 18px;
+            }
+
+            .nav-links {
+                gap: 14px;
+            }
+
+            .hero-banner {
+                min-height: auto;
+            }
+
+            .hero-inner {
+                padding: 24px 18px 26px;
+            }
+
+            .polaroid-strip {
+                gap: 10px;
+                transform: scale(0.88);
+                transform-origin: top center;
+            }
+
+            .feature-strip,
+            .salon-grid,
+            .notes-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .feature-item {
+                border-right: 0;
+                border-bottom: 1px solid var(--vaniday-border);
+            }
+
+            .feature-item:last-child {
+                border-bottom: 0;
+            }
+
+            .journey-card {
+                margin-top: -12px;
+                padding: 18px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-shell">
+        <div class="top-browser-strip"></div>
+
+        <header class="public-top-links">
+            <div class="content-width inner">
+                <div class="top-link-group">
+                    <span>For partner</span>
+                    <span class="divider">|</span>
+                    <span>Download</span>
+                    <span class="divider">|</span>
+                    <span>Follow us on</span>
+                    <span class="social-pills">
+                        <span class="social-pill">f</span>
+                        <span class="social-pill">ig</span>
+                    </span>
+                </div>
+                <div class="top-link-group">
+                    <span>Your Bookings</span>
+                    <span class="divider">|</span>
+                    <span>Earn cashback</span>
+                </div>
+            </div>
+        </header>
+
+        <section class="public-main-header">
+            <div class="content-width inner">
+                <a href="{% url 'customer-entry' %}" class="logo-mark">VANIDAY<span class="dot">.</span></a>
+
+                <form class="public-search-wrap" action="#" method="get" onsubmit="return false;">
+                    <span class="search-icon">o</span>
+                    <input type="text" placeholder="Find All" aria-label="Find All">
+                    <button type="submit">Search</button>
+                </form>
+
+                <div class="header-actions" aria-label="Customer quick actions">
+                    <div class="header-action">
+                        <span class="header-action-icon">WL</span>
+                        <span class="header-action-label">Wishlist</span>
+                    </div>
+                    <div class="header-action">
+                        <span class="header-action-icon">CT</span>
+                        <span class="header-action-label">Cart</span>
+                    </div>
+                    <div class="header-action">
+                        <span class="header-action-icon">ME</span>
+                        <span class="header-action-label">Profile</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <nav class="public-nav-row" aria-label="Public customer navigation">
+            <div class="content-width inner">
+                <div class="menu-entry">
+                    <span class="menu-bars" aria-hidden="true">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </span>
+                    <span>Menu</span>
+                </div>
+
+                <div class="nav-links">
+                    <a href="#">Services</a>
+                    <a href="#">Products</a>
+                    <a href="#">Magazine</a>
+                    <a href="#">Giftcards</a>
+                    <a href="#">CashBack</a>
+                    <a href="#">Promotions</a>
+                    <a href="{% url 'customer-entry' %}" class="invoice-link">Customer Invoice Access</a>
+                </div>
+
+                <div class="help-link">24/7 Live Chat Help</div>
+            </div>
+        </nav>
+
+        <main>
+            <section class="hero-area">
+                <div class="content-width">
+                    <div class="hero-banner">
+                        <div class="hero-inner">
+                            <div class="polaroid-strip" aria-hidden="true">
+                                <div class="polaroid"><div class="polaroid-photo"></div></div>
+                                <div class="polaroid"><div class="polaroid-photo"></div></div>
+                                <div class="polaroid"><div class="polaroid-photo"></div></div>
+                            </div>
+
+                            <div class="hero-copy">
+                                <div class="hero-logo">VANIDAY<span class="dot">.</span></div>
+                                <div class="hero-tagline">DISCOVER.<br>BOOK. GLOW.</div>
+                                <div class="hero-button">BOOK NOW!</div>
+                            </div>
+                        </div>
+                        <div class="slider-dots" aria-hidden="true">
+                            <span class="active"></span>
+                            <span></span>
+                        </div>
+                    </div>
+
+                    <div class="journey-card">
+                        <div class="row g-4 align-items-center">
+                            <div class="col-lg-8">
+                                <div class="eyebrow">Access Your Invoice Portal</div>
+                                <h1>Welcome to Vaniday</h1>
+                                <p>
+                                    Beauty, wellness, and customer invoice access. Customers with invoices can view,
+                                    download, and pay invoices through the Vaniday invoice portal.
+                                </p>
+                                <div class="journey-flow">
+                                    Vaniday public customer page -> View My Invoices -> Login -> Customer Invoice Dashboard
+                                </div>
+                            </div>
+                            <div class="col-lg-4 text-lg-end">
+                                <a href="{% url 'login' %}" class="invoice-cta">View My Invoices</a>
+                                <div class="journey-meta">
+                                    Use this if you have received an invoice from Vaniday and need invoice access.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="feature-strip">
+                        <div class="feature-item">
+                            <div class="feature-icon">BK</div>
+                            <div>
+                                <div class="feature-title">Book</div>
+                                <div class="feature-text">Beauty and wellness service</div>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-icon">BY</div>
+                            <div>
+                                <div class="feature-title">Buy</div>
+                                <div class="feature-text">Beauty and wellness products</div>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-icon">DS</div>
+                            <div>
+                                <div class="feature-title">Discover</div>
+                                <div class="feature-text">Latest trends and tips</div>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-icon">CN</div>
+                            <div>
+                                <div class="feature-title">Connect</div>
+                                <div class="feature-text">Engaged community</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="salon-section">
+                <div class="content-width">
+                    <div class="section-title">Salon of the week</div>
+
+                    <div class="salon-grid">
+                        <article class="salon-card">
+                            <div class="salon-photo one"></div>
+                            <div class="salon-name">Highbrow - Capitol Piazza</div>
+                            <div class="salon-location">Downtown, City Hall, Clarke Quay, North Bridge</div>
+                            <div class="salon-rating">4.4 <span class="salon-stars">★★★★★</span> <span style="color:#777;font-weight:400;">(149)</span></div>
+                        </article>
+
+                        <article class="salon-card">
+                            <div class="salon-photo two"></div>
+                            <div class="salon-name">THE ORGANIC ROOM SG</div>
+                            <div class="salon-location">East, Paya Lebar, Eunos, Kembangan</div>
+                            <div class="salon-rating">4.9 <span class="salon-stars">★★★★★</span> <span style="color:#777;font-weight:400;">(700)</span></div>
+                        </article>
+
+                        <article class="salon-card">
+                            <div class="salon-photo three"></div>
+                            <div class="salon-name">Aresa Nails</div>
+                            <div class="salon-location">East, Marine Parade, East Coast</div>
+                            <div class="salon-rating">4.8 <span class="salon-stars">★★★★★</span> <span style="color:#777;font-weight:400;">(327)</span></div>
+                        </article>
+                    </div>
+                </div>
+            </section>
+
+            <section>
+                <div class="content-width notes-grid">
+                    <div class="note-card">
+                        <h3>Internal vs external distinction</h3>
+                        <p>
+                            Customers use this public-facing entry point. Staff, Finance, HR, and Admin users continue
+                            using the internal Vaniday Operations Portal.
+                        </p>
+                    </div>
+                    <div class="note-card">
+                        <h3>Prototype note</h3>
+                        <p>
+                            This is a live prototype page created for the FYP demonstration. In production, this entry
+                            point would be integrated into Vaniday's actual public website.
+                        </p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

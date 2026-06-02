@@ -181,6 +181,10 @@ def home(request):
     return redirect("login")
 
 
+def customer_entry(request):
+    return render(request, "core/customer_entry.html")
+
+
 @login_required
 def dashboard(request):
     role = get_user_role(request.user)
