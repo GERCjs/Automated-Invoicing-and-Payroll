@@ -14,6 +14,7 @@ from .views import (
     managed_account_role_update,
     managed_account_suspend,
     managed_account_unsuspend,
+    managed_account_verify,
     mass_email_send,
     payment_reminder_run_check,
     payment_reminder_settings_update,
@@ -64,6 +65,12 @@ urlpatterns = [
         "admin-dashboard/accounts/<int:user_id>/unsuspend/",
         managed_account_unsuspend,
         name="managed-account-unsuspend",
+    ),
+    # Manually mark an unverified account as verified for admin/testing.
+    path(
+        "admin-dashboard/accounts/<int:user_id>/verify/",
+        managed_account_verify,
+        name="managed-account-verify",
     ),
     # Resend a verification email for an account.
     path(

@@ -191,7 +191,41 @@ class AccountsPhaseOneTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Unverified")
+        self.assertContains(response, "Verify")
         self.assertNotContains(response, "Resend Verification")
+
+    def test_admin_can_manually_verify_unverified_account(self):
+        admin = User.objects.create_user(username="manual_verify_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+        target = User.objects.create_user(
+            username="manual_verify_target",
+            email="manual_verify_target@vaniday.com",
+            password="TempPass123!",
+        )
+        target.role_profile.role = CUSTOMER
+        target.role_profile.save(update_fields=["role", "updated_at"])
+        target.is_active = False
+        target.save(update_fields=["is_active"])
+        token = EmailVerificationToken.issue_for_user(target)
+
+        self.client.login(username="manual_verify_admin", password="TempPass123!")
+        response = self.client.post(reverse("managed-account-verify", args=[target.id]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], reverse("admin-dashboard"))
+        target.refresh_from_db()
+        token.refresh_from_db()
+        self.assertTrue(target.is_active)
+        self.assertIsNotNone(token.used_at)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="admin.account.manually_verified",
+                user=admin,
+                target_type="user",
+                target_id=str(target.id),
+            ).exists()
+        )
 
     def test_admin_can_resend_verification_email(self):
         admin = User.objects.create_user(username="resend_verify_admin", password="TempPass123!")

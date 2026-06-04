@@ -203,6 +203,12 @@
                                 </form>
                                 {% endif %}
                                 {% endif %}
+                                {% if managed_user.is_unverified and managed_user.can_be_verified %}
+                                <form method="post" action="{% url 'managed-account-verify' managed_user.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Verify</button>
+                                </form>
+                                {% endif %}
                                 {% if managed_user.can_be_managed %}
                                 <a href="{% url 'managed-account-password-update' managed_user.id %}" class="btn btn-sm btn-outline-secondary">Password</a>
                                 <form method="post" action="{% url 'managed-account-delete' managed_user.id %}">

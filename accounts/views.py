@@ -232,6 +232,20 @@ def _can_suspend_target(actor, target_user):
     return True
 
 
+def _can_verify_target(actor, target_user):
+    # Prevent users from manually verifying themselves.
+    if actor == target_user:
+        return False
+    target_role = get_user_role(target_user)
+    # SuperAdmin accounts are protected from this management flow.
+    if target_role == SUPERADMIN:
+        return False
+    # Admins cannot verify other Admin accounts.
+    if get_user_role(actor) == ADMIN and target_role == ADMIN:
+        return False
+    return True
+
+
 def _dashboard_context(request, account_form=None, reminder_form=None, mass_email_form=None):
     # Collect filters from the admin dashboard URL.
     selected_role = request.GET.get("role", "").strip()
@@ -289,6 +303,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         )
         managed_user.can_be_managed = _can_manage_target(request.user, managed_user)
         managed_user.can_be_suspended = _can_suspend_target(request.user, managed_user)
+        managed_user.can_be_verified = _can_verify_target(request.user, managed_user)
         managed_user.is_suspended = managed_user.role_profile.is_suspended
         managed_user.has_pending_verification = (
             not managed_user.is_suspended
@@ -538,6 +553,53 @@ def managed_account_unsuspend(request, user_id):
         ip_address=get_client_ip(request),
     )
     messages.success(request, f"Unsuspended account {target_user.username}.")
+    return redirect("admin-dashboard")
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def managed_account_verify(request, user_id):
+    # Manual verification is an admin/testing override and must be submitted by POST.
+    if request.method != "POST":
+        return redirect("admin-dashboard")
+
+    target_user = get_object_or_404(User.objects.select_related("role_profile"), pk=user_id)
+    if not _can_verify_target(request.user, target_user):
+        messages.error(request, "You cannot verify this account.")
+        return redirect("admin-dashboard")
+    if target_user.role_profile.is_suspended:
+        messages.error(request, "Cannot verify a suspended account.")
+        return redirect("admin-dashboard")
+
+    pending_tokens = EmailVerificationToken.objects.filter(
+        user=target_user,
+        used_at__isnull=True,
+    )
+    if target_user.is_active and not pending_tokens.exists():
+        messages.info(request, f"{target_user.username} is already verified.")
+        return redirect("admin-dashboard")
+
+    now = timezone.now()
+    was_active = target_user.is_active
+    token_count = pending_tokens.update(used_at=now)
+    if not target_user.is_active:
+        target_user.is_active = True
+        target_user.save(update_fields=["is_active"])
+
+    log_event(
+        action="admin.account.manually_verified",
+        user=request.user,
+        target_type="user",
+        target_id=str(target_user.id),
+        metadata={
+            "username": target_user.username,
+            "role": get_user_role(target_user),
+            "was_active": was_active,
+            "pending_tokens_closed": token_count,
+        },
+        ip_address=get_client_ip(request),
+    )
+    messages.success(request, f"Verified account {target_user.username}.")
     return redirect("admin-dashboard")
 
 
