@@ -4,7 +4,6 @@
 
 The project is currently configured to use a shared MySQL database instead of the local SQLite database.
 
-  - Uses simplified business table names such as `customer`, `invoice`, `invoice_item`, `payment`, `employee`, `payroll`, `audit_log`.
 Current database switch:
 
 ```env
