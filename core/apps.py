@@ -50,18 +50,21 @@ class CoreConfig(AppConfig):
                 InvoiceItem._meta.db_table = "invoice_item"
                 InvoiceSourceRow._meta.db_table = "invoice_source_row"
                 PaymentRecord._meta.db_table = "payment"
-                Employee._meta.db_table = "payroll_employee"
-                PayrollBatch._meta.db_table = "payroll_payrollbatch"
-                PayrollEntry._meta.db_table = "payroll_payrollentry"
-                PayslipRecord._meta.db_table = "payroll_paysliprecord"
-                PayrollRecord._meta.db_table = "payroll_payrollrecord"
+                Employee._meta.db_table = "employee"
+                PayrollBatch._meta.db_table = "payroll_details"
+                PayrollEntry._meta.db_table = "payroll"
+                PayslipRecord._meta.db_table = "legacy_payslip_record"
+                PayrollRecord._meta.db_table = "payslip_record"
 
         def should_use_renamed_tables(db_connection):
             import os
 
             db_name = str(db_connection.settings_dict.get("NAME") or "")
+            engine = str(db_connection.settings_dict.get("ENGINE") or "")
+            if engine.endswith("sqlite3"):
+                return False
             if "test" in db_name.lower():
-                # Django test databases are created from migrations that still use auth_* table names.
+                # Django test databases keep auth_* tables but use the current payroll migration names.
                 return False
 
             env_override = os.getenv("USE_RENAMED_TABLES", "").strip().lower()
@@ -70,9 +73,6 @@ class CoreConfig(AppConfig):
             if env_override in {"0", "false", "no", "off"}:
                 return False
 
-            engine = str(db_connection.settings_dict.get("ENGINE") or "")
-            if engine.endswith("sqlite3"):
-                return False
             return "test" not in db_name.lower()
 
         def configure_tables(sender, connection, **kwargs):

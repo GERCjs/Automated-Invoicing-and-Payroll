@@ -12,6 +12,23 @@ The goal is to keep work safe, focused, and sequential (foundation first, then m
 - `QA_GATE.md`: Phase-based quality gate to review the current completed phase before moving forward.
 - `DATABASE_SETUP_NOTES.md`: Shared database setup, migration commands, and ERD table mapping notes.
 
+## Current test workflow
+Use the isolated SQLite test environment for routine verification. This avoids touching shared MySQL data and now ignores renamed MySQL table mapping automatically in SQLite mode.
+
+```powershell
+$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py check
+$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py test
+```
+
+Focused suites used during hardening:
+
+```powershell
+$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py test accounts invoicing payments --verbosity 1
+$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py test payroll reports notifications imports core --verbosity 1
+```
+
+For MySQL test runs, use a dedicated disposable test database, an approved cleanup policy, or `--keepdb` when appropriate. Do not let Django delete or reuse an unknown shared test database interactively.
+
 ## How to use (exact steps)
 1. Open `PROMPTS.md`.
 2. Choose one prompt key from the key map:

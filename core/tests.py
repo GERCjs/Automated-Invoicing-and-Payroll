@@ -13,7 +13,7 @@ class CorePhaseOneTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Welcome to Vaniday")
-        self.assertContains(response, "Access Invoice Portal")
+        self.assertContains(response, "Access Your Invoice Portal")
         self.assertContains(response, reverse("login"))
 
     def test_login_page_has_customer_invoice_access_link(self):

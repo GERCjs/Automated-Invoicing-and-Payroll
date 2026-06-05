@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 staticfiles/
 *.log
+EDGE_TEST_AGENT.md
+EDGE_TEST_FINDINGS.md

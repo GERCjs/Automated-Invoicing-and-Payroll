@@ -16,6 +16,7 @@ The system should stay clean, reliable, maintainable, and scalable. Prioritize c
 
 ### Verified
 - `python manage.py check` passes with no system check issues.
+- The isolated SQLite full test suite passes when run with `USE_SQLITE=true`.
 - The project is a Django app using the expected app split:
   - `accounts`
   - `core`
@@ -29,7 +30,7 @@ The system should stay clean, reliable, maintainable, and scalable. Prioritize c
   - `static`
 
 ### Verification Gap
-- A full `python manage.py test` run timed out after about two minutes during the latest handoff check. Do not mark the project fully validated until tests are run successfully or narrowed down and fixed.
+- Default MySQL test runs need a dedicated disposable test database, an approved cleanup policy, or `--keepdb`; do not interactively delete an unknown shared test database.
 
 ### Implemented Or Partly Implemented
 - Foundation project structure, Django settings, templates, static assets, and app routing.
@@ -235,7 +236,7 @@ Follow these rules at all times:
 ## Current Priority Order
 The next agent should work in this order:
 
-1. Run focused verification and identify failing or slow tests.
+1. Run focused verification and keep the full test suite passing.
 2. Review permissions for admin, finance, HR, staff, customer, payroll, payment, and public invoice routes.
 3. Verify invoicing totals, status transitions, email sending, public view tokens, and exports.
 4. Verify payroll upload validation, employee access restrictions, and payslip generation.
@@ -388,8 +389,8 @@ Mention any assumption, limitation, or follow-up need.
 Work on Phase 12 only unless the user gives a narrower bug or feature request.
 
 Do the following first:
-- investigate why the full test run timed out
 - run focused app-level tests where useful
+- keep the full isolated SQLite suite passing
 - fix blocking test failures or slow tests
 - review route permissions and sensitive data access
 - verify Stripe webhook/payment idempotency

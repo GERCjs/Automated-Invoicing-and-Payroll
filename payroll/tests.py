@@ -4,6 +4,7 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core import mail
+from django.db import connection
 from django.test import TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
@@ -16,6 +17,41 @@ from notifications.models import EmailDeliveryLog
 from payroll.models import Employee, PayrollRecord
 
 
+class PayrollTestEnvironmentTests(TestCase):
+    def test_test_database_uses_migrated_payroll_tables(self):
+        user_model = get_user_model()
+        hr_user = user_model.objects.create_user(username="payroll_fixture_hr", password="TestOnlyPass123!")
+        UserRole.objects.filter(user=hr_user).update(role=HR)
+
+        table_names = set(connection.introspection.table_names())
+        self.assertIn("employee", table_names)
+        self.assertIn("payslip_record", table_names)
+
+        employee = Employee.objects.create(
+            employee_code="STF-999999",
+            first_name="Fixture",
+            last_name="Tester",
+            email="fixture.payroll@example.com",
+            hire_date=date(2026, 1, 1),
+            base_salary=1000,
+            created_by=hr_user,
+        )
+        payroll_record = PayrollRecord.objects.create(
+            employee_name="Fixture Tester",
+            employee_id=employee.employee_code,
+            basic_salary=1000,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=200,
+            net_salary=850,
+            payment_date=date(2026, 6, 1),
+            created_by=hr_user,
+        )
+
+        self.assertEqual(Employee.objects.get(pk=employee.pk).employee_code, "STF-999999")
+        self.assertEqual(PayrollRecord.objects.get(pk=payroll_record.pk).employee_id, "STF-999999")
+
+
 class PayrollUploadPreviewTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -23,7 +59,7 @@ class PayrollUploadPreviewTests(TestCase):
         UserRole.objects.filter(user=self.user).update(role=HR)
         self.client.login(username="hr1", password="pass12345")
         Employee.objects.create(
-            employee_code="EMP001",
+            employee_code="STF-000001",
             first_name="Alex",
             last_name="Tan",
             email="alex@example.com",
@@ -31,7 +67,7 @@ class PayrollUploadPreviewTests(TestCase):
             base_salary=3000,
         )
         Employee.objects.create(
-            employee_code="EMP002",
+            employee_code="STF-000002",
             first_name="Jamie",
             last_name="Lim",
             email="jamie@example.com",
@@ -46,8 +82,7 @@ class PayrollUploadPreviewTests(TestCase):
             [
                 "employee_code",
                 "employee_name",
-                "employee_age",
-                "primary_work_location",
+                "employee_birthofdate",
                 "working_days",
                 "no_pay_leave_days",
                 "basic_salary",
@@ -59,7 +94,7 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["EMP001", "Alex Tan", 34, "Raffles", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Test"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Test"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -76,8 +111,7 @@ class PayrollUploadPreviewTests(TestCase):
             [
                 "employee_code",
                 "employee_name",
-                "employee_age",
-                "primary_work_location",
+                "employee_birthofdate",
                 "working_days",
                 "no_pay_leave_days",
                 "basic_salary",
@@ -89,8 +123,8 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["EMP001", "Alex Tan", 34, "Raffles", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Row 1"])
-        sheet.append(["EMP002", "Jamie Lim", 29, "Somerset", 26, 0, 3200, 50, 120, 450, 100, 20, "Row 2"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Row 1"])
+        sheet.append(["STF-000002", "Jamie Lim", "01-01-1995", 26, 0, 3200, 50, 120, 450, 100, 20, "Row 2"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -107,8 +141,7 @@ class PayrollUploadPreviewTests(TestCase):
             [
                 "employee_code",
                 "employee_name",
-                "employee_age",
-                "primary_work_location",
+                "employee_birthofdate",
                 "working_days",
                 "no_pay_leave_days",
                 "basic_salary",
@@ -120,7 +153,7 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["EMP001", "Alex Tan", 34, "Raffles", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -154,7 +187,7 @@ class PayrollUploadPreviewTests(TestCase):
         self.assertEqual(save_response.status_code, 302)
         self.assertEqual(PayrollRecord.objects.count(), 1)
         record = PayrollRecord.objects.first()
-        self.assertEqual(record.employee_id, "EMP001")
+        self.assertEqual(record.employee_id, "STF-000001")
         self.assertEqual(record.payment_date, date(2026, 5, 24))
 
     def test_confirm_save_creates_multiple_payroll_records(self):
@@ -171,7 +204,7 @@ class PayrollUploadPreviewTests(TestCase):
     def test_confirm_save_skips_duplicate_employee_and_payment_date(self):
         PayrollRecord.objects.create(
             employee_name="Alex Tan",
-            employee_id="EMP001",
+            employee_id="STF-000001",
             basic_salary=3000,
             allowances=1040.90,
             deductions=139.45,

@@ -521,23 +521,19 @@ Phase 12 is complete only when:
 Start here first unless manually changed.
 
 ## Active Phase
-Phase 1 â€” Foundation Setup
+Phase 12 - Hardening and Cleanup
 
 ## Exact Instruction
-Work on Phase 1 only.
+Work on Phase 12 only unless the user gives a narrower bug or feature request.
 
-Focus only on:
-- Django project initialization
-- MySQL configuration
-- environment variable setup
-- base apps structure
-- authentication
-- role-based access control
-- Bootstrap base layout
-- protected dashboard page
-- audit log model
+Focus on:
+- verification and full-suite test stability
+- RBAC and sensitive route review
+- payroll, invoicing, payments, imports, notifications, and reports hardening
+- root-cause fixes for confirmed defects
+- setup, testing, and handover documentation
 
-Do not start later phases yet.
+Do not restart Phase 1. Earlier phases are already implemented and should only be revisited when testing or inspection proves a defect.
 
 ---
 

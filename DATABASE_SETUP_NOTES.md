@@ -73,16 +73,16 @@ SQLite mode uses:
 db.sqlite3
 ```
 
-SQLite/test-style mappings keep Django's default auth tables and older payroll table names, such as:
+SQLite/test-style mappings keep Django's default auth tables while using the current migrated business table names, such as:
 
 - `auth_user`
 - `auth_group`
 - `auth_permission`
-- `payroll_employee`
-- `payroll_payrollbatch`
-- `payroll_payrollentry`
-- `payroll_paysliprecord`
-- `payroll_payrollrecord`
+- `employee`
+- `payroll_details`
+- `payroll`
+- `legacy_payslip_record`
+- `payslip_record`
 
 Do not manually rename Django system tables such as `auth_*`, `django_*`, or session tables unless the whole team is doing a controlled migration reset.
 
@@ -270,11 +270,11 @@ Use these names when explaining the ERD or system architecture.
 - Invoice Source Row (`invoice_source_row`): stored raw invoice import data.
 - Payment (`payment`): manual or Stripe payment records linked to invoices.
 - Stripe Webhook Event (`payments_stripewebhookevent`): Stripe event processing history.
-- Employee (`employee` in renamed MySQL mode, `payroll_employee` in SQLite/test mode): employee master data.
-- Payroll Batch (`payroll_details` in renamed MySQL mode, `payroll_payrollbatch` in SQLite/test mode): payroll run headers.
-- Payroll Entry (`payroll` in renamed MySQL mode, `payroll_payrollentry` in SQLite/test mode): payroll rows per employee and batch.
-- Payslip Document (`legacy_payslip_record` in renamed MySQL mode, `payroll_paysliprecord` in SQLite/test mode): issued payslip artifact metadata.
-- Payroll Record (`payslip_record` in renamed MySQL mode, `payroll_payrollrecord` in SQLite/test mode): structured payroll record snapshots.
+- Employee (`employee`): employee master data.
+- Payroll Batch (`payroll_details`): payroll run headers.
+- Payroll Entry (`payroll`): payroll rows per employee and batch.
+- Payslip Document (`legacy_payslip_record`): issued payslip artifact metadata.
+- Payroll Record (`payslip_record`): structured payroll record snapshots.
 - Email Log (`email_log`): outbound email delivery tracking.
 - Payment Reminder Settings (`notifications_paymentremindersettings`): reminder and mass-email controls.
 - Import Job (`import_job`): import batch metadata.
