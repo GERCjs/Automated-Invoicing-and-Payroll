@@ -115,6 +115,62 @@ class InvoicingMvpTests(TestCase):
             ).exists()
         )
 
+    def test_invoice_create_rejects_zero_unit_price(self):
+        self.client.login(username="finance_u", password="TempPass123!")
+        issue_date = timezone.localdate()
+        due_date = issue_date + timedelta(days=15)
+
+        response = self.client.post(
+            reverse("invoice-create"),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": issue_date,
+                "due_date": due_date,
+                "currency": "SGD",
+                "notes": "Invalid invoice",
+                "items-TOTAL_FORMS": "1",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-description": "Service Fee",
+                "items-0-quantity": "2",
+                "items-0-unit_price": "0.00",
+                "items-0-tax_rate": "9.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Unit price must be greater than 0.")
+        self.assertFalse(Invoice.objects.exists())
+
+    def test_invoice_create_rejects_negative_unit_price(self):
+        self.client.login(username="finance_u", password="TempPass123!")
+        issue_date = timezone.localdate()
+        due_date = issue_date + timedelta(days=15)
+
+        response = self.client.post(
+            reverse("invoice-create"),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": issue_date,
+                "due_date": due_date,
+                "currency": "SGD",
+                "notes": "Invalid invoice",
+                "items-TOTAL_FORMS": "1",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-description": "Service Fee",
+                "items-0-quantity": "2",
+                "items-0-unit_price": "-1.00",
+                "items-0-tax_rate": "9.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Unit price must be greater than 0.")
+        self.assertFalse(Invoice.objects.exists())
+
     def test_finance_can_open_customer_create_page_from_invoice_flow(self):
         self.client.login(username="finance_u", password="TempPass123!")
 

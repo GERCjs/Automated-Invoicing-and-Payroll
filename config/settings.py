@@ -138,11 +138,11 @@ REGISTERED_OFFICE_TEXT = os.getenv(
 INVOICE_PAYMENT_TERM_DAYS = int(os.getenv("INVOICE_PAYMENT_TERM_DAYS", "30"))
 INVOICE_BANK_TEXT = os.getenv(
     "INVOICE_BANK_TEXT",
-    "Vaniday Singapore Pte Ltd\n"
-    "Bank: Oversea-Chinese Banking Corporation Limited (OCBC)\n"
-    "BIC/SWIFT: OCBCSGSGXXX\n"
-    "Account Number: 695105486001\n"
-    "Payment via PayNow to 201535968M",
+    f"{COMPANY_NAME}\n"
+    "Bank: DBS\n"
+    "BIC/SWIFT: DBSSSGSG\n"
+    "Account Number: 001-234567-8\n"
+    "Payment reference: use the bank transfer reference shown on the invoice.",
 )
 INVOICE_PAYMENT_NOTES = os.getenv(
     "INVOICE_PAYMENT_NOTES",
@@ -164,5 +164,15 @@ EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "20"))
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+BANK_TRANSFER_ACCOUNT_NAME = os.getenv("BANK_TRANSFER_ACCOUNT_NAME", COMPANY_NAME)
+BANK_TRANSFER_BANK_NAME = os.getenv("BANK_TRANSFER_BANK_NAME", "DBS")
+BANK_TRANSFER_ACCOUNT_NUMBER = os.getenv("BANK_TRANSFER_ACCOUNT_NUMBER", "001-234567-8")
+BANK_TRANSFER_PAYNOW_ID = os.getenv("BANK_TRANSFER_PAYNOW_ID", "")
+BANK_TRANSFER_BIC = os.getenv("BANK_TRANSFER_BIC", "DBSSSGSG")
+BANK_TRANSFER_INSTRUCTIONS = os.getenv(
+    "BANK_TRANSFER_INSTRUCTIONS",
+    "Enter the payment reference in your bank transfer comments/reference field.",
+)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

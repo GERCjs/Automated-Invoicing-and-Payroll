@@ -10,6 +10,12 @@ urlpatterns = [
     path("checkout/customer/<int:pk>/", views.checkout_customer_invoice, name="payment-checkout-customer"),
     # Finance/admin users post here to refund an invoice payment.
     path("refund/invoice/<int:pk>/", views.refund_invoice_payment, name="payment-refund-invoice"),
+    # Finance/admin users post here after verifying a bank transfer reference externally.
+    path(
+        "bank-transfer/confirm/invoice/<int:pk>/",
+        views.confirm_bank_transfer_payment_for_invoice,
+        name="payment-bank-transfer-confirm",
+    ),
     # Stripe sends the customer back here after checkout succeeds.
     path("checkout/success/", views.checkout_success, name="payment-checkout-success"),
     # Stripe sends the customer back here if checkout is cancelled.

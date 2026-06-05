@@ -61,6 +61,28 @@
                 </form>
             </div>
         </div>
+        {% if bank_transfer_payment %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <h2 class="h6">Bank Transfer</h2>
+                <p class="mb-1"><strong>Reference:</strong> <code>{{ bank_transfer_payment.payment_reference }}</code></p>
+                <p class="mb-2"><strong>Amount:</strong> {{ bank_transfer_payment.currency }} {{ bank_transfer_payment.amount }}</p>
+                {% if bank_transfer_details.account_name %}
+                <p class="mb-1"><strong>Account Name:</strong> {{ bank_transfer_details.account_name }}</p>
+                {% endif %}
+                {% if bank_transfer_details.bank_name %}
+                <p class="mb-1"><strong>Bank:</strong> {{ bank_transfer_details.bank_name }}</p>
+                {% endif %}
+                {% if bank_transfer_details.account_number %}
+                <p class="mb-2"><strong>Account Number:</strong> {{ bank_transfer_details.account_number }}</p>
+                {% endif %}
+                <form method="post" action="{% url 'payment-bank-transfer-confirm' invoice.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-success btn-sm">Confirm Bank Transfer Paid</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
         <div class="card">
             <div class="card-body">
                 <h2 class="h6">Reminder Summary</h2>

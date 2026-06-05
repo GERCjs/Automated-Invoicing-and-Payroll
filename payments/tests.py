@@ -10,7 +10,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.roles import CUSTOMER, FINANCE
+from accounts.roles import CUSTOMER, FINANCE, STAFF
 from core.models import AuditLog
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
@@ -43,6 +43,13 @@ class StripePaymentsPhaseTests(TestCase):
         )
         self.finance_user.role_profile.role = FINANCE
         self.finance_user.role_profile.save()
+        self.staff_user = User.objects.create_user(
+            username="staff_stripe",
+            password="TempPass123!",
+            email="staff@stripe-test.com",
+        )
+        self.staff_user.role_profile.role = STAFF
+        self.staff_user.role_profile.save()
 
         self.customer = Customer.objects.create(
             name="Stripe Test Customer",
@@ -149,6 +156,173 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("customer-invoice-detail", args=[self.invoice.pk]))
         create_checkout_mock.assert_not_called()
+
+    @override_settings(
+        BANK_TRANSFER_ACCOUNT_NAME="Automated Billing Pte Ltd",
+        BANK_TRANSFER_BANK_NAME="DBS Bank",
+        BANK_TRANSFER_ACCOUNT_NUMBER="001-234567-8",
+        BANK_TRANSFER_PAYNOW_ID="201535968M",
+        BANK_TRANSFER_BIC="DBSSSGSG",
+        BANK_TRANSFER_INSTRUCTIONS="Use the reference exactly as shown.",
+    )
+    def test_public_bank_transfer_reference_is_stable_per_invoice(self):
+        first_response = self.client.get(reverse("invoice-public-view", args=[self.invoice.public_view_token]))
+        payment_record = PaymentRecord.objects.get(
+            invoice=self.invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+        )
+        second_response = self.client.get(reverse("invoice-public-view", args=[self.invoice.public_view_token]))
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertContains(first_response, "Bank Transfer")
+        self.assertContains(first_response, "DBS Bank")
+        self.assertContains(first_response, "001-234567-8")
+        self.assertContains(first_response, payment_record.payment_reference)
+        self.assertContains(second_response, payment_record.payment_reference)
+        self.assertEqual(
+            PaymentRecord.objects.filter(
+                invoice=self.invoice,
+                provider=PaymentRecord.PROVIDER_MANUAL,
+                status=PaymentRecord.STATUS_PENDING,
+            ).count(),
+            1,
+        )
+
+    @override_settings(BANK_TRANSFER_BANK_NAME="DBS Bank")
+    def test_customer_invoice_detail_shows_bank_transfer_reference(self):
+        self.client.login(username="customer_stripe", password="TempPass123!")
+
+        response = self.client.get(reverse("customer-invoice-detail", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        payment_record = PaymentRecord.objects.get(
+            invoice=self.invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+        )
+        self.assertContains(response, "Bank Transfer")
+        self.assertContains(response, payment_record.payment_reference)
+
+    @override_settings(
+        BANK_TRANSFER_BANK_NAME="",
+        BANK_TRANSFER_ACCOUNT_NUMBER="",
+        BANK_TRANSFER_BIC="",
+    )
+    def test_bank_transfer_uses_default_dbs_account_when_env_values_are_blank(self):
+        response = self.client.get(reverse("invoice-public-view", args=[self.invoice.public_view_token]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Bank Transfer")
+        self.assertContains(response, "DBS")
+        self.assertContains(response, "001-234567-8")
+        self.assertContains(response, "DBSSSGSG")
+
+    def test_non_payable_invoice_does_not_show_bank_transfer_instructions(self):
+        for status in [Invoice.STATUS_DRAFT, Invoice.STATUS_PAID, Invoice.STATUS_REFUNDED]:
+            with self.subTest(status=status):
+                PaymentRecord.objects.filter(invoice=self.invoice).delete()
+                self.invoice.status = status
+                self.invoice.save(update_fields=["status", "updated_at"])
+
+                response = self.client.get(reverse("invoice-public-view", args=[self.invoice.public_view_token]))
+
+                self.assertEqual(response.status_code, 200)
+                self.assertNotContains(response, "Bank Transfer")
+                self.assertFalse(
+                    PaymentRecord.objects.filter(
+                        invoice=self.invoice,
+                        provider=PaymentRecord.PROVIDER_MANUAL,
+                    ).exists()
+                )
+
+    def test_internal_invoice_detail_shows_bank_transfer_confirmation_action(self):
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-detail", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        payment_record = PaymentRecord.objects.get(
+            invoice=self.invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+        )
+        self.assertContains(response, "Confirm Bank Transfer Paid")
+        self.assertContains(response, payment_record.payment_reference)
+        self.assertContains(response, "DBS")
+        self.assertContains(response, "001-234567-8")
+
+    def test_finance_can_confirm_bank_transfer_and_mark_invoice_paid(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-ABC123",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("invoice-detail", args=[self.invoice.pk]))
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
+        self.assertIsNotNone(payment_record.paid_at)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.bank_transfer.confirmed",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
+
+    def test_customer_and_staff_cannot_confirm_bank_transfer(self):
+        PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-DENIED",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+        )
+
+        self.client.login(username="customer_stripe", password="TempPass123!")
+        customer_response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+        self.client.logout()
+        self.client.login(username="staff_stripe", password="TempPass123!")
+        staff_response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+
+        self.assertEqual(customer_response.status_code, 403)
+        self.assertEqual(staff_response.status_code, 403)
+        self.invoice.refresh_from_db()
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+
+    def test_confirm_already_paid_manual_payment_does_not_duplicate_records(self):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-PAID",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            paid_at=timezone.now(),
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            PaymentRecord.objects.filter(
+                invoice=self.invoice,
+                provider=PaymentRecord.PROVIDER_MANUAL,
+            ).count(),
+            1,
+        )
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",

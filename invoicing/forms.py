@@ -28,9 +28,15 @@ class InvoiceItemForm(forms.ModelForm):
         widgets = {
             "description": forms.TextInput(attrs={"class": "form-control"}),
             "quantity": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0.01"}),
-            "unit_price": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "unit_price": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0.01"}),
             "tax_rate": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0", "max": "100"}),
         }
+
+    def clean_unit_price(self):
+        unit_price = self.cleaned_data.get("unit_price")
+        if unit_price is not None and unit_price <= 0:
+            raise forms.ValidationError("Unit price must be greater than 0.")
+        return unit_price
 
 
 InvoiceItemFormSet = inlineformset_factory(

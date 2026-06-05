@@ -31,6 +31,7 @@ from .services import (
     WEBHOOK_EVENT_REFUND_FAILED,
     WEBHOOK_EVENT_REFUND_UPDATED,
     construct_webhook_event,
+    confirm_bank_transfer_payment,
     create_full_refund_for_payment,
     create_checkout_for_invoice,
     finalize_checkout_success_from_redirect,
@@ -304,6 +305,71 @@ def checkout_customer_invoice(request, pk):
         cancel_url=_checkout_cancel_url_for_customer(request, pk),
         fallback_url=reverse("customer-invoice-detail", args=[pk]),
     )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+@require_POST
+def confirm_bank_transfer_payment_for_invoice(request, pk):
+    invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
+    payment_record = (
+        PaymentRecord.objects.select_related("invoice")
+        .filter(
+            invoice=invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+        )
+        .order_by("created_at")
+        .first()
+    )
+    if payment_record is None:
+        messages.error(request, "No pending bank transfer reference was found for this invoice.")
+        return redirect("invoice-detail", pk=invoice.pk)
+
+    try:
+        payment_record, invoice_status_before, changed = confirm_bank_transfer_payment(
+            payment_record=payment_record,
+            confirmed_by=request.user,
+        )
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("invoice-detail", pk=invoice.pk)
+
+    log_event(
+        action="payment.bank_transfer.confirmed",
+        user=request.user,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata={
+            "invoice_number": invoice.invoice_number,
+            "payment_reference": payment_record.payment_reference,
+            "payment_status": payment_record.status,
+            "invoice_status_before": invoice_status_before,
+            "invoice_status_after": Invoice.STATUS_PAID,
+            "changed": changed,
+        },
+        ip_address=get_client_ip(request),
+    )
+    if invoice_status_before != Invoice.STATUS_PAID:
+        log_event(
+            action="payment.invoice.marked_paid",
+            user=request.user,
+            target_type="invoice",
+            target_id=str(invoice.id),
+            metadata={
+                "invoice_number": invoice.invoice_number,
+                "previous_status": invoice_status_before,
+                "new_status": Invoice.STATUS_PAID,
+                "payment_reference": payment_record.payment_reference,
+                "source": "bank_transfer_confirmation",
+            },
+            ip_address=get_client_ip(request),
+        )
+    messages.success(
+        request,
+        f"Bank transfer confirmed for invoice {invoice.invoice_number}.",
+    )
+    return redirect("invoice-detail", pk=invoice.pk)
 
 
 @login_required

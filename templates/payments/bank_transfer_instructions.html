@@ -1,0 +1,34 @@
+{% if bank_transfer_payment and bank_transfer_details %}
+<div class="card mb-3">
+    <div class="card-header">Bank Transfer</div>
+    <div class="card-body">
+        <p class="mb-2">Transfer the invoice total and enter this reference in your bank transfer comments.</p>
+        <div class="row g-2">
+            <div class="col-md-6">
+                <p class="mb-1"><strong>Reference:</strong> <code>{{ bank_transfer_payment.payment_reference }}</code></p>
+                <p class="mb-1"><strong>Amount:</strong> {{ bank_transfer_payment.currency }} {{ bank_transfer_payment.amount }}</p>
+                {% if bank_transfer_details.account_name %}
+                <p class="mb-1"><strong>Account Name:</strong> {{ bank_transfer_details.account_name }}</p>
+                {% endif %}
+                {% if bank_transfer_details.bank_name %}
+                <p class="mb-1"><strong>Bank:</strong> {{ bank_transfer_details.bank_name }}</p>
+                {% endif %}
+            </div>
+            <div class="col-md-6">
+                {% if bank_transfer_details.account_number %}
+                <p class="mb-1"><strong>Account Number:</strong> {{ bank_transfer_details.account_number }}</p>
+                {% endif %}
+                {% if bank_transfer_details.paynow_id %}
+                <p class="mb-1"><strong>PayNow ID:</strong> {{ bank_transfer_details.paynow_id }}</p>
+                {% endif %}
+                {% if bank_transfer_details.bic %}
+                <p class="mb-1"><strong>BIC / SWIFT:</strong> {{ bank_transfer_details.bic }}</p>
+                {% endif %}
+                {% if bank_transfer_details.instructions %}
+                <p class="mb-0 text-muted">{{ bank_transfer_details.instructions }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}

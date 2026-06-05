@@ -79,10 +79,10 @@
                     <td class="text-end">
                         <div class="d-flex justify-content-end gap-1 flex-wrap">
                             {% if invoice.status == "sent" or invoice.status == "viewed" or invoice.status == "overdue" %}
-                            <form method="post" action="{% url 'payment-checkout-customer' invoice.pk %}" class="d-inline">
+                           <!--<form method="post" action="{% url 'payment-checkout-customer' invoice.pk %}" class="d-inline">
                                 {% csrf_token %}
                                 <button type="submit" class="btn btn-sm btn-success">Pay Now</button>
-                            </form>
+                            </form> --> 
                             {% endif %}
                             <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Details</a>
                             <a href="{% url 'customer-invoice-download-pdf' invoice.pk %}" class="btn btn-sm btn-outline-secondary">Download PDF</a>

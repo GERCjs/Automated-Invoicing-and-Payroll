@@ -18,6 +18,7 @@ from core.audit import get_client_ip, log_event
 from imports.models import ImportJob, ImportRowError
 from notifications.models import EmailDeliveryLog
 from notifications.services import get_invoice_reminder_history, send_invoice_email
+from payments.services import get_bank_transfer_details, get_or_create_bank_transfer_payment
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
 from .forms import CustomerCreateForm, InvoiceCsvUploadForm, InvoiceForm, InvoiceItemFormSet
@@ -41,6 +42,26 @@ BATCH_INVOICE_EMAIL_ALLOWED_STATUSES = {
     Invoice.STATUS_VIEWED,
     Invoice.STATUS_OVERDUE,
 }
+BANK_TRANSFER_PAYABLE_STATUSES = {
+    Invoice.STATUS_SENT,
+    Invoice.STATUS_VIEWED,
+    Invoice.STATUS_OVERDUE,
+}
+
+
+def _bank_transfer_context(invoice: Invoice, initiated_by=None) -> dict:
+    if invoice.status not in BANK_TRANSFER_PAYABLE_STATUSES:
+        return {
+            "bank_transfer_details": None,
+            "bank_transfer_payment": None,
+        }
+    return {
+        "bank_transfer_details": get_bank_transfer_details(),
+        "bank_transfer_payment": get_or_create_bank_transfer_payment(
+            invoice=invoice,
+            initiated_by=initiated_by,
+        ),
+    }
 
 
 def _invoice_reminder_context(invoice: Invoice) -> dict:
@@ -360,6 +381,7 @@ def customer_invoice_detail(request, pk):
         {
             "invoice": invoice,
             "items": invoice.items.all(),
+            **_bank_transfer_context(invoice, initiated_by=request.user),
             **reminder_context,
         },
     )
@@ -785,6 +807,7 @@ def invoice_detail(request, pk):
             "invoice": invoice,
             "items": invoice.items.all(),
             "status_choices": Invoice.STATUS_CHOICES,
+            **_bank_transfer_context(invoice, initiated_by=request.user),
             "last_invoice_email_sent_at": (
                 (last_invoice_email_log.sent_at or last_invoice_email_log.attempted_at)
                 if last_invoice_email_log
@@ -846,7 +869,11 @@ def invoice_public_view(request, token):
     return render(
         request,
         "invoicing/invoice_public_view.html",
-        {"invoice": invoice, "items": invoice.items.all()},
+        {
+            "invoice": invoice,
+            "items": invoice.items.all(),
+            **_bank_transfer_context(invoice),
+        },
     )
 
 

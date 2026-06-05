@@ -29,6 +29,20 @@ $env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py test payroll report
 
 For MySQL test runs, use a dedicated disposable test database, an approved cleanup policy, or `--keepdb` when appropriate. Do not let Django delete or reuse an unknown shared test database interactively.
 
+## Bank transfer configuration
+Bank-transfer payment instructions are shown on payable invoice pages when invoices are pending/viewed/overdue. Configure these optional environment variables in local `.env` and Render:
+
+```env
+BANK_TRANSFER_ACCOUNT_NAME=Your Company Name
+BANK_TRANSFER_BANK_NAME=DBS
+BANK_TRANSFER_ACCOUNT_NUMBER=001-234567-8
+BANK_TRANSFER_PAYNOW_ID=Your PayNow ID
+BANK_TRANSFER_BIC=DBSSSGSG
+BANK_TRANSFER_INSTRUCTIONS=Enter the payment reference in your bank transfer comments/reference field.
+```
+
+Each payable invoice gets one stable manual payment reference. Admin/Finance users confirm the transfer after matching that reference in the banking app.
+
 ## How to use (exact steps)
 1. Open `PROMPTS.md`.
 2. Choose one prompt key from the key map:

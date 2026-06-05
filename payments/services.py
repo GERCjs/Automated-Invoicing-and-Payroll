@@ -26,6 +26,7 @@ WEBHOOK_EVENT_REFUND_UPDATED = "refund.updated"
 WEBHOOK_EVENT_REFUND_FAILED = "refund.failed"
 # PayNow is only enabled for SGD payments.
 PAYNOW_ENABLED_CURRENCY = "SGD"
+BANK_TRANSFER_REFERENCE_PREFIX = "BANK"
 
 # Events outside this set are safely ignored.
 SUPPORTED_WEBHOOK_EVENTS = {
@@ -108,6 +109,88 @@ def _append_checkout_cancel_reference(cancel_url: str, payment_record: PaymentRe
     # Add the payment reference to the cancel URL so we can find the record later.
     separator = "&" if "?" in cancel_url else "?"
     return f"{cancel_url}{separator}{urlencode({'payment_reference': payment_record.payment_reference})}"
+
+
+def get_bank_transfer_details() -> dict[str, str]:
+    return {
+        "account_name": (settings.BANK_TRANSFER_ACCOUNT_NAME or "").strip(),
+        "bank_name": (settings.BANK_TRANSFER_BANK_NAME or "DBS").strip(),
+        "account_number": (settings.BANK_TRANSFER_ACCOUNT_NUMBER or "001-234567-8").strip(),
+        "paynow_id": (settings.BANK_TRANSFER_PAYNOW_ID or "").strip(),
+        "bic": (settings.BANK_TRANSFER_BIC or "DBSSSGSG").strip(),
+        "instructions": (settings.BANK_TRANSFER_INSTRUCTIONS or "").strip(),
+    }
+
+
+def _build_bank_transfer_reference(invoice: Invoice) -> str:
+    invoice_part = "".join(ch for ch in invoice.invoice_number.upper() if ch.isalnum() or ch == "-")
+    return f"{BANK_TRANSFER_REFERENCE_PREFIX}-{invoice_part}-{uuid.uuid4().hex[:6].upper()}"
+
+
+def get_or_create_bank_transfer_payment(
+    *,
+    invoice: Invoice,
+    initiated_by=None,
+) -> PaymentRecord:
+    existing_payment = (
+        PaymentRecord.objects.filter(
+            invoice=invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+        )
+        .order_by("created_at")
+        .first()
+    )
+    if existing_payment is not None:
+        return existing_payment
+
+    for _attempt in range(3):
+        try:
+            return PaymentRecord.objects.create(
+                invoice=invoice,
+                payment_reference=_build_bank_transfer_reference(invoice),
+                provider=PaymentRecord.PROVIDER_MANUAL,
+                status=PaymentRecord.STATUS_PENDING,
+                amount=invoice.total_amount,
+                currency=_normalize_currency_code(invoice.currency),
+                created_by=initiated_by,
+            )
+        except IntegrityError:
+            continue
+    raise IntegrityError("Unable to generate a unique bank transfer payment reference.")
+
+
+def confirm_bank_transfer_payment(
+    *,
+    payment_record: PaymentRecord,
+    confirmed_by=None,
+) -> tuple[PaymentRecord, str, bool]:
+    with transaction.atomic():
+        locked_record = (
+            PaymentRecord.objects.select_related("invoice")
+            .select_for_update()
+            .get(pk=payment_record.pk)
+        )
+        if locked_record.provider != PaymentRecord.PROVIDER_MANUAL:
+            raise ValueError("Only manual bank transfer payments can be confirmed here.")
+
+        invoice = locked_record.invoice
+        invoice_status_before = invoice.status
+        changed = False
+
+        if locked_record.status != PaymentRecord.STATUS_SUCCEEDED:
+            locked_record.status = PaymentRecord.STATUS_SUCCEEDED
+            locked_record.paid_at = timezone.now()
+            locked_record.created_by = locked_record.created_by or confirmed_by
+            locked_record.save(update_fields=["status", "paid_at", "created_by", "updated_at"])
+            changed = True
+
+        if invoice.status != Invoice.STATUS_PAID:
+            invoice.status = Invoice.STATUS_PAID
+            invoice.save(update_fields=["status", "updated_at"])
+            changed = True
+
+        return locked_record, invoice_status_before, changed
 
 
 def _resolve_refunded_invoice_status(invoice: Invoice) -> str:
