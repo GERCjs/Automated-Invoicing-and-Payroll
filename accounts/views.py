@@ -252,10 +252,20 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
     selected_action = request.GET.get("action", "").strip()
     search_query = request.GET.get("q", "").strip()
 
+    pending_verification_user_ids = set(
+        EmailVerificationToken.objects.filter(used_at__isnull=True).values_list("user_id", flat=True)
+    )
+
     # Start with all users, then apply filters/search.
     users = User.objects.select_related("role_profile").order_by("username")
     if selected_role == "suspended":
         users = users.filter(role_profile__suspended_at__isnull=False)
+    elif selected_role == "unverified":
+        users = users.filter(
+            is_active=False,
+            role_profile__suspended_at__isnull=True,
+            id__in=pending_verification_user_ids,
+        )
     elif selected_role:
         users = users.filter(role_profile__role=selected_role)
     if search_query:
@@ -268,7 +278,7 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
 
     # Start with all audit logs, then apply filters/search.
     audit_logs = AuditLog.objects.select_related("user", "user__role_profile")
-    if selected_role and selected_role != "suspended":
+    if selected_role and selected_role not in {"suspended", "unverified"}:
         audit_logs = audit_logs.filter(user__role_profile__role=selected_role)
     if selected_action:
         audit_logs = audit_logs.filter(action__icontains=selected_action)
@@ -289,10 +299,6 @@ def _dashboard_context(request, account_form=None, reminder_form=None, mass_emai
         .annotate(last_activity=Max("created_at"))
     }
     users_with_activity = []
-    # Used to label users who still need to verify email.
-    pending_verification_user_ids = set(
-        EmailVerificationToken.objects.filter(used_at__isnull=True).values_list("user_id", flat=True)
-    )
     for managed_user in users:
         # Attach extra values used directly by the dashboard template.
         managed_user.last_activity_at = last_seen.get(managed_user.id)

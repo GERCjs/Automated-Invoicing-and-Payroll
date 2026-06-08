@@ -123,6 +123,7 @@
             <select name="role" class="form-select form-select-sm">
                 <option value="">All roles</option>
                 <option value="suspended" {% if selected_role == "suspended" %}selected{% endif %}>Suspended</option>
+                <option value="unverified" {% if selected_role == "unverified" %}selected{% endif %}>Unverified</option>
                 {% for role, label in role_choices %}
                 <option value="{{ role }}" {% if selected_role == role %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
@@ -207,6 +208,10 @@
                                 <form method="post" action="{% url 'managed-account-verify' managed_user.id %}">
                                     {% csrf_token %}
                                     <button type="submit" class="btn btn-sm btn-outline-success">Verify</button>
+                                </form>
+                                <form method="post" action="{% url 'managed-account-resend-verification' managed_user.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">Resend Verification</button>
                                 </form>
                                 {% endif %}
                                 {% if managed_user.can_be_managed %}

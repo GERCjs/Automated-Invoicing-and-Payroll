@@ -192,7 +192,33 @@ class AccountsPhaseOneTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Unverified")
         self.assertContains(response, "Verify")
-        self.assertNotContains(response, "Resend Verification")
+        self.assertContains(response, "Resend Verification")
+
+    def test_admin_dashboard_can_filter_unverified_accounts(self):
+        admin = User.objects.create_user(username="unverified_filter_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+        target = User.objects.create_user(
+            username="unverified_filter_user",
+            email="unverified_filter_user@vaniday.com",
+            password="TempPass123!",
+        )
+        target.is_active = False
+        target.save(update_fields=["is_active"])
+        EmailVerificationToken.issue_for_user(target)
+        verified_user = User.objects.create_user(
+            username="active_filter_user",
+            email="active_filter_user@vaniday.com",
+            password="TempPass123!",
+        )
+
+        self.client.login(username="unverified_filter_admin", password="TempPass123!")
+        response = self.client.get(reverse("admin-dashboard"), data={"role": "unverified"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "unverified_filter_user")
+        self.assertContains(response, "Unverified")
+        self.assertNotContains(response, verified_user.username)
 
     def test_admin_can_manually_verify_unverified_account(self):
         admin = User.objects.create_user(username="manual_verify_admin", password="TempPass123!")
