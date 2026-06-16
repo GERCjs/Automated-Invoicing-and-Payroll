@@ -13,18 +13,19 @@ The goal is to keep work safe, focused, and sequential (foundation first, then m
 - `DATABASE_SETUP_NOTES.md`: Shared database setup, migration commands, and ERD table mapping notes.
 
 ## Current test workflow
-Use the isolated SQLite test environment for routine verification. This avoids touching shared MySQL data and now ignores renamed MySQL table mapping automatically in SQLite mode.
+Use the dedicated Django test settings for routine verification. They force an isolated SQLite test database, keep production WhiteNoise manifest storage out of test runs, and prevent automated tests from sending real emails.
 
 ```powershell
-$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py check
-$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py test
+.\.venv\Scripts\python.exe manage.py check
+.\.venv\Scripts\python.exe manage.py check --settings=config.test_settings
+.\.venv\Scripts\python.exe manage.py test --settings=config.test_settings
 ```
 
 Focused suites used during hardening:
 
 ```powershell
-$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py test accounts invoicing payments --verbosity 1
-$env:USE_SQLITE='true'; .\.venv\Scripts\python.exe manage.py test payroll reports notifications imports core --verbosity 1
+.\.venv\Scripts\python.exe manage.py test accounts invoicing payments --settings=config.test_settings --verbosity 1
+.\.venv\Scripts\python.exe manage.py test payroll reports notifications imports core --settings=config.test_settings --verbosity 1
 ```
 
 For MySQL test runs, use a dedicated disposable test database, an approved cleanup policy, or `--keepdb` when appropriate. Do not let Django delete or reuse an unknown shared test database interactively.
