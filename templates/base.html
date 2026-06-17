@@ -117,7 +117,7 @@
     {% endif %}
 
     <main class="portal-main flex-grow-1">
-        <div class="container py-4">
+        <div class="{% block page_container_class %}container{% endblock %} py-4">
             {% if messages %}
             <div class="mb-3">
                 {% for message in messages %}

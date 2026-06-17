@@ -1,18 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}Mass Email | Automated Invoicing & Payroll{% endblock %}
+{% block title %}Announcement Email | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <div>
-        <h1 class="page-title">Mass Email</h1>
-        <p class="page-subtitle">Send notices to selected internal and customer role groups.</p>
+        <h1 class="page-title">Announcement Email</h1>
+        <p class="page-subtitle">Send announcements to selected internal and customer role groups.</p>
     </div>
 </div>
 <div class="row justify-content-center">
     <div class="col-lg-8">
         <div class="card">
-            <div class="card-header">Mass Email</div>
+            <div class="card-header">Announcement Email</div>
             <div class="card-body">
                 <form method="post">
                     {% csrf_token %}
@@ -38,7 +38,7 @@
                         {% for error in form.message.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                     </div>
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-primary">Send Email</button>
+                        <button type="submit" class="btn btn-primary">Send Announcement</button>
                         <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Cancel</a>
                     </div>
                 </form>

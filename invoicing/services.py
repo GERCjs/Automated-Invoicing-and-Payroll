@@ -5,18 +5,25 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
-from io import StringIO
+from io import BytesIO, StringIO
 from typing import Any
+from zipfile import BadZipFile
 
 from django.conf import settings
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow
 
 ZERO = Decimal("0.00")
 TWOPLACES = Decimal("0.01")
+OVERDUE_ELIGIBLE_STATUSES = {
+    Invoice.STATUS_SENT,
+    Invoice.STATUS_VIEWED,
+}
 
 
 def _to_money(value: Decimal) -> Decimal:
@@ -71,13 +78,7 @@ def recalculate_invoice_totals(invoice: Invoice) -> Invoice:
 
 def apply_overdue_status(invoice: Invoice, today: date | None = None) -> bool:
     today = today or timezone.localdate()
-    if invoice.status == Invoice.STATUS_PAID:
-        return False
-    if invoice.due_date < today and invoice.status in {
-        Invoice.STATUS_DRAFT,
-        Invoice.STATUS_SENT,
-        Invoice.STATUS_VIEWED,
-    }:
+    if invoice.due_date < today and invoice.status in OVERDUE_ELIGIBLE_STATUSES:
         invoice.status = Invoice.STATUS_OVERDUE
         invoice.save(update_fields=["status", "updated_at"])
         return True
@@ -88,7 +89,7 @@ def refresh_overdue_invoices(today: date | None = None) -> int:
     today = today or timezone.localdate()
     return Invoice.objects.filter(
         due_date__lt=today,
-        status__in=[Invoice.STATUS_DRAFT, Invoice.STATUS_SENT, Invoice.STATUS_VIEWED],
+        status__in=OVERDUE_ELIGIBLE_STATUSES,
     ).update(status=Invoice.STATUS_OVERDUE, updated_at=timezone.now())
 
 
@@ -162,9 +163,36 @@ CSV_HEADER_ALIASES = {
     "salon_share": ["salonshare", "salon_share"],
 }
 
+INVOICE_IMPORT_REQUIRED_HEADERS = {
+    "merchant/customer identity": ["shop_title", "customer_name", "email"],
+    "amount": ["vaniday_share", "vaniday_commission", "total_revenue"],
+}
+
 
 def _normalize_key(value: str) -> str:
     return "".join(ch for ch in value.strip().lower() if ch.isalnum())
+
+
+def _stringify_import_value(raw_value: Any) -> str:
+    if raw_value in (None, ""):
+        return ""
+    if isinstance(raw_value, datetime):
+        if raw_value.time() == datetime.min.time():
+            return raw_value.strftime("%Y-%m-%d")
+        return raw_value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(raw_value, date):
+        return raw_value.strftime("%Y-%m-%d")
+    if isinstance(raw_value, bool):
+        return "true" if raw_value else "false"
+    if isinstance(raw_value, Decimal):
+        return format(raw_value, "f").rstrip("0").rstrip(".") or "0"
+    if isinstance(raw_value, int):
+        return str(raw_value)
+    if isinstance(raw_value, float):
+        if raw_value.is_integer():
+            return str(int(raw_value))
+        return format(raw_value, "f").rstrip("0").rstrip(".")
+    return str(raw_value).strip()
 
 
 def _parse_decimal(raw_value: Any) -> Decimal | None:
@@ -265,103 +293,121 @@ def _build_fallback_email(customer_name: str, seller_id: str) -> str:
     return f"{safe_name}-{suffix}@import.local"
 
 
-def parse_invoice_csv(uploaded_file) -> dict[str, Any]:
-    raw_bytes = uploaded_file.read()
-    uploaded_file.seek(0)
-    decode_attempts = ["utf-8-sig", "utf-8", "latin-1"]
-    decoded_text = None
-    for encoding in decode_attempts:
-        try:
-            decoded_text = raw_bytes.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    if decoded_text is None:
-        raise ValueError("CSV encoding is not supported. Please upload UTF-8 or Latin-1 CSV.")
+def _max_invoice_import_rows() -> int:
+    return int(getattr(settings, "INVOICE_IMPORT_MAX_ROWS", 1000))
 
-    reader = csv.DictReader(StringIO(decoded_text))
-    headers = reader.fieldnames or []
-    if not headers:
-        raise ValueError("CSV file has no header row.")
+
+def _validate_invoice_headers(headers: list[str]) -> None:
+    normalized_headers = {_normalize_key(str(header)) for header in headers if str(header).strip()}
+    missing_groups = []
+    for group_label, canonical_fields in INVOICE_IMPORT_REQUIRED_HEADERS.items():
+        valid_aliases = {
+            alias
+            for field in canonical_fields
+            for alias in CSV_HEADER_ALIASES.get(field, [])
+        }
+        if not normalized_headers.intersection(valid_aliases):
+            missing_groups.append(group_label)
+
+    if missing_groups:
+        raise ValueError(
+            "Missing required columns for: "
+            "merchant/customer identity (shop_title, customerName, or email) and "
+            "amount (vanidayShare, vanidayCommission, or Total_Revenue)."
+        )
+
+
+def _map_invoice_source_row(source_row: dict[str, Any]) -> dict[str, str]:
+    normalized_source = {
+        _normalize_key(str(key)): _stringify_import_value(value)
+        for key, value in source_row.items()
+        if key is not None and str(key).strip()
+    }
+    return {
+        "seller_id": _resolve_field(normalized_source, "seller_id"),
+        "shop_title": _resolve_field(normalized_source, "shop_title"),
+        "order_id": _resolve_field(normalized_source, "order_id"),
+        "partner_type_name": _resolve_field(normalized_source, "partner_type_name"),
+        "payment_method": _resolve_field(normalized_source, "payment_method"),
+        "product_type": _resolve_field(normalized_source, "product_type"),
+        "customer_id": _resolve_field(normalized_source, "customer_id"),
+        "status": _resolve_field(normalized_source, "status"),
+        "order_status": _resolve_field(normalized_source, "order_status"),
+        "email": _resolve_field(normalized_source, "email"),
+        "customer_name": _resolve_field(normalized_source, "customer_name"),
+        "contact_no": _resolve_field(normalized_source, "contact_no"),
+        "qty": _resolve_field(normalized_source, "qty"),
+        "service_name": _resolve_field(normalized_source, "service_name"),
+        "booked_date": _resolve_field(normalized_source, "booked_date"),
+        "service_duration": _resolve_field(normalized_source, "service_duration"),
+        "staff_id": _resolve_field(normalized_source, "staff_id"),
+        "staff_name": _resolve_field(normalized_source, "staff_name"),
+        "total_revenue": _resolve_field(normalized_source, "total_revenue"),
+        "credit_card": _resolve_field(normalized_source, "credit_card"),
+        "shipping_amount": _resolve_field(normalized_source, "shipping_amount"),
+        "reward_point": _resolve_field(normalized_source, "reward_point"),
+        "vaniday_commission": _resolve_field(normalized_source, "vaniday_commission"),
+        "vaniday_share": _resolve_field(normalized_source, "vaniday_share"),
+        "cashback_fee": _resolve_field(normalized_source, "cashback_fee"),
+        "cashback_discount": _resolve_field(normalized_source, "cashback_discount"),
+        "cashback_date": _resolve_field(normalized_source, "cashback_date"),
+        "salon_share": _resolve_field(normalized_source, "salon_share"),
+    }
+
+
+def _transform_invoice_source_row(index: int, mapped: dict[str, str]) -> dict[str, Any]:
+    customer_name = _coalesce(mapped["shop_title"], mapped["customer_name"], mapped["email"])
+    email_value = _sanitize_email(mapped["email"])
+    amount_value = (
+        _parse_decimal(mapped["vaniday_share"])
+        or _parse_decimal(mapped["vaniday_commission"])
+        or _parse_decimal(mapped["total_revenue"])
+    )
+    quantity_value = _parse_decimal(mapped["qty"]) or Decimal("1.00")
+    booked_at = _parse_datetime(mapped["booked_date"])
+
+    row_errors = []
+    if not customer_name:
+        row_errors.append("Missing merchant/customer identity (shop_title, customerName, or email).")
+    if amount_value is None:
+        row_errors.append("Missing numeric amount (vanidayShare, vanidayCommission, or Total_Revenue).")
+    elif amount_value < ZERO:
+        row_errors.append("Amount must be zero or positive.")
+    if quantity_value <= ZERO:
+        row_errors.append("Quantity must be greater than zero.")
+    if mapped["booked_date"] and booked_at is None:
+        row_errors.append("bookedDate format is invalid.")
+
+    return {
+        "row_number": index,
+        "source": mapped,
+        "customer_name": customer_name,
+        "email": email_value,
+        "amount": str(_to_money(amount_value or ZERO)),
+        "quantity": str(_to_money(quantity_value)),
+        "booked_at": booked_at.isoformat() if booked_at else "",
+        "item_description": _build_item_description(
+            mapped["service_name"],
+            mapped["order_id"],
+            booked_at,
+            mapped["product_type"],
+        ),
+        "group_period": _invoice_group_period(booked_at),
+        "errors": row_errors,
+    }
+
+
+def _build_invoice_parse_result(headers: list[str], source_rows: list[tuple[int, dict[str, Any]]]) -> dict[str, Any]:
+    _validate_invoice_headers(headers)
 
     normalized_rows: list[dict[str, Any]] = []
     invalid_rows: list[dict[str, Any]] = []
     valid_rows: list[dict[str, Any]] = []
 
-    for index, source_row in enumerate(reader, start=2):
-        normalized_source = {_normalize_key(key): value for key, value in source_row.items() if key is not None}
-        mapped = {
-            "seller_id": _resolve_field(normalized_source, "seller_id"),
-            "shop_title": _resolve_field(normalized_source, "shop_title"),
-            "order_id": _resolve_field(normalized_source, "order_id"),
-            "partner_type_name": _resolve_field(normalized_source, "partner_type_name"),
-            "payment_method": _resolve_field(normalized_source, "payment_method"),
-            "product_type": _resolve_field(normalized_source, "product_type"),
-            "customer_id": _resolve_field(normalized_source, "customer_id"),
-            "status": _resolve_field(normalized_source, "status"),
-            "order_status": _resolve_field(normalized_source, "order_status"),
-            "email": _resolve_field(normalized_source, "email"),
-            "customer_name": _resolve_field(normalized_source, "customer_name"),
-            "contact_no": _resolve_field(normalized_source, "contact_no"),
-            "qty": _resolve_field(normalized_source, "qty"),
-            "service_name": _resolve_field(normalized_source, "service_name"),
-            "booked_date": _resolve_field(normalized_source, "booked_date"),
-            "service_duration": _resolve_field(normalized_source, "service_duration"),
-            "staff_id": _resolve_field(normalized_source, "staff_id"),
-            "staff_name": _resolve_field(normalized_source, "staff_name"),
-            "total_revenue": _resolve_field(normalized_source, "total_revenue"),
-            "credit_card": _resolve_field(normalized_source, "credit_card"),
-            "shipping_amount": _resolve_field(normalized_source, "shipping_amount"),
-            "reward_point": _resolve_field(normalized_source, "reward_point"),
-            "vaniday_commission": _resolve_field(normalized_source, "vaniday_commission"),
-            "vaniday_share": _resolve_field(normalized_source, "vaniday_share"),
-            "cashback_fee": _resolve_field(normalized_source, "cashback_fee"),
-            "cashback_discount": _resolve_field(normalized_source, "cashback_discount"),
-            "cashback_date": _resolve_field(normalized_source, "cashback_date"),
-            "salon_share": _resolve_field(normalized_source, "salon_share"),
-        }
-
-        customer_name = _coalesce(mapped["shop_title"], mapped["customer_name"], mapped["email"])
-        email_value = _sanitize_email(mapped["email"])
-        amount_value = (
-            _parse_decimal(mapped["vaniday_share"])
-            or _parse_decimal(mapped["vaniday_commission"])
-            or _parse_decimal(mapped["total_revenue"])
-        )
-        quantity_value = _parse_decimal(mapped["qty"]) or Decimal("1.00")
-        booked_at = _parse_datetime(mapped["booked_date"])
-
-        row_errors = []
-        if not customer_name:
-            row_errors.append("Missing merchant/customer identity (shop_title, customerName, or email).")
-        if amount_value is None:
-            row_errors.append("Missing numeric amount (vanidayShare, vanidayCommission, or Total_Revenue).")
-        elif amount_value < ZERO:
-            row_errors.append("Amount must be zero or positive.")
-        if quantity_value <= ZERO:
-            row_errors.append("Quantity must be greater than zero.")
-        if mapped["booked_date"] and booked_at is None:
-            row_errors.append("bookedDate format is invalid.")
-
-        transformed = {
-            "row_number": index,
-            "source": mapped,
-            "customer_name": customer_name,
-            "email": email_value,
-            "amount": str(_to_money(amount_value or ZERO)),
-            "quantity": str(_to_money(quantity_value)),
-            "booked_at": booked_at.isoformat() if booked_at else "",
-            "item_description": _build_item_description(
-                mapped["service_name"],
-                mapped["order_id"],
-                booked_at,
-                mapped["product_type"],
-            ),
-            "group_period": _invoice_group_period(booked_at),
-            "errors": row_errors,
-        }
+    for index, source_row in source_rows:
+        transformed = _transform_invoice_source_row(index, _map_invoice_source_row(source_row))
         normalized_rows.append(transformed)
-        if row_errors:
+        if transformed["errors"]:
             invalid_rows.append(transformed)
         else:
             valid_rows.append(transformed)
@@ -391,6 +437,97 @@ def parse_invoice_csv(uploaded_file) -> dict[str, Any]:
             for group in preview_groups.values()
         ],
     }
+
+
+def parse_invoice_csv(uploaded_file) -> dict[str, Any]:
+    raw_bytes = uploaded_file.read()
+    uploaded_file.seek(0)
+    if not raw_bytes:
+        raise ValueError("Uploaded file is empty.")
+
+    decode_attempts = ["utf-8-sig", "utf-8", "latin-1"]
+    decoded_text = None
+    for encoding in decode_attempts:
+        try:
+            decoded_text = raw_bytes.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if decoded_text is None:
+        raise ValueError("CSV encoding is not supported. Please upload UTF-8 or Latin-1 CSV.")
+
+    reader = csv.DictReader(StringIO(decoded_text))
+    headers = reader.fieldnames or []
+    if not headers:
+        raise ValueError("CSV file has no header row.")
+
+    source_rows = []
+    max_rows = _max_invoice_import_rows()
+    for index, source_row in enumerate(reader, start=2):
+        if source_row is None:
+            continue
+        if all(_stringify_import_value(value) == "" for value in source_row.values()):
+            continue
+        source_rows.append((index, source_row))
+        if len(source_rows) > max_rows:
+            raise ValueError(f"Upload exceeds the maximum of {max_rows} data rows.")
+
+    return _build_invoice_parse_result(headers, source_rows)
+
+
+def parse_invoice_excel(uploaded_file) -> dict[str, Any]:
+    raw_bytes = uploaded_file.read()
+    uploaded_file.seek(0)
+    if not raw_bytes:
+        raise ValueError("Uploaded file is empty.")
+
+    try:
+        workbook = load_workbook(BytesIO(raw_bytes), data_only=True)
+    except (BadZipFile, InvalidFileException, OSError, ValueError, KeyError) as exc:
+        raise ValueError("Excel workbook is corrupted or unreadable.") from exc
+
+    try:
+        worksheet = workbook.active
+        rows = list(worksheet.iter_rows(values_only=True))
+    finally:
+        workbook.close()
+
+    header_row_index = None
+    header_row = None
+    for row_index, row in enumerate(rows, start=1):
+        if row and any(_stringify_import_value(cell) for cell in row):
+            header_row_index = row_index
+            header_row = row
+            break
+
+    if header_row is None:
+        raise ValueError("Excel workbook is empty.")
+
+    headers = [_stringify_import_value(cell) for cell in header_row]
+    source_rows = []
+    max_rows = _max_invoice_import_rows()
+    for row_index, row in enumerate(rows[header_row_index:], start=header_row_index + 1):
+        if row is None or all(_stringify_import_value(cell) == "" for cell in row):
+            continue
+        source_row = {
+            headers[column_index]: row[column_index] if column_index < len(row) else None
+            for column_index in range(len(headers))
+            if headers[column_index]
+        }
+        source_rows.append((row_index, source_row))
+        if len(source_rows) > max_rows:
+            raise ValueError(f"Upload exceeds the maximum of {max_rows} data rows.")
+
+    return _build_invoice_parse_result(headers, source_rows)
+
+
+def parse_invoice_upload(uploaded_file) -> dict[str, Any]:
+    file_name = (uploaded_file.name or "").strip().lower()
+    if file_name.endswith(".csv"):
+        return parse_invoice_csv(uploaded_file)
+    if file_name.endswith(".xlsx"):
+        return parse_invoice_excel(uploaded_file)
+    raise ValueError("Upload a CSV or Excel (.xlsx) file.")
 
 
 def import_invoice_rows_from_preview(
@@ -494,7 +631,7 @@ def import_invoice_rows_from_preview(
                 due_date=due_date,
                 currency="SGD",
                 created_by=initiated_by,
-                notes=f"Imported from CSV: {source_file_name}",
+                notes=f"Imported from file: {source_file_name}",
             )
             created_invoices += 1
 

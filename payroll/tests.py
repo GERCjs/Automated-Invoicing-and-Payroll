@@ -4,14 +4,14 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core import mail
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from accounts.models import UserRole
-from accounts.roles import ADMIN, CUSTOMER, HR, STAFF, SUPERADMIN
+from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from core.models import AuditLog
 from notifications.models import EmailDeliveryLog
 from payroll.models import Employee, PayrollRecord
@@ -265,6 +265,545 @@ class PayrollUploadPreviewTests(TestCase):
         self.assertNotContains(response, "EMP002")
 
 
+class PayrollInvalidRowDownloadTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.hr_user = user_model.objects.create_user(username="payroll_invalid_hr", password="pass12345")
+        UserRole.objects.filter(user=self.hr_user).update(role=HR)
+        self.admin_user = user_model.objects.create_user(username="payroll_invalid_admin", password="pass12345")
+        UserRole.objects.filter(user=self.admin_user).update(role=ADMIN)
+        self.superadmin_user = user_model.objects.create_user(username="payroll_invalid_super", password="pass12345")
+        UserRole.objects.filter(user=self.superadmin_user).update(role=SUPERADMIN)
+        self.staff_user = user_model.objects.create_user(username="payroll_invalid_staff", password="pass12345")
+        UserRole.objects.filter(user=self.staff_user).update(role=STAFF)
+        self.customer_user = user_model.objects.create_user(username="payroll_invalid_customer", password="pass12345")
+        UserRole.objects.filter(user=self.customer_user).update(role=CUSTOMER)
+        self.finance_user = user_model.objects.create_user(username="payroll_invalid_finance", password="pass12345")
+        UserRole.objects.filter(user=self.finance_user).update(role=FINANCE)
+
+        Employee.objects.create(
+            employee_code="STF-000001",
+            first_name="Alex",
+            last_name="Tan",
+            email="alex-invalid@example.com",
+            hire_date=date(2025, 1, 1),
+            base_salary=3000,
+        )
+
+    def _build_upload_file(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(
+            [
+                "employee_code",
+                "employee_name",
+                "employee_birthofdate",
+                "working_days",
+                "no_pay_leave_days",
+                "basic_salary",
+                "physical_products_commission",
+                "credit_commission",
+                "services_commission",
+                "loan_deduction",
+                "other_deductions",
+                "notes",
+            ]
+        )
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Valid"])
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        return SimpleUploadedFile(
+            "payroll_valid.xlsx",
+            output.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def _build_upload_file_with_invalid_numeric(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(
+            [
+                "employee_code",
+                "employee_name",
+                "employee_birthofdate",
+                "working_days",
+                "no_pay_leave_days",
+                "basic_salary",
+                "physical_products_commission",
+                "credit_commission",
+                "services_commission",
+                "loan_deduction",
+                "other_deductions",
+                "notes",
+            ]
+        )
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        return SimpleUploadedFile(
+            "payroll_invalid_numeric.xlsx",
+            output.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def _build_upload_file_with_multiple_errors(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(
+            [
+                "employee_code",
+                "employee_name",
+                "employee_birthofdate",
+                "working_days",
+                "no_pay_leave_days",
+                "basic_salary",
+                "physical_products_commission",
+                "credit_commission",
+                "services_commission",
+                "loan_deduction",
+                "other_deductions",
+                "notes",
+            ]
+        )
+        sheet.append(["", "", "01-01-1990", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad row"])
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        return SimpleUploadedFile(
+            "payroll_invalid_multiple.xlsx",
+            output.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def _upload_invalid_preview(self, upload_file=None):
+        self.client.login(username="payroll_invalid_hr", password="pass12345")
+        return self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": upload_file or self._build_upload_file_with_invalid_numeric(), "payment_date": "2026-05-24"},
+        )
+
+    def _download_workbook(self, response):
+        return load_workbook(BytesIO(response.content))
+
+    def test_hr_can_download_invalid_payroll_rows(self):
+        preview_response = self._upload_invalid_preview()
+        self.assertEqual(preview_response.status_code, 200)
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(".xlsx", response["Content-Disposition"])
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_admin_can_download_invalid_payroll_rows(self):
+        self.client.force_login(self.admin_user)
+        preview_response = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file_with_invalid_numeric(), "payment_date": "2026-05-24"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_superadmin_can_download_invalid_payroll_rows(self):
+        self.client.force_login(self.superadmin_user)
+        preview_response = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file_with_invalid_numeric(), "payment_date": "2026-05-24"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_staff_customer_and_finance_cannot_download_invalid_rows(self):
+        self.client.force_login(self.hr_user)
+        self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file_with_invalid_numeric(), "payment_date": "2026-05-24"},
+        )
+
+        for user in [self.staff_user, self.customer_user, self.finance_user]:
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get(reverse("payroll-download-invalid-rows"))
+                self.assertEqual(response.status_code, 403)
+
+    def test_downloaded_workbook_contains_expected_columns_and_only_invalid_rows(self):
+        self._upload_invalid_preview()
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"))
+        workbook = self._download_workbook(response)
+        worksheet = workbook.active
+        headers = [cell.value for cell in worksheet[1]]
+
+        self.assertEqual(headers[0], "Original Excel Row Number")
+        self.assertEqual(headers[-1], "Error Reason")
+        self.assertIn("Employee Code", headers)
+        self.assertIn("Basic Salary", headers)
+        self.assertEqual(worksheet.max_row, 2)
+
+    def test_original_invalid_values_are_preserved_in_download(self):
+        self._upload_invalid_preview()
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"))
+        workbook = self._download_workbook(response)
+        worksheet = workbook.active
+        headers = [cell.value for cell in worksheet[1]]
+        row = [cell.value for cell in worksheet[2]]
+        row_map = dict(zip(headers, row))
+
+        self.assertEqual(row_map["Original Excel Row Number"], 2)
+        self.assertEqual(row_map["Employee Code"], "STF-000001")
+        self.assertEqual(row_map["Basic Salary"], "abc")
+        self.assertEqual(row_map["Notes"], "Bad salary")
+        self.assertIn("Basic salary must be a valid number.", row_map["Error Reason"])
+
+    def test_multiple_error_messages_are_included_clearly(self):
+        self._upload_invalid_preview(self._build_upload_file_with_multiple_errors())
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"))
+        workbook = self._download_workbook(response)
+        worksheet = workbook.active
+        headers = [cell.value for cell in worksheet[1]]
+        row_map = dict(zip(headers, [cell.value for cell in worksheet[2]]))
+
+        self.assertIn("Basic salary must be a valid number.", row_map["Error Reason"])
+        self.assertIn("Employee code is required.", row_map["Error Reason"])
+        self.assertIn("Employee name is required.", row_map["Error Reason"])
+
+    def test_no_invalid_rows_redirects_with_clear_message(self):
+        self.client.login(username="payroll_invalid_hr", password="pass12345")
+        preview_response = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file(), "payment_date": "2026-05-24"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "There are no invalid payroll rows to download.")
+
+    def test_missing_or_expired_session_redirects_safely(self):
+        self.client.login(username="payroll_invalid_hr", password="pass12345")
+
+        response = self.client.get(reverse("payroll-download-invalid-rows"), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Payroll upload session expired. Please upload the file again.")
+
+    def test_download_invalid_rows_button_appears_only_when_invalid_rows_exist(self):
+        self.client.login(username="payroll_invalid_hr", password="pass12345")
+        invalid_preview = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file_with_invalid_numeric(), "payment_date": "2026-05-24"},
+        )
+        valid_preview = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file(), "payment_date": "2026-05-24"},
+        )
+
+        self.assertContains(invalid_preview, reverse("payroll-download-invalid-rows"))
+        self.assertNotContains(valid_preview, reverse("payroll-download-invalid-rows"))
+
+    def test_corrected_downloaded_workbook_can_be_uploaded_again(self):
+        self._upload_invalid_preview()
+
+        download_response = self.client.get(reverse("payroll-download-invalid-rows"))
+        workbook = self._download_workbook(download_response)
+        worksheet = workbook.active
+        headers = [cell.value for cell in worksheet[1]]
+        basic_salary_col = headers.index("Basic Salary") + 1
+        worksheet.cell(row=2, column=basic_salary_col, value=3000)
+
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        corrected_file = SimpleUploadedFile(
+            "payroll_invalid_rows_corrected.xlsx",
+            output.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": corrected_file, "payment_date": "2026-05-24"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Valid rows:</strong> 1")
+        self.assertContains(response, "Invalid rows:</strong> 0")
+
+
+class PayrollDuplicatePreventionTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.hr_user = user_model.objects.create_user(username="payroll_hr", password="pass12345")
+        UserRole.objects.filter(user=self.hr_user).update(role=HR)
+        self.admin_user = user_model.objects.create_user(username="payroll_admin", password="pass12345")
+        UserRole.objects.filter(user=self.admin_user).update(role=ADMIN)
+        self.superadmin_user = user_model.objects.create_user(username="payroll_super", password="pass12345")
+        UserRole.objects.filter(user=self.superadmin_user).update(role=SUPERADMIN)
+        self.staff_user = user_model.objects.create_user(username="payroll_staff", password="pass12345")
+        UserRole.objects.filter(user=self.staff_user).update(role=STAFF)
+        self.customer_user = user_model.objects.create_user(username="payroll_customer", password="pass12345")
+        UserRole.objects.filter(user=self.customer_user).update(role=CUSTOMER)
+
+        self.employee = Employee.objects.create(
+            employee_code="STF-000010",
+            first_name="Alex",
+            last_name="Tan",
+            email="alex.duplicate@example.com",
+            date_of_birth=date(1990, 1, 1),
+            hire_date=date(2024, 1, 1),
+            base_salary=3000,
+        )
+        self.other_employee = Employee.objects.create(
+            employee_code="STF-000011",
+            first_name="Jamie",
+            last_name="Lim",
+            email="jamie.duplicate@example.com",
+            date_of_birth=date(1992, 2, 2),
+            hire_date=date(2024, 1, 1),
+            base_salary=3200,
+        )
+
+    def _payroll_form_data(self, employee, payment_date, **overrides):
+        data = {
+            "employee_name": f"{employee.first_name} {employee.last_name}",
+            "employee_id": employee.employee_code,
+            "basic_salary": "3000.00",
+            "physical_products_commission": "10.00",
+            "credit_commission": "20.00",
+            "services_commission": "30.00",
+            "loan_deduction": "5.00",
+            "other_deductions": "10.00",
+            "cpf_contribution": "0.00",
+            "payment_date": payment_date.isoformat(),
+        }
+        data.update(overrides)
+        return data
+
+    def _create_record(self, employee, payment_date, **overrides):
+        values = {
+            "employee_name": f"{employee.first_name} {employee.last_name}",
+            "employee_id": employee.employee_code,
+            "basic_salary": 3000,
+            "allowances": 60,
+            "physical_products_commission": 10,
+            "credit_commission": 20,
+            "services_commission": 30,
+            "deductions": 15,
+            "loan_deduction": 5,
+            "other_deductions": 10,
+            "cpf_contribution": 600,
+            "net_salary": 2445,
+            "payment_date": payment_date,
+        }
+        values.update(overrides)
+        return PayrollRecord.objects.create(**values)
+
+    def _build_upload_file_multiple(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(
+            [
+                "employee_code",
+                "employee_name",
+                "employee_birthofdate",
+                "working_days",
+                "no_pay_leave_days",
+                "basic_salary",
+                "physical_products_commission",
+                "credit_commission",
+                "services_commission",
+                "loan_deduction",
+                "other_deductions",
+                "notes",
+            ]
+        )
+        sheet.append(["STF-000010", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Row 1"])
+        sheet.append(["STF-000011", "Jamie Lim", "02-02-1992", 26, 0, 3200, 50, 120, 450, 100, 20, "Row 2"])
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        return SimpleUploadedFile(
+            "payroll_multi_duplicates.xlsx",
+            output.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def test_manual_creation_succeeds_for_new_employee_and_payment_date(self):
+        self.client.login(username="payroll_hr", password="pass12345")
+
+        response = self.client.post(
+            reverse("payroll-create"),
+            data=self._payroll_form_data(self.employee, date(2026, 6, 30)),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(PayrollRecord.objects.count(), 1)
+        record = PayrollRecord.objects.get()
+        self.assertEqual(record.employee_id, self.employee.employee_code)
+        self.assertEqual(record.payment_date, date(2026, 6, 30))
+
+    def test_manual_creation_rejects_same_employee_and_payment_date(self):
+        self._create_record(self.employee, date(2026, 6, 30))
+        self.client.login(username="payroll_hr", password="pass12345")
+
+        response = self.client.post(
+            reverse("payroll-create"),
+            data=self._payroll_form_data(self.employee, date(2026, 6, 30)),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A payroll record already exists for this employee and payment date.")
+        self.assertEqual(PayrollRecord.objects.count(), 1)
+
+    def test_same_employee_can_have_payroll_on_different_payment_date(self):
+        self.client.login(username="payroll_hr", password="pass12345")
+
+        first = self.client.post(
+            reverse("payroll-create"),
+            data=self._payroll_form_data(self.employee, date(2026, 6, 30)),
+        )
+        second = self.client.post(
+            reverse("payroll-create"),
+            data=self._payroll_form_data(self.employee, date(2026, 7, 31)),
+        )
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(PayrollRecord.objects.count(), 2)
+
+    def test_different_employees_can_have_payroll_on_same_payment_date(self):
+        self.client.login(username="payroll_hr", password="pass12345")
+
+        first = self.client.post(
+            reverse("payroll-create"),
+            data=self._payroll_form_data(self.employee, date(2026, 6, 30)),
+        )
+        second = self.client.post(
+            reverse("payroll-create"),
+            data=self._payroll_form_data(
+                self.other_employee,
+                date(2026, 6, 30),
+                employee_name="Jamie Lim",
+                basic_salary="3200.00",
+            ),
+        )
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(PayrollRecord.objects.count(), 2)
+
+    def test_editing_record_without_changing_employee_and_payment_date_succeeds(self):
+        record = self._create_record(self.employee, date(2026, 6, 30))
+        self.client.login(username="payroll_hr", password="pass12345")
+
+        response = self.client.post(
+            reverse("payroll-edit", args=[record.pk]),
+            data=self._payroll_form_data(
+                self.employee,
+                date(2026, 6, 30),
+                basic_salary="3100.00",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        record.refresh_from_db()
+        self.assertEqual(record.employee_id, self.employee.employee_code)
+        self.assertEqual(record.payment_date, date(2026, 6, 30))
+        self.assertEqual(record.basic_salary, 3100)
+
+    def test_editing_record_to_conflict_with_another_record_is_rejected(self):
+        existing = self._create_record(self.employee, date(2026, 6, 30))
+        editable = self._create_record(self.employee, date(2026, 7, 31), basic_salary=3200, net_salary=2645)
+        self.client.login(username="payroll_hr", password="pass12345")
+
+        response = self.client.post(
+            reverse("payroll-edit", args=[editable.pk]),
+            data=self._payroll_form_data(
+                self.employee,
+                date(2026, 6, 30),
+                basic_salary="3200.00",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A payroll record already exists for this employee and payment date.")
+        editable.refresh_from_db()
+        self.assertEqual(editable.payment_date, date(2026, 7, 31))
+        self.assertEqual(PayrollRecord.objects.filter(employee_id=self.employee.employee_code).count(), 2)
+        self.assertTrue(PayrollRecord.objects.filter(pk=existing.pk).exists())
+
+    def test_excel_confirmation_skips_duplicate_and_saves_other_non_duplicate_rows(self):
+        self._create_record(self.employee, date(2026, 5, 24))
+        self.client.login(username="payroll_hr", password="pass12345")
+
+        preview_response = self.client.post(
+            reverse("payroll-upload-preview"),
+            {"payroll_file": self._build_upload_file_multiple(), "payment_date": "2026-05-24"},
+        )
+        self.assertEqual(preview_response.status_code, 200)
+
+        save_response = self.client.post(reverse("payroll-upload-confirm-save"), follow=True)
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(PayrollRecord.objects.count(), 2)
+        self.assertTrue(
+            PayrollRecord.objects.filter(
+                employee_id=self.other_employee.employee_code,
+                payment_date=date(2026, 5, 24),
+            ).exists()
+        )
+        self.assertContains(save_response, "1 duplicate record(s) skipped")
+
+    def test_direct_database_duplicate_create_raises_integrity_error(self):
+        self._create_record(self.employee, date(2026, 6, 30))
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self._create_record(self.employee, date(2026, 6, 30), basic_salary=3500, net_salary=2845)
+
+    def test_hr_admin_and_superadmin_can_access_manual_payroll_creation(self):
+        for username, role in [
+            ("payroll_hr", HR),
+            ("payroll_admin", ADMIN),
+            ("payroll_super", SUPERADMIN),
+        ]:
+            with self.subTest(role=role):
+                self.client.force_login(get_user_model().objects.get(username=username))
+                create_response = self.client.get(reverse("payroll-create"))
+                upload_response = self.client.post(reverse("payroll-upload-confirm-save"))
+                self.assertEqual(create_response.status_code, 200)
+                self.assertEqual(upload_response.status_code, 302)
+                self.client.logout()
+
+    def test_staff_and_customer_cannot_use_manual_payroll_creation_or_upload_confirmation(self):
+        for username, role in [
+            ("payroll_staff", STAFF),
+            ("payroll_customer", CUSTOMER),
+        ]:
+            with self.subTest(role=role):
+                self.client.force_login(get_user_model().objects.get(username=username))
+                create_response = self.client.get(reverse("payroll-create"))
+                upload_response = self.client.post(reverse("payroll-upload-confirm-save"))
+                self.assertEqual(create_response.status_code, 403)
+                self.assertEqual(upload_response.status_code, 403)
+                self.client.logout()
+
+
 class PayslipPdfAccessTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -382,6 +921,58 @@ class PayrollReportPlacementAndAccessTests(TestCase):
         self.client.force_login(superadmin_user)
         super_response = self.client.get(reverse("payroll-report"))
         self.assertEqual(super_response.status_code, 200)
+
+    def test_payroll_report_shows_purpose_filters_and_actions(self):
+        hr_user = self._make_user("hr_payroll_report_ui", HR)
+        Employee.objects.create(
+            employee_code="EMP-REPORT-01",
+            first_name="Report",
+            last_name="Employee",
+            email="report.employee@example.com",
+            hire_date=date(2025, 1, 1),
+            date_of_birth=date(1995, 6, 1),
+            base_salary=3000,
+        )
+        PayrollRecord.objects.create(
+            employee_name="Report Employee",
+            employee_id="EMP-REPORT-01",
+            basic_salary=3000,
+            allowances=150,
+            deductions=50,
+            cpf_contribution=600,
+            net_salary=2500,
+            payment_date=date(2026, 6, 1),
+        )
+
+        self.client.force_login(hr_user)
+        response = self.client.get(reverse("payroll-report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Use this report to review payroll costs, CPF amounts, processing issues and individual employee payroll records.",
+        )
+        self.assertContains(response, "Filters")
+        self.assertContains(response, "Payroll Processing Issues")
+        self.assertContains(response, "Detailed Records")
+        self.assertContains(response, "View Payroll Record")
+        self.assertContains(response, "Download Payslip")
+        self.assertContains(response, "S$3,150.00")
+        self.assertNotContains(response, ">Open<")
+
+    def test_payroll_report_preserves_selected_month_and_employee_filters(self):
+        hr_user = self._make_user("hr_payroll_report_filter", HR)
+        self.client.force_login(hr_user)
+
+        response = self.client.get(
+            reverse("payroll-report"),
+            data={"month": "2026-06", "employee": "EMP-REPORT-01"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="month" value="2026-06"')
+        self.assertContains(response, 'name="employee" value="EMP-REPORT-01"')
+        self.assertContains(response, "Showing payroll records for June 2026 and employee search")
 
 
 class MyPayslipsViewTests(TestCase):

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% load humanize %}
 
 {% block title %}Payment & Stripe Report{% endblock %}
 
@@ -7,7 +8,7 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Payment & Stripe Report</h1>
-        <p class="page-subtitle">Snapshot as of {{ today }} for payment monitoring and diploma-level reporting.</p>
+        <p class="page-subtitle">Use this report to review successful payments, failed attempts, bank transfers and refunds requiring attention.</p>
     </div>
 </div>
 
@@ -17,24 +18,79 @@
 </div>
 {% endif %}
 
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="section-heading mb-0">Filters</h2>
+            {% if has_active_filters %}
+            <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+            {% endif %}
+        </div>
+        <form id="paymentReportFilterForm" method="get" class="row g-3 align-items-end" data-date-range-form>
+            <div class="col-md-4">
+                <label for="paymentDateFrom" class="form-label">Payment Date From</label>
+                <input
+                    id="paymentDateFrom"
+                    type="date"
+                    name="date_from"
+                    value="{{ date_from }}"
+                    class="form-control"
+                    data-date-from
+                >
+            </div>
+            <div class="col-md-4">
+                <label for="paymentDateTo" class="form-label">Payment Date To</label>
+                <input
+                    id="paymentDateTo"
+                    type="date"
+                    name="date_to"
+                    value="{{ date_to }}"
+                    class="form-control"
+                    data-date-to
+                >
+            </div>
+            <div class="col-md-4">
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="submit" class="btn btn-primary">Apply Filters</button>
+                    <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+                </div>
+            </div>
+            <div class="col-12">
+                <div
+                    id="paymentReportDateMessage"
+                    class="form-text text-danger{% if not date_filter_error %} d-none{% endif %}"
+                    data-date-error
+                >{{ date_filter_error }}</div>
+            </div>
+        </form>
+        {% if has_active_filters and active_filter_badges %}
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            {% for badge in active_filter_badges %}
+            <span class="badge bg-secondary">{{ badge }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
 <div class="row g-3 mb-3">
-    <div class="col-md-3">
+    <div class="col-md-6 col-xl-2">
         <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Collected This Month</div>
-                <div class="h4 mb-0">SGD {{ successful_month_amount|floatformat:2 }}</div>
+                <div class="h4 mb-0">S${{ successful_month_amount|floatformat:2|intcomma }}</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-6 col-xl-2">
         <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Collected This Year</div>
-                <div class="h4 mb-0">SGD {{ successful_year_amount|floatformat:2 }}</div>
+                <div class="h4 mb-0">S${{ successful_year_amount|floatformat:2|intcomma }}</div>
             </div>
         </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-md-6 col-xl-2">
         <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Successful Payments</div>
@@ -42,25 +98,97 @@
             </div>
         </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-md-6 col-xl-2">
         <div class="dashboard-card h-100">
             <div class="card-body">
-                <div class="text-muted small">Failed / Cancelled</div>
-                <div class="display-6 mb-0 text-danger">{{ failed_cancelled_count }}</div>
+                <div class="text-muted small">Failed Payments</div>
+                <div class="display-6 mb-0 text-danger">{{ failed_payment_count }}</div>
             </div>
         </div>
     </div>
-    <div class="col-md-2">
+    <div class="col-md-6 col-xl-2">
         <div class="dashboard-card h-100">
             <div class="card-body">
-                <div class="text-muted small">Refunded</div>
-                <div class="display-6 mb-0 text-warning">{{ refunded_count }}</div>
+                <div class="text-muted small">Cancelled Payments</div>
+                <div class="display-6 mb-0 text-warning">{{ cancelled_payment_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl-2">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Refunded Payments</div>
+                <div class="display-6 mb-0">{{ refunded_count }}</div>
             </div>
         </div>
     </div>
 </div>
 
-<h2 class="section-heading mb-3">Report Visuals</h2>
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Payment Attention</span>
+        <span class="text-muted small">Use this section to review failed, cancelled, pending or refunded activity.</span>
+    </div>
+    <div class="card-body">
+        {% if attention_payments %}
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Pending Manual Payments</div>
+                    <div class="h4 mb-1">{{ pending_manual_payment_count }}</div>
+                    <div class="text-muted small">Manual bank-transfer records still awaiting confirmation.</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Refunded Amount</div>
+                    <div class="h4 mb-1">S${{ refunded_amount|floatformat:2|intcomma }}</div>
+                    <div class="text-muted small">Refunded payments stay excluded from collected totals.</div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="sub-kpi h-100">
+                    <div class="text-muted small">Outstanding Invoice Amount</div>
+                    <div class="h4 mb-1">S${{ outstanding_amount|floatformat:2|intcomma }}</div>
+                    <div class="text-muted small">Unpaid invoice value still waiting to be collected.</div>
+                </div>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-clean table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Invoice</th>
+                        <th>Customer</th>
+                        <th>Provider</th>
+                        <th>Status</th>
+                        <th class="text-end">Amount</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in attention_payments %}
+                    <tr>
+                        <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
+                        <td>{{ payment.invoice.invoice_number }}</td>
+                        <td>{{ payment.invoice.customer.name }}</td>
+                        <td>{{ payment.get_provider_display }}</td>
+                        <td>{{ payment.get_status_display }}</td>
+                        <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
+                        <td class="text-end"><a href="{% url 'invoice-detail' payment.invoice.pk %}" class="btn btn-sm btn-outline-primary">View Related Invoice</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">No urgent payment issues were found for the current report data.</div>
+        {% endif %}
+    </div>
+</div>
+
+<h2 class="section-heading mb-3">Useful Charts</h2>
 <div class="row g-3 mb-3">
     <div class="col-lg-6">
         <div class="report-chart-card">
@@ -69,6 +197,7 @@
                 <canvas id="monthlyPaymentAmountChart" class="report-chart-canvas" aria-label="Monthly payment collection trend chart" role="img"></canvas>
                 <div id="monthlyPaymentAmountChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Shows the value of successful payments in each of the last 6 months.</div>
         </div>
     </div>
     <div class="col-lg-6">
@@ -78,6 +207,7 @@
                 <canvas id="paymentStatusChart" class="report-chart-canvas" aria-label="Payment status breakdown chart" role="img"></canvas>
                 <div id="paymentStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Visible counts: Successful {{ successful_payment_count }}, Failed {{ failed_payment_count }}, Cancelled {{ cancelled_payment_count }}, Refunded {{ refunded_count }}.</div>
         </div>
     </div>
     <div class="col-lg-6">
@@ -87,6 +217,7 @@
                 <canvas id="paymentMethodChart" class="report-chart-canvas" aria-label="Payment method summary chart" role="img"></canvas>
                 <div id="paymentMethodChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Summarises which payment methods were actually used in stored payment records.</div>
         </div>
     </div>
     <div class="col-lg-6">
@@ -96,6 +227,7 @@
                 <canvas id="successfulPaymentCountChart" class="report-chart-canvas" aria-label="Successful payment count trend chart" role="img"></canvas>
                 <div id="successfulPaymentCountChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Shows how many successful payments were recorded each month.</div>
         </div>
     </div>
 </div>
@@ -105,7 +237,7 @@
         <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Outstanding Invoice Amount</div>
-                <div class="h4 mb-0">SGD {{ outstanding_amount|floatformat:2 }}</div>
+                <div class="h4 mb-0">S${{ outstanding_amount|floatformat:2|intcomma }}</div>
             </div>
         </div>
     </div>
@@ -121,8 +253,8 @@
         <div class="dashboard-card h-100">
             <div class="card-body">
                 <div class="text-muted small">Reporting Window</div>
-                <div class="mb-0">Month start: {{ month_start }}</div>
-                <div class="mb-0">Year start: {{ year_start }}</div>
+                <div class="mb-0">Month start: {{ month_start|date:"d M Y" }}</div>
+                <div class="mb-0">Year start: {{ year_start|date:"d M Y" }}</div>
             </div>
         </div>
     </div>
@@ -189,6 +321,7 @@
     </div>
 </div>
 
+<h2 class="section-heading mb-3">Detailed Records</h2>
 <div class="card mb-3">
     <div class="card-header">Recent Stripe Transactions</div>
     <div class="table-responsive">
@@ -202,21 +335,23 @@
                     <th>Status</th>
                     <th>Payment Reference</th>
                     <th>Session ID</th>
+                    <th class="text-end">Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for payment in recent_stripe_transactions %}
                 <tr>
-                    <td>{{ payment.paid_at|default:payment.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
                     <td>{{ payment.invoice.invoice_number }}</td>
                     <td>{{ payment.invoice.customer.name }}</td>
-                    <td class="text-end">{{ payment.currency }} {{ payment.amount|floatformat:2 }}</td>
+                    <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
                     <td>{{ payment.get_status_display }}</td>
                     <td>{{ payment.payment_reference }}</td>
                     <td><span class="small text-muted">{{ payment.stripe_checkout_session_id|default:"-" }}</span></td>
+                    <td class="text-end"><a href="{% url 'invoice-detail' payment.invoice.pk %}" class="btn btn-sm btn-outline-primary">View Related Invoice</a></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="text-center py-3">No Stripe transactions found.</td></tr>
+                <tr><td colspan="8" class="text-center py-3">No Stripe transactions were found for this report.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -235,20 +370,22 @@
                     <th class="text-end">Amount</th>
                     <th>Method</th>
                     <th>Status</th>
+                    <th class="text-end">Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for payment in recent_payments %}
                 <tr>
-                    <td>{{ payment.paid_at|default:payment.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
                     <td>{{ payment.invoice.invoice_number }}</td>
                     <td>{{ payment.invoice.customer.name }}</td>
-                    <td class="text-end">{{ payment.currency }} {{ payment.amount|floatformat:2 }}</td>
+                    <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
                     <td>{{ payment.get_provider_display }}</td>
                     <td>{{ payment.get_status_display }}</td>
+                    <td class="text-end"><a href="{% url 'invoice-detail' payment.invoice.pk %}" class="btn btn-sm btn-outline-secondary">View Related Invoice</a></td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center py-3">No payments found.</td></tr>
+                <tr><td colspan="7" class="text-center py-3">No payment records were found for this report.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -260,6 +397,7 @@
 {{ payment_status_summary|json_script:"payment-status-summary-data" }}
 {{ payment_method_summary|json_script:"payment-method-data" }}
 {{ monthly_successful_count_values|json_script:"payment-trend-success-count-values-data" }}
+<script src="{% static 'js/date-range-filters.js' %}"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 <script src="{% static 'js/report_charts.js' %}"></script>
 <script>
@@ -292,7 +430,8 @@
                         beginAtZero: true
                     }
                 }
-            }
+            },
+            emptyText: "No successful payment trend data is available yet."
         });
 
         var paymentStatusSummary = window.ReportCharts.parseJsonScript("payment-status-summary-data", []);
@@ -315,7 +454,8 @@
                 plugins: {
                     legend: { position: "bottom" }
                 }
-            }
+            },
+            emptyText: "No payment status data is available yet."
         });
 
         var methodSummary = window.ReportCharts.parseJsonScript("payment-method-data", []);
@@ -338,7 +478,8 @@
                 plugins: {
                     legend: { position: "bottom" }
                 }
-            }
+            },
+            emptyText: "No payment method data is available yet."
         });
 
         var paymentTrendCountValues = window.ReportCharts.parseJsonScript("payment-trend-success-count-values-data", []);
@@ -367,7 +508,8 @@
                         precision: 0
                     }
                 }
-            }
+            },
+            emptyText: "No successful payment count trend is available yet."
         });
     })();
 </script>

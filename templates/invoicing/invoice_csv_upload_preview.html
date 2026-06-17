@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Invoice CSV Upload | Automated Invoicing & Payroll{% endblock %}
+{% block title %}Invoice Upload | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <div>
-        <h1 class="page-title">Invoice CSV Upload</h1>
-        <p class="page-subtitle">Upload Vaniday CSV data, preview grouped invoices, and confirm import safely.</p>
+        <h1 class="page-title">Invoice File Upload</h1>
+        <p class="page-subtitle">Upload Vaniday CSV or Excel (.xlsx) data, preview grouped invoices, and confirm import safely.</p>
     </div>
 </div>
 
@@ -66,7 +66,7 @@
 
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Grouped Invoice Preview</span>
+        <span>Invoice Upload Preview</span>
         <span class="badge bg-secondary">{{ group_preview_rows|length }} group(s)</span>
     </div>
     <div class="table-responsive">

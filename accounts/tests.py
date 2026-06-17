@@ -1,3 +1,6 @@
+from unittest.mock import patch
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.urls import NoReverseMatch
@@ -893,3 +896,351 @@ class AccountsPhaseOneTests(TestCase):
         self.assertTrue(logs[0].metadata.get("simulate"))
         self.assertEqual(logs[1].status, EmailDeliveryLog.STATUS_SENT)
         self.assertFalse(logs[1].metadata.get("simulate"))
+
+
+class AnnouncementEmailTests(TestCase):
+    def setUp(self):
+        self.password = "TempPass123!"
+        self.url = reverse("mass-email-send")
+        self.admin = self._create_user("announcement_admin", ADMIN, "announcement_admin@vaniday.com")
+        self.customer = self._create_user("announcement_customer", CUSTOMER, "customer@example.com")
+        self.staff = self._create_user("announcement_staff", STAFF, "staff@example.com")
+
+    def _create_user(self, username, role, email):
+        user = User.objects.create_user(username=username, email=email, password=self.password)
+        user.role_profile.role = role
+        user.role_profile.save(update_fields=["role", "updated_at"])
+        return user
+
+    def test_admin_can_open_announcement_email_page(self):
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Announcement Email")
+        self.assertContains(response, "Send Announcement")
+
+    def test_customer_cannot_open_announcement_email_page(self):
+        self.client.login(username=self.customer.username, password=self.password)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_cannot_open_announcement_email_page(self):
+        self.client.login(username=self.staff.username, password=self.password)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_superadmin_can_open_announcement_email_page(self):
+        superadmin = User.objects.create_superuser(
+            username="announcement_superadmin",
+            email="announcement_superadmin@example.com",
+            password=self.password,
+        )
+        self.client.login(username=superadmin.username, password=self.password)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Announcement Email")
+
+    def test_announcement_email_send_deduplicates_recipients_and_logs_each_delivery(self):
+        self._create_user("announcement_staff_dup", STAFF, "STAFF@example.com")
+        self._create_user("announcement_staff_blank", STAFF, "")
+        self._create_user("announcement_finance", FINANCE, "finance@example.com")
+
+        self.client.login(username=self.admin.username, password=self.password)
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER, STAFF],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Announcement email results: sent 2, failed 0, skipped 2.")
+        self.assertEqual(len(mail.outbox), 2)
+
+        delivered_to = {message.to[0] for message in mail.outbox}
+        self.assertEqual(delivered_to, {"customer@example.com", "staff@example.com"})
+        for message in mail.outbox:
+            self.assertEqual(len(message.to), 1)
+            self.assertFalse(message.cc)
+            self.assertFalse(message.bcc)
+            self.assertEqual(message.subject, "Portal update")
+            self.assertEqual(message.body, "Please review the new schedule.")
+
+        logs = EmailDeliveryLog.objects.filter(template_key="admin_mass_email").order_by("recipient_email")
+        self.assertEqual(logs.count(), 2)
+        self.assertEqual({log.recipient_email for log in logs}, delivered_to)
+        for log in logs:
+            self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)
+            self.assertEqual(log.triggered_by, self.admin)
+            self.assertIsNotNone(log.sent_at)
+            self.assertEqual(set(log.metadata.get("selected_roles", [])), {CUSTOMER, STAFF})
+            self.assertNotEqual(log.recipient_email, settings.DEFAULT_FROM_EMAIL)
+
+        audit_log = AuditLog.objects.filter(action="admin.mass_email.sent", user=self.admin).latest("created_at")
+        self.assertEqual(set(audit_log.metadata.get("roles", [])), {CUSTOMER, STAFF})
+        self.assertEqual(audit_log.metadata.get("attempted_count"), 2)
+        self.assertEqual(audit_log.metadata.get("sent_count"), 2)
+        self.assertEqual(audit_log.metadata.get("failed_count"), 0)
+        self.assertEqual(audit_log.metadata.get("skipped_count"), 2)
+        self.assertNotIn("subject", audit_log.metadata)
+        self.assertNotIn("message", audit_log.metadata)
+        self.assertNotIn("Please review the new schedule.", str(audit_log.metadata))
+
+    def test_active_user_in_selected_role_receives_announcement(self):
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Announcement email results: sent 1, failed 0, skipped 0.")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["customer@example.com"])
+
+        logs = EmailDeliveryLog.objects.filter(template_key="admin_mass_email")
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs.get().recipient_email, "customer@example.com")
+
+    def test_inactive_user_does_not_receive_announcement(self):
+        self.customer.is_active = False
+        self.customer.save(update_fields=["is_active"])
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No users with usable email addresses matched the selected roles.")
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertFalse(EmailDeliveryLog.objects.filter(template_key="admin_mass_email").exists())
+
+    def test_suspended_user_does_not_receive_announcement(self):
+        self.customer.role_profile.suspend(by=self.admin, reason="Suspended for test")
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No users with usable email addresses matched the selected roles.")
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertFalse(EmailDeliveryLog.objects.filter(template_key="admin_mass_email").exists())
+
+    def test_technically_active_suspended_user_does_not_receive_announcement(self):
+        self.customer.role_profile.suspended_at = timezone.now()
+        self.customer.role_profile.suspended_reason = "Manual state test"
+        self.customer.role_profile.save(update_fields=["suspended_at", "suspended_reason", "updated_at"])
+        self.customer.is_active = True
+        self.customer.save(update_fields=["is_active"])
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No users with usable email addresses matched the selected roles.")
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertFalse(EmailDeliveryLog.objects.filter(template_key="admin_mass_email").exists())
+
+    def test_inactive_but_not_suspended_user_does_not_receive_announcement(self):
+        self.customer.is_active = False
+        self.customer.save(update_fields=["is_active"])
+        self.customer.role_profile.suspended_at = None
+        self.customer.role_profile.suspended_reason = ""
+        self.customer.role_profile.save(update_fields=["suspended_at", "suspended_reason", "updated_at"])
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No users with usable email addresses matched the selected roles.")
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertFalse(EmailDeliveryLog.objects.filter(template_key="admin_mass_email").exists())
+
+    def test_active_and_suspended_accounts_sharing_email_send_once_to_active_account_only(self):
+        suspended_customer = self._create_user(
+            "announcement_customer_suspended",
+            CUSTOMER,
+            "customer@example.com",
+        )
+        suspended_customer.role_profile.suspend(by=self.admin, reason="Suspended for test")
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Announcement email results: sent 1, failed 0, skipped 1.")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["customer@example.com"])
+
+        logs = EmailDeliveryLog.objects.filter(template_key="admin_mass_email")
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs.get().recipient_email, "customer@example.com")
+
+    def test_empty_recipient_selection_is_rejected_clearly(self):
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.post(
+            self.url,
+            data={"subject": "Portal update", "message": "Please review the new schedule."},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Select at least one recipient role.")
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_selected_role_with_no_usable_email_addresses_is_handled_safely(self):
+        self._create_user("announcement_hr_blank", HR, "")
+
+        self.client.login(username=self.admin.username, password=self.password)
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [HR],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No users with usable email addresses matched the selected roles.")
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertFalse(EmailDeliveryLog.objects.filter(template_key="admin_mass_email").exists())
+
+    def test_skipped_summary_counts_inactive_suspended_blank_and_duplicate_recipients(self):
+        self._create_user("announcement_customer_duplicate", CUSTOMER, "CUSTOMER@example.com")
+        blank_customer = self._create_user("announcement_customer_blank", CUSTOMER, "")
+        blank_customer.is_active = True
+        blank_customer.save(update_fields=["is_active"])
+
+        inactive_customer = self._create_user("announcement_customer_inactive", CUSTOMER, "inactive@example.com")
+        inactive_customer.is_active = False
+        inactive_customer.save(update_fields=["is_active"])
+
+        suspended_customer = self._create_user(
+            "announcement_customer_suspended_count",
+            CUSTOMER,
+            "suspended@example.com",
+        )
+        suspended_customer.role_profile.suspend(by=self.admin, reason="Suspended for test")
+
+        self.client.login(username=self.admin.username, password=self.password)
+        response = self.client.post(
+            self.url,
+            data={
+                "recipients": [CUSTOMER],
+                "subject": "Portal update",
+                "message": "Please review the new schedule.",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Announcement email results: sent 1, failed 0, skipped 4.")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["customer@example.com"])
+
+        logs = EmailDeliveryLog.objects.filter(template_key="admin_mass_email")
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs.get().recipient_email, "customer@example.com")
+
+        audit_log = AuditLog.objects.filter(action="admin.mass_email.sent", user=self.admin).latest("created_at")
+        self.assertEqual(audit_log.metadata.get("attempted_count"), 1)
+        self.assertEqual(audit_log.metadata.get("sent_count"), 1)
+        self.assertEqual(audit_log.metadata.get("failed_count"), 0)
+        self.assertEqual(audit_log.metadata.get("skipped_count"), 4)
+        self.assertEqual(set(audit_log.metadata.get("roles", [])), {CUSTOMER})
+        self.assertNotIn("recipient_emails", audit_log.metadata)
+        self.assertNotIn("inactive@example.com", str(audit_log.metadata))
+        self.assertNotIn("suspended@example.com", str(audit_log.metadata))
+
+    def test_announcement_email_smtp_failure_is_logged_without_server_error(self):
+        self.client.login(username=self.admin.username, password=self.password)
+
+        with patch("accounts.views.send_mail", side_effect=RuntimeError("SMTP backend unavailable")):
+            response = self.client.post(
+                self.url,
+                data={
+                    "recipients": [CUSTOMER],
+                    "subject": "Portal update",
+                    "message": "Please review the new schedule.",
+                },
+                follow=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Announcement email results: sent 0, failed 1, skipped 0.")
+        self.assertEqual(len(mail.outbox), 0)
+
+        email_log = EmailDeliveryLog.objects.get(template_key="admin_mass_email")
+        self.assertEqual(email_log.recipient_email, "customer@example.com")
+        self.assertEqual(email_log.status, EmailDeliveryLog.STATUS_FAILED)
+        self.assertIn("SMTP backend unavailable", email_log.error_message)
+        self.assertIsNone(email_log.sent_at)
+
+        audit_log = AuditLog.objects.filter(action="admin.mass_email.sent", user=self.admin).latest("created_at")
+        self.assertEqual(audit_log.metadata.get("attempted_count"), 1)
+        self.assertEqual(audit_log.metadata.get("sent_count"), 0)
+        self.assertEqual(audit_log.metadata.get("failed_count"), 1)
+        self.assertEqual(audit_log.metadata.get("skipped_count"), 0)
+        self.assertNotIn("subject", audit_log.metadata)
+        self.assertNotIn("message", audit_log.metadata)
+
+    def test_announcement_email_tests_use_in_memory_backend(self):
+        self.assertEqual(settings.EMAIL_BACKEND, "django.core.mail.backends.locmem.EmailBackend")

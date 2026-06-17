@@ -310,6 +310,7 @@ class MassEmailForm(forms.Form):
     recipients = forms.MultipleChoiceField(
         choices=[],
         required=True,
+        error_messages={"required": "Select at least one recipient role."},
         widget=forms.CheckboxSelectMultiple,
     )
     subject = forms.CharField(max_length=255, widget=forms.TextInput(attrs={"class": "form-control"}))

@@ -124,11 +124,21 @@
 
 <form method="post" action="{% url 'payroll-upload-confirm-save' %}" class="mb-4">
     {% csrf_token %}
-    <button type="submit" class="btn btn-success">Confirm Save Valid Rows</button>
+    <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-success">Confirm Save Valid Rows</button>
+        {% if invalid_rows %}
+        <a href="{% url 'payroll-download-invalid-rows' %}" class="btn btn-outline-danger">Download Invalid Rows</a>
+        {% endif %}
+    </div>
 </form>
 {% endif %}
 
 {% if invalid_rows %}
+{% if not preview_rows %}
+<div class="mb-3">
+    <a href="{% url 'payroll-download-invalid-rows' %}" class="btn btn-outline-danger">Download Invalid Rows</a>
+</div>
+{% endif %}
 <div class="card">
     <div class="card-header bg-danger-subtle">
         <strong>Invalid Rows</strong>

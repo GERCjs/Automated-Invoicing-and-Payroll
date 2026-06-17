@@ -278,6 +278,30 @@ class StripePaymentsPhaseTests(TestCase):
             ).exists()
         )
 
+    def test_finance_can_confirm_bank_transfer_for_overdue_invoice_and_mark_it_paid(self):
+        self.invoice.status = Invoice.STATUS_OVERDUE
+        self.invoice.issue_date = timezone.localdate() - timedelta(days=10)
+        self.invoice.due_date = timezone.localdate() - timedelta(days=2)
+        self.invoice.save(update_fields=["status", "issue_date", "due_date", "updated_at"])
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-OVERDUE",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("invoice-detail", args=[self.invoice.pk]))
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
+
     def test_customer_and_staff_cannot_confirm_bank_transfer(self):
         PaymentRecord.objects.create(
             invoice=self.invoice,

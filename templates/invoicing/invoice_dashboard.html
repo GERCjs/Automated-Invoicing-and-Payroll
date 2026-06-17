@@ -9,7 +9,7 @@
         <p class="page-subtitle">Action-focused invoice monitoring for collections and follow-up.</p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary">Upload CSV</a>
+        <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary">Upload Invoice File</a>
         <a href="{% url 'invoice-create' %}" class="btn btn-primary">Create Invoice</a>
         <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark">View Invoice List</a>
         <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary">Invoice / Customer Report</a>
@@ -89,7 +89,7 @@
     <div class="card-body">
         <h2 class="section-heading">Quick Actions</h2>
         <div class="d-flex flex-wrap gap-2">
-            <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary btn-sm">Upload Invoice CSV</a>
+            <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary btn-sm">Upload Invoice File</a>
             <a href="{% url 'invoice-create' %}" class="btn btn-primary btn-sm">Create Invoice</a>
             <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark btn-sm">View All Invoices</a>
             <a href="{% url 'invoice-list' %}?status=outstanding" class="btn btn-outline-secondary btn-sm">View Outstanding</a>

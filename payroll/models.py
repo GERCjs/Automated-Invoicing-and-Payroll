@@ -320,6 +320,12 @@ class PayrollRecord(models.Model):
     class Meta:
         db_table = "payslip_record"
         ordering = ["-payment_date", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employee_id", "payment_date"],
+                name="unique_payroll_employee_payment_date",
+            ),
+        ]
         indexes = [
             models.Index(fields=["payment_date"]),
             models.Index(fields=["employee_id", "payment_date"]),

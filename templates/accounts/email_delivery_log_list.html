@@ -6,7 +6,7 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Delivery Logs</h1>
-        <p class="page-subtitle">Mass email and payment reminder delivery attempts.</p>
+        <p class="page-subtitle">Announcement email and payment reminder delivery attempts.</p>
     </div>
     <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
 </div>
@@ -17,8 +17,8 @@
             <div class="col-md-3">
                 <label class="form-label small">Type</label>
                 <select name="type" class="form-select form-select-sm">
-                    <option value="">Mass and reminders</option>
-                    <option value="mass" {% if selected_type == "mass" %}selected{% endif %}>Mass email</option>
+                    <option value="">Announcements and reminders</option>
+                    <option value="mass" {% if selected_type == "mass" %}selected{% endif %}>Announcement email</option>
                     <option value="reminder" {% if selected_type == "reminder" %}selected{% endif %}>Reminder email</option>
                 </select>
             </div>
@@ -59,7 +59,7 @@
                     <td class="text-nowrap">{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
                     <td>
                         {% if log.template_key == "admin_mass_email" %}
-                        Mass Email
+                        Announcement Email
                         {% else %}
                         Reminder Email
                         {% endif %}
@@ -82,7 +82,7 @@
                     </td>
                     <td>
                         {% if log.template_key == "admin_mass_email" %}
-                        {{ log.metadata.recipient_count|default:"-" }} recipient(s)
+                        {{ log.related_object_id|default:"Selected roles" }}
                         {% else %}
                         {{ log.metadata.invoice_number|default:log.related_object_id }}
                         {% endif %}

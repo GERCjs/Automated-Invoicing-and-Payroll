@@ -97,6 +97,79 @@ def _send_verification_email(request, user, *, triggered_by=None):
     return True, verification, email_log
 
 
+def _safe_email_error_message(exc):
+    message = str(exc).strip()
+    if not message:
+        message = exc.__class__.__name__
+    return message[:500]
+
+
+def _collect_announcement_recipient_emails(selected_roles):
+    recipients = User.objects.filter(role_profile__role__in=selected_roles).order_by("id")
+    recipient_emails = []
+    seen = set()
+    inactive_count = 0
+    suspended_count = 0
+    blank_count = 0
+    duplicate_count = 0
+
+    for recipient in recipients.values("email", "is_active", "role_profile__suspended_at"):
+        if recipient["role_profile__suspended_at"] is not None:
+            suspended_count += 1
+            continue
+        if not recipient["is_active"]:
+            inactive_count += 1
+            continue
+
+        email = (recipient["email"] or "").strip().lower()
+        if not email:
+            blank_count += 1
+            continue
+        if email in seen:
+            duplicate_count += 1
+            continue
+
+        seen.add(email)
+        recipient_emails.append(email)
+
+    skipped_count = inactive_count + suspended_count + blank_count + duplicate_count
+    return recipient_emails, skipped_count
+
+
+def _send_announcement_email(*, subject, body, recipient, selected_roles, triggered_by):
+    email_log = EmailDeliveryLog.objects.create(
+        recipient_email=recipient,
+        subject=subject,
+        template_key="admin_mass_email",
+        status=EmailDeliveryLog.STATUS_PENDING,
+        related_object_type="user_role_group",
+        related_object_id=",".join(selected_roles),
+        triggered_by=triggered_by,
+        metadata={"selected_roles": list(selected_roles)},
+    )
+
+    try:
+        sent_count = send_mail(
+            subject=subject,
+            message=body,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[recipient],
+            fail_silently=False,
+        )
+        if sent_count < 1:
+            raise RuntimeError("Email backend returned zero deliveries.")
+    except Exception as exc:
+        email_log.status = EmailDeliveryLog.STATUS_FAILED
+        email_log.error_message = _safe_email_error_message(exc)
+        email_log.save(update_fields=["status", "error_message"])
+        return False, email_log
+
+    email_log.status = EmailDeliveryLog.STATUS_SENT
+    email_log.sent_at = timezone.now()
+    email_log.save(update_fields=["status", "sent_at"])
+    return True, email_log
+
+
 class UserLoginView(LoginView):
     # Login page that uses the custom LoginForm.
     template_name = "accounts/login.html"
@@ -800,7 +873,7 @@ def payment_reminder_run_check(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def mass_email_send(request):
-    # Page/action for sending one message to selected role groups.
+    # Page/action for sending one announcement to selected role groups.
     role_counts = _get_role_counts()
     if request.method != "POST":
         return render(
@@ -811,50 +884,53 @@ def mass_email_send(request):
     form = MassEmailForm(request.POST, role_counts=role_counts)
     reminder_settings = PaymentReminderSettings.load()
     if not reminder_settings.mass_email_enabled:
-        messages.error(request, "Mass email sending is disabled in reminder settings.")
+        messages.error(request, "Announcement email sending is disabled in reminder settings.")
         return redirect("admin-dashboard")
     if form.is_valid():
-        # Find users whose roles were selected and who have email addresses.
-        recipients = User.objects.filter(
-            role_profile__role__in=form.cleaned_data["recipients"],
-            email__isnull=False,
-        ).exclude(email="")
-        recipient_emails = list(recipients.values_list("email", flat=True))
+        selected_roles = form.cleaned_data["recipients"]
+        recipient_emails, skipped_count = _collect_announcement_recipient_emails(selected_roles)
         if not recipient_emails:
-            messages.error(request, "No users with email addresses matched the selected roles.")
+            messages.error(request, "No users with usable email addresses matched the selected roles.")
             return redirect("admin-dashboard")
-        # Send one email to the matched recipients.
-        sent_count = send_mail(
-            subject=form.cleaned_data["subject"],
-            message=form.cleaned_data["message"],
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=recipient_emails,
-            fail_silently=False,
-        )
-        # Store a delivery log for the mass email.
-        EmailDeliveryLog.objects.create(
-            recipient_email=settings.DEFAULT_FROM_EMAIL,
-            subject=form.cleaned_data["subject"],
-            template_key="admin_mass_email",
-            status=EmailDeliveryLog.STATUS_SENT,
-            related_object_type="user_role_group",
-            related_object_id=",".join(form.cleaned_data["recipients"]),
-            triggered_by=request.user,
-            sent_at=timezone.now(),
-            metadata={"recipient_count": len(recipient_emails), "sent_count": sent_count},
-        )
-        # Audit the mass email action.
+
+        sent_count = 0
+        failed_count = 0
+        for recipient in recipient_emails:
+            email_sent, _email_log = _send_announcement_email(
+                subject=form.cleaned_data["subject"],
+                body=form.cleaned_data["message"],
+                recipient=recipient,
+                selected_roles=selected_roles,
+                triggered_by=request.user,
+            )
+            if email_sent:
+                sent_count += 1
+            else:
+                failed_count += 1
+
         log_event(
             action="admin.mass_email.sent",
             user=request.user,
             metadata={
-                "roles": form.cleaned_data["recipients"],
-                "recipient_count": len(recipient_emails),
+                "roles": selected_roles,
+                "attempted_count": len(recipient_emails),
                 "sent_count": sent_count,
+                "failed_count": failed_count,
+                "skipped_count": skipped_count,
             },
             ip_address=get_client_ip(request),
         )
-        messages.success(request, f"Mass email queued for {len(recipient_emails)} recipient(s).")
+
+        summary = (
+            f"Announcement email results: sent {sent_count}, "
+            f"failed {failed_count}, skipped {skipped_count}."
+        )
+        if failed_count and sent_count:
+            messages.warning(request, summary)
+        elif failed_count:
+            messages.error(request, summary)
+        else:
+            messages.success(request, summary)
         return redirect("admin-dashboard")
     return render(request, "accounts/mass_email.html", {"form": form})
 

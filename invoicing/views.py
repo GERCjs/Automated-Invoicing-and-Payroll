@@ -6,6 +6,7 @@ from django.db.models import Q
 from django.http import Http404, HttpResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.dateparse import parse_date
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from datetime import date
@@ -18,7 +19,11 @@ from core.audit import get_client_ip, log_event
 from imports.models import ImportJob, ImportRowError
 from notifications.models import EmailDeliveryLog
 from notifications.services import get_invoice_reminder_history, send_invoice_email
-from payments.services import get_bank_transfer_details, get_or_create_bank_transfer_payment
+from payments.services import (
+    get_bank_transfer_details,
+    get_or_create_bank_transfer_payment,
+    successful_payments_queryset,
+)
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
 from .forms import CustomerCreateForm, InvoiceCsvUploadForm, InvoiceForm, InvoiceItemFormSet
@@ -29,7 +34,7 @@ from .services import (
     generate_invoice_number,
     import_invoice_rows_from_preview,
     mark_invoice_viewed,
-    parse_invoice_csv,
+    parse_invoice_upload,
     recalculate_invoice_totals,
     refresh_overdue_invoices,
     transition_invoice_status,
@@ -96,6 +101,12 @@ def _get_customer_invoice_queryset(user):
 
 def _csv_import_session_key(import_token: str) -> str:
     return f"{CSV_IMPORT_SESSION_KEY_PREFIX}{import_token}"
+
+
+def _clear_invoice_import_preview_sessions(request) -> None:
+    for key in list(request.session.keys()):
+        if key.startswith(CSV_IMPORT_SESSION_KEY_PREFIX):
+            request.session.pop(key, None)
 
 
 def _resolve_next_url(request, next_url: str, fallback: str) -> str:
@@ -190,7 +201,7 @@ def invoice_csv_upload(request):
             session_key = _csv_import_session_key(import_token)
             preview_payload = request.session.get(session_key)
             if not preview_payload:
-                messages.error(request, "Import preview expired. Please upload the CSV again.")
+                messages.error(request, "Import preview expired. Please upload the file again.")
                 return redirect("invoice-csv-upload")
 
             import_job = get_object_or_404(ImportJob, pk=preview_payload["import_job_id"])
@@ -206,7 +217,8 @@ def invoice_csv_upload(request):
                 import_job.completed_at = timezone.now()
                 import_job.saved_rows = 0
                 import_job.save(update_fields=["status", "completed_at", "saved_rows", "updated_at"])
-                messages.error(request, "No valid rows to import. Please fix CSV errors and retry.")
+                request.session.pop(session_key, None)
+                messages.error(request, "No valid rows to import. Please fix the file errors and retry.")
                 return redirect("invoice-csv-upload")
 
             summary = import_invoice_rows_from_preview(
@@ -240,7 +252,7 @@ def invoice_csv_upload(request):
             messages.success(
                 request,
                 (
-                    f"CSV import completed. Invoices created: {summary['created_invoices']}, "
+                    f"Invoice import completed. Invoices created: {summary['created_invoices']}, "
                     f"items created: {summary['created_items']}, source rows stored: {summary['stored_source_rows']}."
                 ),
             )
@@ -250,7 +262,7 @@ def invoice_csv_upload(request):
         if form.is_valid():
             csv_file = form.cleaned_data["csv_file"]
             try:
-                parsed = parse_invoice_csv(csv_file)
+                parsed = parse_invoice_upload(csv_file)
             except ValueError as exc:
                 messages.error(request, str(exc))
                 return render(
@@ -286,6 +298,7 @@ def invoice_csv_upload(request):
 
             import_token = uuid.uuid4().hex
             session_key = _csv_import_session_key(import_token)
+            _clear_invoice_import_preview_sessions(request)
             preview_payload = {
                 "import_token": import_token,
                 "import_job_id": import_job.id,
@@ -415,22 +428,39 @@ def customer_invoice_download_pdf(request, pk):
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_list(request):
-    def _parse_iso_date(raw_value: str) -> date | None:
-        value = (raw_value or "").strip()
-        if not value:
-            return None
-        try:
-            return date.fromisoformat(value)
-        except ValueError:
-            return None
-
     updated_count = refresh_overdue_invoices()
     selected_filter = request.GET.get("status", "").strip().lower()
     search_query = request.GET.get("q", "").strip()
     issue_date_from_raw = request.GET.get("issue_date_from", "").strip()
     issue_date_to_raw = request.GET.get("issue_date_to", "").strip()
-    issue_date_from = _parse_iso_date(issue_date_from_raw)
-    issue_date_to = _parse_iso_date(issue_date_to_raw)
+
+    def _parse_issue_date(raw_value: str, label: str) -> tuple[date | None, str]:
+        value = (raw_value or "").strip()
+        if not value:
+            return None, ""
+        try:
+            parsed_value = parse_date(value)
+        except ValueError:
+            parsed_value = None
+        if parsed_value is None:
+            return None, f'{label} "{value}" is invalid. Use YYYY-MM-DD.'
+        return parsed_value, ""
+
+    issue_date_from, issue_date_from_error = _parse_issue_date(issue_date_from_raw, "From date")
+    issue_date_to, issue_date_to_error = _parse_issue_date(issue_date_to_raw, "To date")
+    issue_date_error = issue_date_from_error or issue_date_to_error
+    issue_date_from_filter = issue_date_from
+    issue_date_to_filter = issue_date_to
+    if issue_date_error:
+        if issue_date_from_error:
+            issue_date_from_filter = None
+        if issue_date_to_error:
+            issue_date_to_filter = None
+    elif issue_date_from and issue_date_to and issue_date_from > issue_date_to:
+        issue_date_error = "From date cannot be later than To date."
+        issue_date_from_filter = None
+        issue_date_to_filter = None
+
     invoices = Invoice.objects.select_related("customer").all()
 
     filter_map = {
@@ -453,10 +483,10 @@ def invoice_list(request):
     if active_statuses:
         invoices = invoices.filter(status__in=active_statuses)
 
-    if issue_date_from:
-        invoices = invoices.filter(issue_date__gte=issue_date_from)
-    if issue_date_to:
-        invoices = invoices.filter(issue_date__lte=issue_date_to)
+    if issue_date_from_filter:
+        invoices = invoices.filter(issue_date__gte=issue_date_from_filter)
+    if issue_date_to_filter:
+        invoices = invoices.filter(issue_date__lte=issue_date_to_filter)
 
     if search_query:
         invoices = invoices.filter(
@@ -503,8 +533,9 @@ def invoice_list(request):
             "active_filter_label": active_filter_label,
             "status_summary": status_summary,
             "result_count": len(invoice_rows),
-            "issue_date_from": issue_date_from.isoformat() if issue_date_from else "",
-            "issue_date_to": issue_date_to.isoformat() if issue_date_to else "",
+            "issue_date_from": issue_date_from_raw,
+            "issue_date_to": issue_date_to_raw,
+            "issue_date_error": issue_date_error,
             "batch_email_next_url": request.get_full_path(),
         },
     )
@@ -544,20 +575,19 @@ def invoice_dashboard(request):
         or 0
     )
 
+    successful_payments = successful_payments_queryset()
     collected_month = (
-        Invoice.objects.filter(
-            status=Invoice.STATUS_PAID,
-            updated_at__date__gte=month_start,
-            updated_at__date__lte=today,
-        ).aggregate(total=Sum("total_amount"))["total"]
+        successful_payments.filter(
+            paid_at__date__gte=month_start,
+            paid_at__date__lte=today,
+        ).aggregate(total=Sum("amount"))["total"]
         or 0
     )
     collected_year = (
-        Invoice.objects.filter(
-            status=Invoice.STATUS_PAID,
-            updated_at__date__gte=year_start,
-            updated_at__date__lte=today,
-        ).aggregate(total=Sum("total_amount"))["total"]
+        successful_payments.filter(
+            paid_at__date__gte=year_start,
+            paid_at__date__lte=today,
+        ).aggregate(total=Sum("amount"))["total"]
         or 0
     )
 

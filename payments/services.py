@@ -40,6 +40,14 @@ SUPPORTED_WEBHOOK_EVENTS = {
 }
 
 
+def successful_payments_queryset():
+    # Reporting should use completed payments with a real paid timestamp.
+    return PaymentRecord.objects.filter(
+        status=PaymentRecord.STATUS_SUCCEEDED,
+        paid_at__isnull=False,
+    )
+
+
 def _import_stripe():
     # Import Stripe only when needed, so Django can still start if Stripe is missing.
     try:

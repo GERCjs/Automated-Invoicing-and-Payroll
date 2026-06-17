@@ -1,6 +1,6 @@
 from django import forms
+from django.conf import settings
 from django.forms import inlineformset_factory
-from django.core.validators import FileExtensionValidator
 
 from .models import Customer, Invoice, InvoiceItem
 
@@ -52,11 +52,22 @@ InvoiceItemFormSet = inlineformset_factory(
 
 class InvoiceCsvUploadForm(forms.Form):
     csv_file = forms.FileField(
-        label="Vaniday Invoice CSV File",
-        help_text="Upload a CSV file exported from Vaniday invoice source data.",
-        validators=[FileExtensionValidator(allowed_extensions=["csv"])],
-        widget=forms.ClearableFileInput(attrs={"class": "form-control"}),
+        label="Upload Invoice File",
+        help_text="Choose a Vaniday CSV or Excel (.xlsx) invoice source file.",
+        widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": ".csv,.xlsx"}),
     )
+
+    def clean_csv_file(self):
+        uploaded_file = self.cleaned_data["csv_file"]
+        file_name = (uploaded_file.name or "").strip().lower()
+        if not (file_name.endswith(".csv") or file_name.endswith(".xlsx")):
+            raise forms.ValidationError("Upload a CSV or Excel (.xlsx) file.")
+        max_bytes = int(getattr(settings, "INVOICE_IMPORT_MAX_UPLOAD_BYTES", 2097152))
+        if uploaded_file.size > max_bytes:
+            raise forms.ValidationError(
+                f"Upload exceeds the maximum file size of {max_bytes // (1024 * 1024)} MB."
+            )
+        return uploaded_file
 
 
 class CustomerCreateForm(forms.ModelForm):

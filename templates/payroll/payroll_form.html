@@ -14,8 +14,19 @@
     {% csrf_token %}
     <div class="card mb-3">
         <div class="card-body">
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {% for error in form.non_field_errors %}
+                <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Employee ID</label>{{ form.employee_id }}</div>
+                <div class="col-md-6">
+                    <label class="form-label">Employee ID</label>
+                    {{ form.employee_id }}
+                    {% for error in form.employee_id.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
                 <div class="col-md-6"><label class="form-label">Employee Name</label>{{ form.employee_name }}</div>
                 <div class="col-md-3"><label class="form-label">Basic Salary</label>{{ form.basic_salary }}</div>
                 <div class="col-md-3"><label class="form-label">Physical Products Commission</label>{{ form.physical_products_commission }}</div>
@@ -38,6 +49,7 @@
                     <label class="form-label">Payment Date</label>
                     {{ form.payment_date }}
                     <div class="form-text">Format: DD-MM-YYYY</div>
+                    {% for error in form.payment_date.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
             </div>
             {% if form.errors %}

@@ -26,6 +26,26 @@ TEMPLATE_HEADERS = [
     "notes",
 ]
 
+PAYROLL_UPLOAD_COLUMN_LABELS = {
+    "employee_code": "Employee Code",
+    "employee_name": "Employee Name",
+    "employee_birthofdate": "Employee Birthofdate",
+    "working_days": "Working Days",
+    "no_pay_leave_days": "No Pay Leave Days",
+    "basic_salary": "Basic Salary",
+    "physical_products_commission": "Physical Products Commission",
+    "credit_commission": "Credit Commission",
+    "services_commission": "Services Commission",
+    "loan_deduction": "Loan Deduction",
+    "other_deductions": "Other Deductions",
+    "notes": "Notes",
+}
+
+PAYROLL_UPLOAD_HEADER_ALIASES = {
+    label.strip().lower(): header
+    for header, label in PAYROLL_UPLOAD_COLUMN_LABELS.items()
+}
+
 EMPLOYEE_CODE_PATTERN = re.compile(r"^STF-[0-9]{6}$")
 
 
@@ -109,7 +129,12 @@ def parse_payroll_excel(uploaded_file, payment_date: date) -> list[dict[str, Any
     if not rows:
         raise ValueError("Uploaded file is empty.")
 
-    headers = [str(h).strip().lower() if h is not None else "" for h in rows[0]]
+    headers = [
+        PAYROLL_UPLOAD_HEADER_ALIASES.get(str(h).strip().lower(), str(h).strip().lower())
+        if h is not None
+        else ""
+        for h in rows[0]
+    ]
     required = set(TEMPLATE_HEADERS)
     missing = required - set(headers)
     if missing:
@@ -121,6 +146,10 @@ def parse_payroll_excel(uploaded_file, payment_date: date) -> list[dict[str, Any
         if row is None or all(v in (None, "") for v in row):
             continue
         row_errors: list[str] = []
+        raw_values = {
+            header: _stringify_uploaded_value(row[index_map[header]])
+            for header in TEMPLATE_HEADERS
+        }
         employee_code = str(row[index_map["employee_code"]] or "").strip()
         employee_name = str(row[index_map["employee_name"]] or "").strip()
 
@@ -181,6 +210,7 @@ def parse_payroll_excel(uploaded_file, payment_date: date) -> list[dict[str, Any
                     "employee_code": employee_code,
                     "employee_name": employee_name,
                     "__parse_errors": row_errors,
+                    "__raw_values": raw_values,
                 }
             )
             continue
@@ -212,6 +242,7 @@ def parse_payroll_excel(uploaded_file, payment_date: date) -> list[dict[str, Any
                 "cpf_employer_rate": cpf.employer_rate,
                 "cpf_employee_amount": cpf.employee_amount,
                 "cpf_employer_amount": cpf.employer_amount,
+                "__raw_values": raw_values,
             }
         )
     return parsed
@@ -249,6 +280,7 @@ def parse_and_validate_payroll_excel(uploaded_file, payment_date: date) -> dict[
                     "employee_code": row.get("employee_code", ""),
                     "employee_name": row.get("employee_name", ""),
                     "errors": reasons,
+                    "raw_values": row.get("__raw_values", {}),
                 }
             )
         else:
@@ -304,3 +336,13 @@ def _parse_date_field(value: Any, label: str, row_errors: list[str]) -> date | N
             continue
     row_errors.append(f"{label} must be DD-MM-YYYY.")
     return None
+
+
+def _stringify_uploaded_value(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%d-%m-%Y")
+    if isinstance(value, date):
+        return value.strftime("%d-%m-%Y")
+    return str(value).strip()

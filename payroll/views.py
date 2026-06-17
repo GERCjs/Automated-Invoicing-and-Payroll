@@ -10,7 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -27,6 +27,8 @@ from notifications.models import EmailDeliveryLog
 from .forms import EmployeeForm, EmployeeUploadForm, PayrollRecordForm, PayrollUploadForm
 from .models import Employee, PayrollRecord
 from .services import (
+    PAYROLL_UPLOAD_COLUMN_LABELS,
+    TEMPLATE_HEADERS,
     cpf_for_2026,
     parse_and_validate_payroll_excel,
 )
@@ -261,7 +263,16 @@ def payroll_create(request):
                 - employee_cpf
             )
             payslip_record.created_by = request.user
-            payslip_record.save()
+            try:
+                with transaction.atomic():
+                    payslip_record.save()
+            except IntegrityError:
+                form.add_error(None, PayrollRecordForm.DUPLICATE_ERROR)
+                return render(
+                    request,
+                    "payroll/payroll_form.html",
+                    {"form": form, "is_edit": False, "payslip_record": None},
+                )
             log_event(
                 action="payroll.record.created",
                 user=request.user,
@@ -333,7 +344,16 @@ def payroll_edit(request, pk):
                 - payslip_record.deductions
                 - employee_cpf
             )
-            payslip_record.save()
+            try:
+                with transaction.atomic():
+                    payslip_record.save()
+            except IntegrityError:
+                form.add_error(None, PayrollRecordForm.DUPLICATE_ERROR)
+                return render(
+                    request,
+                    "payroll/payroll_form.html",
+                    {"form": form, "is_edit": True, "payslip_record": payslip_record},
+                )
             log_event(
                 action="payroll.record.updated",
                 user=request.user,
@@ -419,6 +439,7 @@ def payroll_upload_preview(request):
                             "employee_code": employee_code,
                             "employee_name": row.get("employee_name", ""),
                             "errors": ["Employee code not found in employee records."],
+                            "raw_values": row.get("__raw_values", {}),
                         }
                     )
                 else:
@@ -434,6 +455,7 @@ def payroll_upload_preview(request):
                 request.session["payroll_upload_preview"] = {
                     "payment_date": form.cleaned_data["payment_date"].isoformat(),
                     "rows": [_serialize_preview_row(r) for r in preview_rows],
+                    "invalid_rows": [_serialize_invalid_preview_row(r) for r in invalid_rows],
                 }
             log_event(
                 action="payroll.upload.previewed",
@@ -486,6 +508,70 @@ def _serialize_preview_row(row):
     }
 
 
+def _serialize_invalid_preview_row(row):
+    raw_values = row.get("raw_values") or {}
+    return {
+        "row_number": row.get("row_number"),
+        "employee_code": str(row.get("employee_code", "")),
+        "employee_name": str(row.get("employee_name", "")),
+        "errors": [str(error) for error in row.get("errors", [])],
+        "raw_values": {
+            header: str(raw_values.get(header, ""))
+            for header in TEMPLATE_HEADERS
+        },
+    }
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def download_invalid_rows(request):
+    upload_data = request.session.get("payroll_upload_preview") or {}
+    invalid_rows = upload_data.get("invalid_rows") or []
+
+    if not upload_data:
+        messages.error(request, "Payroll upload session expired. Please upload the file again.")
+        return redirect("payroll-upload-preview")
+
+    if not invalid_rows:
+        messages.warning(request, "There are no invalid payroll rows to download.")
+        return redirect("payroll-upload-preview")
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Invalid Payroll Rows"
+    worksheet.append(
+        ["Original Excel Row Number"]
+        + [PAYROLL_UPLOAD_COLUMN_LABELS[header] for header in TEMPLATE_HEADERS]
+        + ["Error Reason"]
+    )
+
+    for row in invalid_rows:
+        raw_values = row.get("raw_values") or {}
+        worksheet.append(
+            [row.get("row_number", "")]
+            + [raw_values.get(header, "") for header in TEMPLATE_HEADERS]
+            + [", ".join(row.get("errors", []))]
+        )
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    log_event(
+        action="payroll.upload.invalid_rows_downloaded",
+        user=request.user,
+        metadata={"invalid_row_count": len(invalid_rows)},
+        ip_address=get_client_ip(request),
+    )
+
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="payroll_invalid_rows.xlsx"'
+    return response
+
+
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_upload_confirm_save(request):
@@ -505,45 +591,51 @@ def payroll_upload_confirm_save(request):
     skipped_count = 0
     invalid_format_count = 0
 
-    with transaction.atomic():
-        for row in serialized_rows:
-            employee_code = str(row["employee_code"]).strip()
-            if not EMPLOYEE_CODE_PATTERN.fullmatch(employee_code):
-                invalid_format_count += 1
-                continue
-            if PayrollRecord.objects.filter(employee_id=employee_code, payment_date=payment_date).exists():
-                skipped_count += 1
-                continue
+    for row in serialized_rows:
+        employee_code = str(row["employee_code"]).strip()
+        if not EMPLOYEE_CODE_PATTERN.fullmatch(employee_code):
+            invalid_format_count += 1
+            continue
 
-            allowances = (
-                Decimal(row["physical_products_commission"])
-                + Decimal(row["credit_commission"])
-                + Decimal(row["services_commission"])
-            )
-            deductions = Decimal(row["loan_deduction"]) + Decimal(row["other_deductions"])
-            record = PayrollRecord(
-                employee_name=row["employee_name"],
-                employee_id=employee_code,
-                basic_salary=Decimal(row["basic_salary"]),
-                physical_products_commission=Decimal(row["physical_products_commission"]),
-                credit_commission=Decimal(row["credit_commission"]),
-                services_commission=Decimal(row["services_commission"]),
-                allowances=allowances,
-                loan_deduction=Decimal(row["loan_deduction"]),
-                other_deductions=Decimal(row["other_deductions"]),
-                deductions=deductions,
-                cpf_contribution=Decimal(row["cpf_employee_amount"]),
-                net_salary=Decimal(row["net_pay"]),
-                payment_date=payment_date,
-                created_by=request.user,
-            )
-            employee = Employee.objects.filter(employee_code=record.employee_id).first()
-            if employee:
-                record.nric = (employee.nric or "")[:9]
-                record.cpf_exempted = employee.cpf_exempt
-                record.sdl_exempted = employee.sdl_exempt
-            record.save()
-            saved_count += 1
+        try:
+            with transaction.atomic():
+                if PayrollRecord.objects.filter(employee_id=employee_code, payment_date=payment_date).exists():
+                    skipped_count += 1
+                    continue
+
+                allowances = (
+                    Decimal(row["physical_products_commission"])
+                    + Decimal(row["credit_commission"])
+                    + Decimal(row["services_commission"])
+                )
+                deductions = Decimal(row["loan_deduction"]) + Decimal(row["other_deductions"])
+                record = PayrollRecord(
+                    employee_name=row["employee_name"],
+                    employee_id=employee_code,
+                    basic_salary=Decimal(row["basic_salary"]),
+                    physical_products_commission=Decimal(row["physical_products_commission"]),
+                    credit_commission=Decimal(row["credit_commission"]),
+                    services_commission=Decimal(row["services_commission"]),
+                    allowances=allowances,
+                    loan_deduction=Decimal(row["loan_deduction"]),
+                    other_deductions=Decimal(row["other_deductions"]),
+                    deductions=deductions,
+                    cpf_contribution=Decimal(row["cpf_employee_amount"]),
+                    net_salary=Decimal(row["net_pay"]),
+                    payment_date=payment_date,
+                    created_by=request.user,
+                )
+                employee = Employee.objects.filter(employee_code=record.employee_id).first()
+                if employee:
+                    record.nric = (employee.nric or "")[:9]
+                    record.cpf_exempted = employee.cpf_exempt
+                    record.sdl_exempted = employee.sdl_exempt
+                record.save()
+        except IntegrityError:
+            skipped_count += 1
+            continue
+
+        saved_count += 1
 
     request.session.pop("payroll_upload_preview", None)
     log_event(

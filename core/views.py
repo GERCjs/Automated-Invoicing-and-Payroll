@@ -3,6 +3,7 @@ from django.db import DatabaseError
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from accounts.permissions import get_user_role, role_required
@@ -11,6 +12,7 @@ from imports.models import ImportJob, ImportRowError
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
 from payments.models import PaymentRecord
+from payments.services import successful_payments_queryset
 from payroll.models import Employee, PayrollBatch, PayrollEntry, PayrollRecord
 
 from .models import AuditLog
@@ -52,7 +54,7 @@ AUDIT_ACTION_LABELS = {
     "admin.account.deleted": "Account deleted",
     "admin.payment_reminders.updated": "Reminder settings updated",
     "admin.payment_reminders.run_check": "Reminder check executed",
-    "admin.mass_email.sent": "Mass email sent",
+    "admin.mass_email.sent": "Announcement email sent",
 }
 
 
@@ -119,7 +121,7 @@ def explain_audit_action(action):
         "admin.account.deleted": "An admin deleted a user account.",
         "admin.payment_reminders.updated": "An admin updated reminder settings.",
         "admin.payment_reminders.run_check": "An admin ran the reminder check job.",
-        "admin.mass_email.sent": "An admin sent a mass email.",
+        "admin.mass_email.sent": "An admin sent an announcement email.",
     }
     return descriptions.get(action, describe_audit_action(action))
 
@@ -175,6 +177,28 @@ def _recent_month_starts(today, total_months=6):
     return month_starts
 
 
+def _currency_string(value):
+    return f"S${float(value or 0):,.2f}"
+
+
+def _build_chart_summary(month_labels, values):
+    numeric_values = [float(value or 0) for value in values]
+    total_value = sum(numeric_values)
+    has_data = any(value > 0 for value in numeric_values)
+    peak_label = ""
+    peak_value = 0.0
+    if has_data and month_labels and numeric_values:
+        peak_index = max(range(len(numeric_values)), key=numeric_values.__getitem__)
+        peak_label = month_labels[peak_index]
+        peak_value = numeric_values[peak_index]
+    return {
+        "has_data": has_data,
+        "six_month_total": total_value,
+        "peak_label": peak_label,
+        "peak_value": peak_value,
+    }
+
+
 def home(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
@@ -198,6 +222,8 @@ def dashboard(request):
     recent_since = timezone.now() - timezone.timedelta(days=7)
     today = timezone.localdate()
     current_month_start = today.replace(day=1)
+    report_generated_at = timezone.localtime()
+    reporting_period_label = current_month_start.strftime("%B %Y")
 
     audit_logs = AuditLog.objects.select_related("user", "user__role_profile")
     audit_action_stats = _safe_list(
@@ -232,14 +258,13 @@ def dashboard(request):
     payroll_total_net = _safe_sum(PayrollRecord.objects.all(), "net_salary")
 
     import_status_counts = _safe_group_counts(ImportJob.objects.all(), "status")
+    import_failed_count = import_status_counts.get(ImportJob.STATUS_FAILED, 0)
+    import_with_errors_count = import_status_counts.get(ImportJob.STATUS_COMPLETED_WITH_ERRORS, 0)
     recent_import_errors = _safe_list(ImportRowError.objects.select_related("import_job").order_by("-created_at")[:6])
 
     email_status_counts = _safe_group_counts(EmailDeliveryLog.objects.all(), "status")
 
-    succeeded_payments = PaymentRecord.objects.filter(
-        status=PaymentRecord.STATUS_SUCCEEDED,
-        paid_at__isnull=False,
-    )
+    succeeded_payments = successful_payments_queryset()
     collected_total = _safe_sum(succeeded_payments, "amount")
     refunded_total = _safe_sum(
         PaymentRecord.objects.filter(status=PaymentRecord.STATUS_REFUNDED),
@@ -248,6 +273,9 @@ def dashboard(request):
     collected_this_month = _safe_sum(
         succeeded_payments.filter(paid_at__date__gte=current_month_start, paid_at__date__lte=today),
         "amount",
+    )
+    successful_payment_count_this_month = _safe_count(
+        succeeded_payments.filter(paid_at__date__gte=current_month_start, paid_at__date__lte=today)
     )
 
     month_starts = _recent_month_starts(today, total_months=6)
@@ -291,6 +319,13 @@ def dashboard(request):
         PayrollRecord.objects.filter(payment_date__gte=current_month_start, payment_date__lte=today),
         "net_salary",
     )
+    payroll_records_this_month = PayrollRecord.objects.filter(
+        payment_date__gte=current_month_start,
+        payment_date__lte=today,
+    )
+    payroll_paid_employee_count = _safe_count(
+        payroll_records_this_month.values("employee_id").distinct()
+    )
     overdue_invoice_amount = _safe_sum(
         Invoice.objects.filter(status=Invoice.STATUS_OVERDUE),
         "total_amount",
@@ -302,6 +337,117 @@ def dashboard(request):
             action__in=["auth.permission_denied", "auth.login.failed"],
         )
     )
+    failed_email_count = email_status_counts.get(EmailDeliveryLog.STATUS_FAILED, 0)
+    security_alert_total = suspicious_activity_count + failed_email_count
+    import_issue_total = import_failed_count + import_with_errors_count
+
+    detail_report_links = [
+        {
+            "label": "Finance Report",
+            "description": "Review invoice collections and customer balances.",
+            "url": reverse("invoice-customer-report"),
+        },
+        {
+            "label": "Payment Report",
+            "description": "Review payment activity, failed attempts and refunds.",
+            "url": reverse("payment-stripe-report"),
+        },
+        {
+            "label": "Payroll Report",
+            "description": "Review payroll cost and employee payment records.",
+            "url": reverse("payroll-report"),
+        },
+        {
+            "label": "Security Report",
+            "description": "Review suspicious activity and failed email delivery issues.",
+            "url": reverse("admin-security-report"),
+        },
+    ]
+    secondary_summary_items = [
+        {
+            "label": "Overdue Amount",
+            "value": _currency_string(overdue_invoice_amount),
+            "note": f"{invoice_status_counts.get(Invoice.STATUS_OVERDUE, 0)} overdue invoice(s)",
+            "link_label": "Review overdue invoices",
+            "link_url": f"{reverse('invoice-list')}?status=overdue",
+        },
+        {
+            "label": "Refunded Amount",
+            "value": _currency_string(refunded_total),
+            "note": "Refunded payments remain excluded from net collection.",
+            "link_label": "Review refund activity",
+            "link_url": reverse("payment-stripe-report"),
+        },
+        {
+            "label": "Failed Email Deliveries",
+            "value": str(failed_email_count),
+            "note": "Invoice, reminder or payslip messages may require follow-up.",
+            "link_label": "Review failed emails",
+            "link_url": f"{reverse('email-delivery-log-list')}?status=failed",
+        },
+        {
+            "label": "Import Issues",
+            "value": str(import_issue_total),
+            "note": "Failed and completed-with-errors import jobs needing review.",
+            "link_label": "Review import errors",
+            "link_url": reverse("dashboard-validation-errors"),
+        },
+    ]
+    management_attention_items = []
+    if overdue_invoice_amount or invoice_status_counts.get(Invoice.STATUS_OVERDUE, 0):
+        management_attention_items.append(
+            {
+                "priority": "High",
+                "priority_class": "status-danger",
+                "area": "Finance",
+                "finding": f"{invoice_status_counts.get(Invoice.STATUS_OVERDUE, 0)} overdue invoice(s)",
+                "impact": f"{_currency_string(overdue_invoice_amount)} remains unpaid.",
+                "link_label": "Review overdue invoices",
+                "link_url": f"{reverse('invoice-list')}?status=overdue",
+            }
+        )
+    if suspicious_activity_count:
+        management_attention_items.append(
+            {
+                "priority": "High",
+                "priority_class": "status-warning",
+                "area": "Security",
+                "finding": f"{suspicious_activity_count} suspicious event(s)",
+                "impact": "Accounts or access attempts may require investigation.",
+                "link_label": "Review security issues",
+                "link_url": reverse("admin-security-report"),
+            }
+        )
+    if failed_email_count:
+        management_attention_items.append(
+            {
+                "priority": "Medium",
+                "priority_class": "status-warning",
+                "area": "Email",
+                "finding": f"{failed_email_count} failed delivery log(s)",
+                "impact": "Some users may not receive invoices, reminders or payroll documents.",
+                "link_label": "Review failed emails",
+                "link_url": f"{reverse('email-delivery-log-list')}?status=failed",
+            }
+        )
+    if import_failed_count or import_with_errors_count:
+        management_attention_items.append(
+            {
+                "priority": "Low",
+                "priority_class": "status-neutral",
+                "area": "Imports",
+                "finding": (
+                    f"{import_failed_count} failed import(s) and "
+                    f"{import_with_errors_count} import(s) completed with errors."
+                ),
+                "impact": "Some imported records may need correction before follow-up reporting.",
+                "link_label": "Review import errors",
+                "link_url": reverse("dashboard-validation-errors"),
+            }
+        )
+
+    collection_chart_summary = _build_chart_summary(month_labels, monthly_collection_values)
+    payroll_chart_summary = _build_chart_summary(month_labels, monthly_payroll_values)
 
     return render(
         request,
@@ -326,12 +472,12 @@ def dashboard(request):
             "payroll_pending_entries": payroll_pending_entries,
             "payroll_total_net": payroll_total_net,
             "import_total": _safe_count(ImportJob.objects.all()),
-            "import_failed_count": import_status_counts.get(ImportJob.STATUS_FAILED, 0),
-            "import_with_errors_count": import_status_counts.get(ImportJob.STATUS_COMPLETED_WITH_ERRORS, 0),
+            "import_failed_count": import_failed_count,
+            "import_with_errors_count": import_with_errors_count,
             "import_error_total": _safe_count(ImportRowError.objects.all()),
             "recent_import_errors": recent_import_errors,
             "email_sent_count": email_status_counts.get(EmailDeliveryLog.STATUS_SENT, 0),
-            "email_failed_count": email_status_counts.get(EmailDeliveryLog.STATUS_FAILED, 0),
+            "email_failed_count": failed_email_count,
             "collection_trend_labels": month_labels,
             "collection_trend_values": monthly_collection_values,
             "outstanding_vs_collected_labels": ["Collected", "Outstanding", "Refunded"],
@@ -343,9 +489,21 @@ def dashboard(request):
             "payroll_trend_labels": month_labels,
             "payroll_trend_values": monthly_payroll_values,
             "collected_this_month": collected_this_month,
+            "successful_payment_count_this_month": successful_payment_count_this_month,
             "payroll_cost_this_month": payroll_cost_this_month,
+            "payroll_paid_employee_count": payroll_paid_employee_count,
             "overdue_invoice_amount": overdue_invoice_amount,
             "suspicious_activity_count": suspicious_activity_count,
+            "security_alert_total": security_alert_total,
+            "refunded_total": refunded_total,
+            "import_issue_total": import_issue_total,
+            "reporting_period_label": reporting_period_label,
+            "report_generated_at": report_generated_at,
+            "detail_report_links": detail_report_links,
+            "secondary_summary_items": secondary_summary_items,
+            "management_attention_items": management_attention_items,
+            "collection_chart_summary": collection_chart_summary,
+            "payroll_chart_summary": payroll_chart_summary,
         },
     )
 

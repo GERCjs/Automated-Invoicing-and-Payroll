@@ -7,9 +7,172 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Admin &amp; Security Report</h1>
-        <p class="page-subtitle">Operational report for account administration, security monitoring, and reminder operations.</p>
+        <p class="page-subtitle">Use this report to investigate failed logins, suspended accounts, permission problems and email delivery failures.</p>
     </div>
-    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Admin Console</a>
+    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Admin Dashboard</a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="section-heading mb-0">Filters</h2>
+            {% if has_active_filters %}
+            <a href="{% url 'admin-security-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+            {% endif %}
+        </div>
+        <form id="adminSecurityReportFilterForm" method="get" class="row g-3 align-items-end" data-date-range-form>
+            <div class="col-md-4">
+                <label for="eventDateFrom" class="form-label">Event Date From</label>
+                <input
+                    id="eventDateFrom"
+                    type="date"
+                    name="date_from"
+                    value="{{ date_from }}"
+                    class="form-control"
+                    data-date-from
+                >
+            </div>
+            <div class="col-md-4">
+                <label for="eventDateTo" class="form-label">Event Date To</label>
+                <input
+                    id="eventDateTo"
+                    type="date"
+                    name="date_to"
+                    value="{{ date_to }}"
+                    class="form-control"
+                    data-date-to
+                >
+            </div>
+            <div class="col-md-4">
+                <div class="d-flex flex-wrap gap-2">
+                    <button type="submit" class="btn btn-primary">Apply Filters</button>
+                    <a href="{% url 'admin-security-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+                </div>
+            </div>
+            <div class="col-12">
+                <div
+                    id="adminSecurityReportDateMessage"
+                    class="form-text text-danger{% if not date_filter_error %} d-none{% endif %}"
+                    data-date-error
+                >{{ date_filter_error }}</div>
+            </div>
+        </form>
+        {% if has_active_filters and active_filter_badges %}
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            {% for badge in active_filter_badges %}
+            <span class="badge bg-secondary">{{ badge }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6 col-xl">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Failed Logins</div>
+                <div class="h4 mb-2 text-warning">{{ failed_login_attempts_count }}</div>
+                <a href="{{ suspicious_failed_url }}" class="btn btn-sm btn-outline-warning">Review Failed Logins</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Permission Denied Events</div>
+                <div class="h4 mb-2 text-danger">{{ permission_denied_count }}</div>
+                <a href="{{ permission_denied_audit_url }}" class="btn btn-sm btn-outline-danger">View Audit Details</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Suspended Accounts</div>
+                <div class="h4 mb-2">{{ suspended_accounts_count }}</div>
+                <a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-secondary">Review Suspicious Activity</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Failed Email Deliveries</div>
+                <div class="h4 mb-2 {% if failed_email_deliveries_count %}text-danger{% endif %}">{{ failed_email_deliveries_count }}</div>
+                <a href="{{ failed_email_logs_url }}" class="btn btn-sm btn-outline-danger">Review Failed Emails</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 col-xl">
+        <div class="dashboard-card h-100">
+            <div class="card-body">
+                <div class="text-muted small">Requires Investigation</div>
+                <div class="h4 mb-2">{{ requires_investigation_count }}</div>
+                <a href="{{ audit_log_url }}" class="btn btn-sm btn-outline-dark">View Audit Details</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header">Requires Investigation</div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-clean table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Issue</th>
+                        <th>What is happening?</th>
+                        <th>Count</th>
+                        <th>Suggested next step</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if failed_login_attempts_count %}
+                    <tr>
+                        <td>Failed login attempts</td>
+                        <td>Some users could not sign in successfully and may need investigation.</td>
+                        <td>{{ failed_login_attempts_count }}</td>
+                        <td>Review recent failed logins and suspend any account with repeated suspicious attempts.</td>
+                        <td class="text-end"><a href="{{ suspicious_failed_url }}" class="btn btn-sm btn-outline-warning">Review Failed Logins</a></td>
+                    </tr>
+                    {% endif %}
+                    {% if permission_denied_count %}
+                    <tr>
+                        <td>Permission denied events</td>
+                        <td>Users tried to open pages without the required role or permission.</td>
+                        <td>{{ permission_denied_count }}</td>
+                        <td>Check whether the access attempt was harmless or needs follow-up.</td>
+                        <td class="text-end"><a href="{{ permission_denied_audit_url }}" class="btn btn-sm btn-outline-danger">View Audit Details</a></td>
+                    </tr>
+                    {% endif %}
+                    {% if failed_email_deliveries_count %}
+                    <tr>
+                        <td>Failed email deliveries</td>
+                        <td>Some reminder, invoice or announcement emails could not be delivered.</td>
+                        <td>{{ failed_email_deliveries_count }}</td>
+                        <td>Review the failed delivery log and correct recipient or SMTP issues.</td>
+                        <td class="text-end"><a href="{{ failed_email_logs_url }}" class="btn btn-sm btn-outline-danger">Review Failed Emails</a></td>
+                    </tr>
+                    {% endif %}
+                    {% if suspended_accounts_count %}
+                    <tr>
+                        <td>Suspended accounts</td>
+                        <td>Some accounts are currently suspended and may need restoration or continued containment.</td>
+                        <td>{{ suspended_accounts_count }}</td>
+                        <td>Check flagged accounts and decide whether to keep them suspended or restore them.</td>
+                        <td class="text-end"><a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-secondary">Review Suspicious Activity</a></td>
+                    </tr>
+                    {% endif %}
+                    {% if not failed_login_attempts_count and not permission_denied_count and not failed_email_deliveries_count and not suspended_accounts_count %}
+                    <tr><td colspan="5" class="text-center py-3"><div class="empty-state">No urgent admin or security issues were found from the current records.</div></td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <div class="card mb-3">
@@ -42,7 +205,7 @@
             </div>
         </div>
         <div class="table-responsive">
-            <table class="table table-clean table-sm mb-0">
+            <table class="table table-clean mb-0">
                 <thead>
                     <tr>
                         <th>Role</th>
@@ -64,7 +227,7 @@
     </div>
 </div>
 
-<h2 class="section-heading mb-3">Report Visuals</h2>
+<h2 class="section-heading mb-3">Useful Charts</h2>
 <div class="row g-3 mb-3">
     <div class="col-lg-6">
         <div class="report-chart-card">
@@ -73,6 +236,7 @@
                 <canvas id="usersByRoleChart" class="report-chart-canvas" aria-label="Users by role chart" role="img"></canvas>
                 <div id="usersByRoleChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Shows how user accounts are distributed across the system roles.</div>
         </div>
     </div>
     <div class="col-lg-6">
@@ -82,6 +246,7 @@
                 <canvas id="accountStatusChart" class="report-chart-canvas" aria-label="Account status breakdown chart" role="img"></canvas>
                 <div id="accountStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Visible totals: Active {{ active_users_count }}, Suspended or inactive {{ suspended_or_inactive_only_count }}, Unverified {{ unverified_users_count }}.</div>
         </div>
     </div>
     <div class="col-lg-6">
@@ -91,6 +256,7 @@
                 <canvas id="failedLoginTrendChart" class="report-chart-canvas" aria-label="Failed login attempts trend chart" role="img"></canvas>
                 <div id="failedLoginTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Shows whether failed login activity is increasing and needs immediate investigation.</div>
         </div>
     </div>
     <div class="col-lg-6">
@@ -100,94 +266,74 @@
                 <canvas id="adminActionSummaryChart" class="report-chart-canvas" aria-label="Admin action summary chart" role="img"></canvas>
                 <div id="adminActionSummaryChartEmpty" class="report-chart-empty d-none">No data available yet</div>
             </div>
+            <div class="px-3 pb-3 text-muted small">Summarises key admin actions such as account creation, role changes and password resets.</div>
         </div>
     </div>
 </div>
 
-<div class="card mb-3">
-    <div class="card-header">Security Summary</div>
-    <div class="card-body">
-        <div class="row g-3 mb-3">
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Failed Login Attempts</div>
-                    <div class="h4 mb-0 text-warning">{{ failed_login_attempts_count }}</div>
-                </div>
+<h2 class="section-heading mb-3">Detailed Records</h2>
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Recent Suspicious Activities</span>
+                <a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-secondary">Review Suspicious Activity</a>
             </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Suspicious Activity Count</div>
-                    <div class="h4 mb-0 text-danger">{{ suspicious_activity_count }}</div>
-                </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Suspended Accounts</div>
-                    <div class="h4 mb-0">{{ suspended_accounts_count }}</div>
-                </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">As Of</div>
-                    <div class="h5 mb-0">{{ today }}</div>
-                </div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>User</th>
+                            <th>Event</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in recent_suspicious_activities %}
+                        <tr>
+                            <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
+                            <td>{{ log.user.username|default:"System" }}</td>
+                            <td>{{ log.action }}</td>
+                            <td class="text-end"><a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-primary">Review Suspicious Activity</a></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No suspicious activity was found for the current records.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
-
-        <div class="row g-3">
-            <div class="col-lg-6">
-                <div class="card h-100">
-                    <div class="card-header bg-light">Recent Suspicious Activities</div>
-                    <div class="table-responsive">
-                        <table class="table table-clean table-sm mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>User</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for log in recent_suspicious_activities %}
-                                <tr>
-                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
-                                    <td>{{ log.user.username|default:"System" }}</td>
-                                    <td><span class="text-muted small">{{ log.action }}</span></td>
-                                </tr>
-                                {% empty %}
-                                <tr><td colspan="3" class="text-center py-3">No suspicious activity logs.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Recent Failed Email Deliveries</span>
+                <a href="{{ failed_email_logs_url }}" class="btn btn-sm btn-outline-danger">Review Failed Emails</a>
             </div>
-            <div class="col-lg-6">
-                <div class="card h-100">
-                    <div class="card-header bg-light">Recent Login-Related Audit Logs</div>
-                    <div class="table-responsive">
-                        <table class="table table-clean table-sm mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>User</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for log in recent_login_related_logs %}
-                                <tr>
-                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
-                                    <td>{{ log.user.username|default:"System" }}</td>
-                                    <td><span class="text-muted small">{{ log.action }}</span></td>
-                                </tr>
-                                {% empty %}
-                                <tr><td colspan="3" class="text-center py-3">No login-related logs available.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+            <div class="table-responsive">
+                <table class="table table-clean table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Attempted At</th>
+                            <th>Recipient</th>
+                            <th>Template</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in recent_failed_email_logs %}
+                        <tr>
+                            <td>{{ log.attempted_at|date:"d M Y, H:i" }}</td>
+                            <td>{{ log.recipient_email }}</td>
+                            <td>{{ log.template_key }}</td>
+                            <td>{{ log.get_status_display }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" class="text-center py-3">No failed email deliveries were found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -208,7 +354,7 @@
                             <tbody>
                                 {% for log in recent_account_creations %}
                                 <tr>
-                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
                                     <td><span class="text-muted small">{{ log.action }}</span></td>
                                 </tr>
                                 {% empty %}
@@ -230,7 +376,7 @@
                             <tbody>
                                 {% for log in recent_role_changes %}
                                 <tr>
-                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
                                     <td><span class="text-muted small">{{ log.action }}</span></td>
                                 </tr>
                                 {% empty %}
@@ -252,7 +398,7 @@
                             <tbody>
                                 {% for log in recent_password_changes %}
                                 <tr>
-                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                                    <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
                                     <td><span class="text-muted small">{{ log.action }}</span></td>
                                 </tr>
                                 {% empty %}
@@ -266,9 +412,12 @@
         </div>
 
         <div class="card mt-3">
-            <div class="card-header bg-light">Recent Admin Actions</div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Recent Admin Actions</span>
+                <a href="{{ audit_log_url }}" class="btn btn-sm btn-outline-dark">View Audit Details</a>
+            </div>
             <div class="table-responsive">
-                <table class="table table-clean table-sm mb-0">
+                <table class="table table-clean table-hover mb-0">
                     <thead>
                         <tr>
                             <th>Time</th>
@@ -280,7 +429,7 @@
                     <tbody>
                         {% for log in recent_admin_actions %}
                         <tr>
-                            <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
+                            <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
                             <td>{{ log.user.username|default:"System" }}</td>
                             <td><span class="text-muted small">{{ log.action }}</span></td>
                             <td>{{ log.target_type }} {{ log.target_id }}</td>
@@ -296,7 +445,13 @@
 </div>
 
 <div class="card">
-    <div class="card-header">Reminder Summary</div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Reminder and Announcement Tools</span>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{{ reminder_settings_url }}" class="btn btn-sm btn-outline-dark">Open Reminder Settings</a>
+            <a href="{{ announcement_email_url }}" class="btn btn-sm btn-outline-primary">Send Announcement</a>
+        </div>
+    </div>
     <div class="card-body">
         <div class="row g-3 mb-3">
             <div class="col-md-4 col-sm-6">
@@ -337,14 +492,14 @@
             </div>
             <div class="col-md-4 col-sm-6">
                 <div class="sub-kpi h-100">
-                    <div class="text-muted small">Mass Email Setting</div>
+                    <div class="text-muted small">Announcement Email Setting</div>
                     <div class="fw-semibold">{% if reminder_settings.mass_email_enabled %}Enabled{% else %}Disabled{% endif %}</div>
                 </div>
             </div>
         </div>
 
         <div class="table-responsive">
-            <table class="table table-clean table-sm mb-0">
+            <table class="table table-clean table-hover mb-0">
                 <thead>
                     <tr>
                         <th>Attempted At</th>
@@ -356,7 +511,7 @@
                 <tbody>
                     {% for log in recent_reminder_email_logs %}
                     <tr>
-                        <td>{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
+                        <td>{{ log.attempted_at|date:"d M Y, H:i" }}</td>
                         <td>{{ log.recipient_email }}</td>
                         <td>{{ log.template_key }}</td>
                         <td>{{ log.get_status_display }}</td>
@@ -377,6 +532,7 @@
 {{ failed_login_trend_labels|json_script:"failed-login-trend-labels-data" }}
 {{ failed_login_trend_values|json_script:"failed-login-trend-values-data" }}
 {{ admin_action_summary|json_script:"admin-action-summary-data" }}
+<script src="{% static 'js/date-range-filters.js' %}"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 <script src="{% static 'js/report_charts.js' %}"></script>
 <script>
@@ -407,7 +563,8 @@
                         precision: 0
                     }
                 }
-            }
+            },
+            emptyText: "No user-role data is available yet."
         });
 
         var activeUsers = window.ReportCharts.parseJsonScript("active-users-data", 0);
@@ -432,7 +589,8 @@
                 plugins: {
                     legend: { position: "bottom" }
                 }
-            }
+            },
+            emptyText: "No account status data is available yet."
         });
 
         var failedLoginTrendLabels = window.ReportCharts.parseJsonScript("failed-login-trend-labels-data", []);
@@ -464,7 +622,8 @@
                         precision: 0
                     }
                 }
-            }
+            },
+            emptyText: "No failed login trend data is available yet."
         });
 
         var adminActionSummary = window.ReportCharts.parseJsonScript("admin-action-summary-data", []);
@@ -493,7 +652,8 @@
                         precision: 0
                     }
                 }
-            }
+            },
+            emptyText: "No admin action summary data is available yet."
         });
     })();
 </script>

@@ -55,7 +55,7 @@
         if (!hasData || typeof window.Chart === "undefined") {
             canvas.classList.add("d-none");
             emptyState.classList.remove("d-none");
-            emptyState.textContent = "No data available yet";
+            emptyState.textContent = config.emptyText || "No data available yet";
             return null;
         }
 

@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.humanize",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -136,6 +137,8 @@ REGISTERED_OFFICE_TEXT = os.getenv(
     "Attention: finance@vaniday.com, 7 Temasek Boulevard, #12-07 Suntec Tower One, Singapore 038987, Singapore.",
 )
 INVOICE_PAYMENT_TERM_DAYS = int(os.getenv("INVOICE_PAYMENT_TERM_DAYS", "30"))
+INVOICE_IMPORT_MAX_UPLOAD_BYTES = int(os.getenv("INVOICE_IMPORT_MAX_UPLOAD_BYTES", "2097152"))
+INVOICE_IMPORT_MAX_ROWS = int(os.getenv("INVOICE_IMPORT_MAX_ROWS", "1000"))
 INVOICE_BANK_TEXT = os.getenv(
     "INVOICE_BANK_TEXT",
     f"{COMPANY_NAME}\n"

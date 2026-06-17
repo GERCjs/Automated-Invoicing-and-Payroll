@@ -1,458 +1,511 @@
 {% extends "base.html" %}
 {% load static %}
+{% load humanize %}
 
 {% block title %}Invoice / Customer Report{% endblock %}
+{% block page_container_class %}container-xl{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Invoice / Customer Report</h1>
-        <p class="page-subtitle">Invoice collections and customer activity summary as of {{ today }}.</p>
+<div class="invoice-report-page">
+    <div class="page-header">
+        <div>
+            <h1 class="page-title">Invoice / Customer Report</h1>
+            <p class="page-subtitle">Use this report to monitor collections, identify unpaid invoices and decide which customers require follow-up.</p>
+        </div>
     </div>
-</div>
 
-<div class="card mb-3">
-    <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-            <h2 class="section-heading mb-0">Filter / Drill-down</h2>
-            {% if has_active_filters %}
-            <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Reset Filters</a>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h2 class="section-heading mb-0">Filters</h2>
+                {% if has_active_filters %}
+                <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+                {% endif %}
+            </div>
+            <form
+                id="invoiceCustomerReportFilterForm"
+                method="get"
+                class="row g-3 align-items-end invoice-report-filters"
+                data-date-range-form
+            >
+                <div class="col-12 col-lg-4">
+                    <label for="reportSearch" class="form-label">Search Invoice or Customer</label>
+                    <input
+                        id="reportSearch"
+                        type="search"
+                        name="q"
+                        value="{{ search_query }}"
+                        class="form-control"
+                        placeholder="Invoice number, customer name or customer email"
+                    >
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label for="reportStatus" class="form-label">Invoice Status</label>
+                    <select id="reportStatus" name="status" class="form-select">
+                        {% for option in status_filter_options %}
+                        <option value="{{ option.value }}" {% if selected_status == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label for="reportCustomer" class="form-label">Customer</label>
+                    <select id="reportCustomer" name="customer" class="form-select">
+                        <option value="" {% if not selected_customer_id %}selected{% endif %}>All customers</option>
+                        {% for option in customer_filter_options %}
+                        <option value="{{ option.customer_id }}" {% if selected_customer_id == option.customer_id|stringformat:"s" %}selected{% endif %}>
+                            {{ option.customer__name }} ({{ option.customer__email }})
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-4">
+                    <label for="reportDateType" class="form-label">Date Type</label>
+                    <select id="reportDateType" name="date_type" class="form-select">
+                        {% for option in date_type_options %}
+                        <option value="{{ option.value }}" {% if selected_date_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-4">
+                    <label for="reportDateFrom" class="form-label">From Date</label>
+                    <input
+                        id="reportDateFrom"
+                        type="date"
+                        name="date_from"
+                        value="{{ date_from }}"
+                        class="form-control"
+                        data-date-from
+                    >
+                </div>
+                <div class="col-12 col-md-4">
+                    <label for="reportDateTo" class="form-label">To Date</label>
+                    <input
+                        id="reportDateTo"
+                        type="date"
+                        name="date_to"
+                        value="{{ date_to }}"
+                        class="form-control"
+                        data-date-to
+                    >
+                </div>
+                <div class="col-12">
+                    <div
+                        id="invoiceCustomerReportDateMessage"
+                        class="form-text text-danger{% if not date_filter_error %} d-none{% endif %}"
+                        data-date-error
+                    >{{ date_filter_error }}</div>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label for="reportQuickRange" class="form-label">Quick Date Range</label>
+                    <select id="reportQuickRange" name="quick_range" class="form-select">
+                        {% for option in quick_range_options %}
+                        <option value="{{ option.value }}" {% if selected_quick_range == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label for="reportAgeing" class="form-label">Overdue Ageing</label>
+                    <select id="reportAgeing" name="ageing" class="form-select">
+                        {% for option in ageing_filter_options %}
+                        <option value="{{ option.value }}" {% if selected_ageing == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12">
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="submit" class="btn btn-primary">Apply Filters</button>
+                        <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+                    </div>
+                </div>
+            </form>
+            {% if has_active_filters and active_filter_badges %}
+            <div class="d-flex flex-wrap gap-2 mt-3">
+                {% for badge in active_filter_badges %}
+                <span class="badge bg-secondary">{{ badge }}</span>
+                {% endfor %}
+            </div>
             {% endif %}
         </div>
-        <form method="get" class="row g-3 align-items-end">
-            <div class="col-lg-4 col-md-6">
-                <label for="reportStatus" class="form-label">Invoice Status</label>
-                <select id="reportStatus" name="status" class="form-select">
-                    {% for option in status_filter_options %}
-                    <option value="{{ option.value }}" {% if selected_status == option.value %}selected{% endif %}>{{ option.label }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-lg-4 col-md-6">
-                <label for="reportCustomer" class="form-label">Customer</label>
-                <select id="reportCustomer" name="customer" class="form-select">
-                    <option value="" {% if not selected_customer_id %}selected{% endif %}>All customers</option>
-                    {% for option in customer_filter_options %}
-                    <option value="{{ option.customer_id }}" {% if selected_customer_id == option.customer_id|stringformat:"s" %}selected{% endif %}>
-                        {{ option.customer__name }} ({{ option.customer__email }})
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-lg-4 col-md-6">
-                <label for="reportMonth" class="form-label">Month</label>
-                <select id="reportMonth" name="month" class="form-select">
-                    <option value="" {% if not selected_month %}selected{% endif %}>All months</option>
-                    {% for option in month_filter_options %}
-                    <option value="{{ option.value }}" {% if selected_month == option.value %}selected{% endif %}>{{ option.label }}</option>
-                    {% endfor %}
-                </select>
-                <div class="form-text">Available months come from invoice issue dates and payment activity.</div>
-            </div>
-            <div class="col-12">
-                <div class="d-flex flex-wrap gap-2">
-                    <button type="submit" class="btn btn-primary">Apply Filters</button>
-                    <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary">Reset Filters</a>
+    </div>
+
+    {% if not has_report_data %}
+    <div class="empty-state mb-4">
+        <div class="fw-semibold mb-1">No invoices match the selected filters.</div>
+        <div class="text-muted mb-3">Try clearing the filters or review all invoice records.</div>
+        <div class="d-flex flex-wrap justify-content-center gap-2">
+            <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+            <a href="{% url 'invoice-list' %}" class="btn btn-outline-primary btn-sm">View All Invoices</a>
+        </div>
+    </div>
+    {% endif %}
+
+    <h2 class="section-heading mb-3">Finance Snapshot</h2>
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
+                <div class="card-body">
+                    <div class="kpi-label">{{ collection_month_label }}</div>
+                    <div class="report-kpi-value">S${{ total_amount_collected_month|floatformat:2|intcomma }}</div>
+                    <div class="small text-muted mt-auto">Successful payments recorded for the current reporting period.</div>
                 </div>
             </div>
-        </form>
-        <p class="text-muted mb-0 mt-3">{{ selected_filter_text }}</p>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
+                <div class="card-body">
+                    <div class="kpi-label">{{ collection_year_label }}</div>
+                    <div class="report-kpi-value">S${{ total_amount_collected_year|floatformat:2|intcomma }}</div>
+                    <div class="small text-muted mt-auto">Year-to-date collections based on successful payment records.</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card report-kpi-card-amber h-100">
+                <div class="card-body">
+                    <div class="kpi-label">Outstanding Amount</div>
+                    <div class="report-kpi-value">S${{ outstanding_amount|floatformat:2|intcomma }}</div>
+                    <a href="{% url 'invoice-list' %}{{ outstanding_invoice_list_query }}" class="report-kpi-link">View outstanding invoices -></a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                <div class="card-body">
+                    <div class="kpi-label">Overdue Invoices</div>
+                    <div class="report-kpi-value">{{ overdue_count }}</div>
+                    <a href="{% url 'invoice-list' %}{{ overdue_invoice_list_query }}" class="report-kpi-link">Review overdue invoices -></a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
+                <div class="card-body">
+                    <div class="kpi-label">Pending Payment</div>
+                    <div class="report-kpi-value">{{ pending_payment_count }}</div>
+                    <a href="{% url 'invoice-list' %}{{ pending_invoice_list_query }}" class="report-kpi-link">Review pending invoices -></a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
+                <div class="card-body">
+                    <div class="kpi-label">Draft Invoices</div>
+                    <div class="report-kpi-value">{{ draft_count }}</div>
+                    <a href="{% url 'invoice-list' %}{{ draft_invoice_list_query }}" class="report-kpi-link">View draft invoices -></a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card report-kpi-card-refunded h-100">
+                <div class="card-body">
+                    <div class="kpi-label">Refunded Invoices</div>
+                    <div class="report-kpi-value">{{ refunded_count }}</div>
+                    <a href="{% url 'invoice-list' %}{{ refunded_invoice_list_query }}" class="report-kpi-link">Review refunded invoices -></a>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="dashboard-card report-kpi-card {% if failed_invoice_email_count %}report-kpi-card-danger{% else %}report-kpi-card-neutral{% endif %} h-100">
+                <div class="card-body">
+                    <div class="kpi-label">Failed Invoice Emails</div>
+                    <div class="report-kpi-value">{{ failed_invoice_email_count }}</div>
+                    <a href="#invoice-email-failures" class="report-kpi-link">Review email failures -></a>
+                </div>
+            </div>
+        </div>
     </div>
-</div>
 
-{% if not filtered_invoice_count %}
-<div class="alert alert-info">No data found for the selected filters.</div>
-{% endif %}
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Finance Follow-up Required</span>
+            <span class="text-muted small">Prioritise invoices that are unpaid, overdue or still waiting to be issued.</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-clean table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Customer</th>
+                        <th>Status</th>
+                        <th>Due Date</th>
+                        <th class="text-end">Amount</th>
+                        <th>Recommended Next Step</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for invoice in follow_up_invoices %}
+                    <tr>
+                        <td>{{ invoice.invoice_number }}</td>
+                        <td>
+                            <div>{{ invoice.customer.name }}</div>
+                            <div class="small text-muted">{{ invoice.customer.email }}</div>
+                        </td>
+                        <td>{{ invoice.get_status_display }}</td>
+                        <td>{{ invoice.due_date|date:"d M Y" }}</td>
+                        <td class="text-end">S${{ invoice.total_amount|floatformat:2|intcomma }}</td>
+                        <td>
+                            {% if invoice.status == "overdue" %}
+                            Customer follow-up is overdue.
+                            {% elif invoice.status == "viewed" %}
+                            Customer has viewed the invoice but has not paid yet.
+                            {% elif invoice.status == "sent" %}
+                            Payment is still pending.
+                            {% elif invoice.status == "draft" %}
+                            Issue the invoice to begin collection.
+                            {% else %}
+                            Review the invoice record.
+                            {% endif %}
+                        </td>
+                        <td class="text-end"><a href="{% url 'invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Invoice Details</a></td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="7" class="text-center py-4"><div class="empty-state">No invoices require follow-up for the selected filters.</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 
-<h2 class="section-heading mb-3">Invoice Summary</h2>
-<div class="row g-3 mb-3">
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">{{ collection_month_label }}</div>
-                <div class="h4 mb-0">SGD {{ total_amount_collected_month|floatformat:2 }}</div>
+    <h2 class="section-heading mb-3">Useful Charts</h2>
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="report-chart-card">
+                <div class="report-chart-header">Invoice Status Distribution</div>
+                <div class="report-chart-body">
+                    <canvas id="invoiceStatusChart" class="report-chart-canvas" aria-label="Invoice status chart" role="img"></canvas>
+                    <div id="invoiceStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                </div>
+                <div class="px-3 pb-3 text-muted small">Visible counts: Draft {{ draft_count }}, Pending Payment {{ pending_payment_count }}, Viewed {{ viewed_count }}, Overdue {{ overdue_count }}, Paid {{ paid_count }}, Refunded {{ refunded_count }}.</div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="report-chart-card">
+                <div class="report-chart-header">Monthly Collection Trend</div>
+                <div class="report-chart-body">
+                    <canvas id="collectionTrendChart" class="report-chart-canvas" aria-label="Monthly collection trend chart" role="img"></canvas>
+                    <div id="collectionTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                </div>
+                <div class="px-3 pb-3 text-muted small">Use this chart to see whether collections are increasing or slowing down over time.</div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="report-chart-card">
+                <div class="report-chart-header">Overdue Invoice Duration</div>
+                <div class="report-chart-body">
+                    <canvas id="overdueAgeingChart" class="report-chart-canvas" aria-label="Overdue ageing chart" role="img"></canvas>
+                    <div id="overdueAgeingChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                </div>
+                <div class="px-3 pb-3 text-muted small">Shows how much overdue value sits in each age band so finance can prioritise older debts first.</div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="report-chart-card">
+                <div class="report-chart-header">Top Customers by Outstanding Amount</div>
+                <div class="report-chart-body">
+                    <canvas id="topOutstandingCustomersChart" class="report-chart-canvas" aria-label="Top outstanding customers chart" role="img"></canvas>
+                    <div id="topOutstandingCustomersChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                </div>
+                <div class="px-3 pb-3 text-muted small">Shows which customers currently contribute the largest unpaid balances.</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">{{ collection_year_label }}</div>
-                <div class="h4 mb-0">SGD {{ total_amount_collected_year|floatformat:2 }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Outstanding Amount</div>
-                <div class="h4 mb-0">SGD {{ outstanding_amount|floatformat:2 }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Reporting Window</div>
-                <div class="small">Month start: {{ month_start }}</div>
-                <div class="small">Year start: {{ year_start }}</div>
-                <div class="small">Filtered invoices: {{ filtered_invoice_count }}</div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<h2 class="section-heading mb-3">Report Visuals</h2>
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Invoice Status Distribution</div>
-            <div class="report-chart-body">
-                <canvas id="invoiceStatusChart" class="report-chart-canvas" aria-label="Invoice status chart" role="img"></canvas>
-                <div id="invoiceStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+    <h2 class="section-heading mb-3">Detailed Records</h2>
+    <div class="row g-3 mb-3">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Customer Summary</div>
+                <div class="card-body">
+                    <div class="text-muted small">Total Customers With Invoices</div>
+                    <div class="display-6 mb-2">{{ total_customers_with_invoices }}</div>
+                    {% if selected_customer_id %}
+                    <a href="{% url 'invoice-customer-report' %}{{ customer_history_query }}" class="report-kpi-link">View Customer History -></a>
+                    {% else %}
+                    <div class="text-muted small">Select a customer filter to focus on one customer history.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Status Summary</div>
+                <div class="table-responsive">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th class="text-end">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in status_summary %}
+                            <tr>
+                                <td>{{ row.label }}</td>
+                                <td class="text-end">{{ row.count }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center py-3">No invoice status summary is available.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Monthly Collection Trend</div>
-            <div class="report-chart-body">
-                <canvas id="collectionTrendChart" class="report-chart-canvas" aria-label="Monthly collection trend chart" role="img"></canvas>
-                <div id="collectionTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Overdue Invoice Duration</div>
-            <div class="report-chart-body">
-                <canvas id="overdueAgeingChart" class="report-chart-canvas" aria-label="Overdue ageing chart" role="img"></canvas>
-                <div id="overdueAgeingChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Top Customers by Outstanding Amount</div>
-            <div class="report-chart-body">
-                <canvas id="topOutstandingCustomersChart" class="report-chart-canvas" aria-label="Top outstanding customers chart" role="img"></canvas>
-                <div id="topOutstandingCustomersChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<div class="row g-3 mb-3">
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Overdue Invoices</div>
-                <div class="display-6 mb-0 text-danger">{{ overdue_count }}</div>
+    <div class="row g-3 mb-3">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Top Customers by Invoice Amount</div>
+                <div class="table-responsive">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Email</th>
+                                <th class="text-end">Invoices</th>
+                                <th class="text-end">Total Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in top_customers_by_total %}
+                            <tr>
+                                <td><a href="{% url 'invoice-customer-report' %}{{ row.report_query }}">{{ row.customer__name }}</a></td>
+                                <td>{{ row.customer__email }}</td>
+                                <td class="text-end">{{ row.invoice_count }}</td>
+                                <td class="text-end">S${{ row.total_amount|floatformat:2|intcomma }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="text-center py-3">No customer totals are available for the selected filters.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Customers With Overdue Invoices</div>
+                <div class="table-responsive">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th>Email</th>
+                                <th class="text-end">Overdue Invoices</th>
+                                <th class="text-end">Overdue Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in customers_with_overdue %}
+                            <tr>
+                                <td><a href="{% url 'invoice-customer-report' %}{{ row.report_query }}">{{ row.customer__name }}</a></td>
+                                <td>{{ row.customer__email }}</td>
+                                <td class="text-end">{{ row.overdue_invoice_count }}</td>
+                                <td class="text-end">S${{ row.overdue_amount|floatformat:2|intcomma }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="text-center py-3">No overdue invoices require follow-up.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Pending Payment</div>
-                <div class="display-6 mb-0 text-warning">{{ pending_payment_count }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Paid Invoices</div>
-                <div class="display-6 mb-0 text-success">{{ paid_count }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Draft / Refunded</div>
-                <div class="display-6 mb-0">{{ draft_count }} / {{ refunded_count }}</div>
-            </div>
-        </div>
-    </div>
-</div>
 
-<div class="row g-3 mb-3">
-    <div class="col-lg-5">
-        <div class="card h-100">
-            <div class="card-header">Follow-up Focus</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Invoice #</th>
-                            <th>Customer</th>
-                            <th>Status</th>
-                            <th>Next Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for invoice in follow_up_invoices %}
-                        <tr>
-                            <td>{{ invoice.invoice_number }}</td>
-                            <td>{{ invoice.customer.name }}</td>
-                            <td>{{ invoice.get_status_display }}</td>
-                            <td>
-                                {% if invoice.status == "overdue" %}
-                                Send overdue reminder
-                                {% elif invoice.status == "viewed" %}
-                                Follow up after customer view
-                                {% elif invoice.status == "sent" %}
-                                Monitor payment / remind if needed
-                                {% elif invoice.status == "draft" %}
-                                Review and send invoice
-                                {% else %}
-                                Check invoice record
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No follow-up invoices for the selected filters.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+    <div class="card mb-3">
+        <div class="card-header">Invoice Records Requiring Review</div>
+        <div class="table-responsive">
+            <table class="table table-clean table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Customer</th>
+                        <th>Status</th>
+                        <th>Issue Date</th>
+                        <th>Due Date</th>
+                        <th class="text-end">Amount</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for invoice in detailed_invoices %}
+                    <tr>
+                        <td>{{ invoice.invoice_number }}</td>
+                        <td>{{ invoice.customer.name }}</td>
+                        <td>{{ invoice.get_status_display }}</td>
+                        <td>{{ invoice.issue_date|date:"d M Y" }}</td>
+                        <td>{{ invoice.due_date|date:"d M Y" }}</td>
+                        <td class="text-end">S${{ invoice.total_amount|floatformat:2|intcomma }}</td>
+                        <td class="text-end"><a href="{% url 'invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View Invoice Details</a></td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="7" class="text-center py-3">No invoices match the selected filters.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
-    <div class="col-lg-7">
-        <div class="card h-100">
-            <div class="card-header">Detailed Invoice Drill-down</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Invoice #</th>
-                            <th>Customer</th>
-                            <th>Status</th>
-                            <th>Issue Date</th>
-                            <th>Due Date</th>
-                            <th class="text-end">Total</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for invoice in detailed_invoices %}
-                        <tr>
-                            <td>{{ invoice.invoice_number }}</td>
-                            <td>
-                                <div>{{ invoice.customer.name }}</div>
-                                <div class="small text-muted">{{ invoice.customer.email }}</div>
-                            </td>
-                            <td>{{ invoice.get_status_display }}</td>
-                            <td>{{ invoice.issue_date }}</td>
-                            <td>{{ invoice.due_date }}</td>
-                            <td class="text-end">SGD {{ invoice.total_amount|floatformat:2 }}</td>
-                            <td>
-                                {% if invoice.status == "overdue" %}
-                                Customer needs urgent follow-up
-                                {% elif invoice.status == "viewed" %}
-                                Customer has seen invoice
-                                {% elif invoice.status == "sent" %}
-                                Pending payment
-                                {% elif invoice.status == "draft" %}
-                                Internal draft only
-                                {% elif invoice.status == "paid" %}
-                                No follow-up needed
-                                {% else %}
-                                Refund completed / review closure
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="7" class="text-center py-3">No data found for the selected filters.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
 
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header">Invoice Status Summary</div>
-            <div class="table-responsive">
-                <table class="table table-clean mb-0">
-                    <thead>
-                        <tr>
-                            <th>Status</th>
-                            <th class="text-end">Count</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in status_summary %}
-                        <tr>
-                            <td>{{ row.label }}</td>
-                            <td class="text-end">{{ row.count }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">Recent Payments Received</div>
+                <div class="table-responsive">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Paid At</th>
+                                <th>Invoice #</th>
+                                <th>Customer</th>
+                                <th class="text-end">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for payment in recent_payments_received %}
+                            <tr>
+                                <td>{{ payment.paid_at|date:"d M Y, H:i" }}</td>
+                                <td><a href="{% url 'invoice-detail' payment.invoice.pk %}">{{ payment.invoice.invoice_number }}</a></td>
+                                <td>{{ payment.invoice.customer.name }}</td>
+                                <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="text-center py-3">No payments were found for the selected filters.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header">Customer Summary</div>
-            <div class="card-body">
-                <div class="text-muted small">Total Customers With Invoices</div>
-                <div class="display-6">{{ total_customers_with_invoices }}</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header">Top Customers by Invoice Amount</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Customer</th>
-                            <th>Email</th>
-                            <th class="text-end">Invoices</th>
-                            <th class="text-end">Total Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in top_customers_by_total %}
-                        <tr>
-                            <td>{{ row.customer__name }}</td>
-                            <td>{{ row.customer__email }}</td>
-                            <td class="text-end">{{ row.invoice_count }}</td>
-                            <td class="text-end">SGD {{ row.total_amount|floatformat:2 }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No customer totals available.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header">Customers With Overdue Invoices</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Customer</th>
-                            <th>Email</th>
-                            <th class="text-end">Overdue Invoices</th>
-                            <th class="text-end">Overdue Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in customers_with_overdue %}
-                        <tr>
-                            <td>{{ row.customer__name }}</td>
-                            <td>{{ row.customer__email }}</td>
-                            <td class="text-end">{{ row.overdue_invoice_count }}</td>
-                            <td class="text-end">SGD {{ row.overdue_amount|floatformat:2 }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No overdue customers.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<h2 class="section-heading mb-3">Recent Invoice Activity</h2>
-<div class="row g-3">
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header">Recent Invoices Created</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Created At</th>
-                            <th>Invoice #</th>
-                            <th>Customer</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for invoice in recent_invoices_created %}
-                        <tr>
-                            <td>{{ invoice.created_at|date:"Y-m-d H:i" }}</td>
-                            <td>{{ invoice.invoice_number }}</td>
-                            <td>{{ invoice.customer.name }}</td>
-                            <td>{{ invoice.get_status_display }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No invoice activity yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header">Recent Invoices Paid</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Paid At</th>
-                            <th>Invoice #</th>
-                            <th>Customer</th>
-                            <th class="text-end">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for invoice in recent_invoices_paid %}
-                        <tr>
-                            <td>{{ invoice.updated_at|date:"Y-m-d H:i" }}</td>
-                            <td>{{ invoice.invoice_number }}</td>
-                            <td>{{ invoice.customer.name }}</td>
-                            <td class="text-end">SGD {{ invoice.total_amount|floatformat:2 }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No paid invoices yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header">Recent Invoice Emails Sent</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Recipient</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for log in recent_invoice_emails_sent %}
-                        <tr>
-                            <td>{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
-                            <td>{{ log.recipient_email }}</td>
-                            <td>{{ log.get_status_display }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="3" class="text-center py-3">No invoice email logs yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+        <div class="col-lg-6">
+            <div class="card h-100" id="invoice-email-failures">
+                <div class="card-header">Failed Invoice Email Deliveries</div>
+                <div class="table-responsive">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Recipient</th>
+                                <th>Status</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in recent_failed_invoice_email_logs %}
+                            <tr>
+                                <td>{{ log.attempted_at|date:"d M Y, H:i" }}</td>
+                                <td>{{ log.recipient_email }}</td>
+                                <td>{{ log.get_status_display }}</td>
+                                <td class="text-end"><a href="{% url 'invoice-detail' log.related_object_id %}" class="btn btn-sm btn-outline-secondary">View Invoice Details</a></td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4" class="text-center py-3">No failed invoice emails were found.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -464,6 +517,7 @@
 {{ overdue_ageing_labels|json_script:"invoice-overdue-ageing-labels" }}
 {{ overdue_ageing_values|json_script:"invoice-overdue-ageing-values" }}
 {{ top_customers_by_outstanding|json_script:"invoice-top-outstanding-customers-data" }}
+<script src="{% static 'js/date-range-filters.js' %}"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 <script src="{% static 'js/report_charts.js' %}"></script>
 <script>
@@ -478,7 +532,7 @@
                 {
                     label: "Invoices",
                     data: statusRows.map(function (row) { return row.count; }),
-                    backgroundColor: ["#ff7f73", "#f59e0b", "#64748b", "#dc3545", "#198754"],
+                    backgroundColor: ["#64748b", "#f59e0b", "#ffb703", "#dc3545", "#198754", "#8b5cf6"],
                     borderColor: "#ffffff",
                     borderWidth: 2
                 }
@@ -488,7 +542,8 @@
                 plugins: {
                     legend: { position: "bottom" }
                 }
-            }
+            },
+            emptyText: "No invoice status data is available for the selected filters."
         });
 
         var monthlyCollectionLabels = window.ReportCharts.parseJsonScript("invoice-monthly-collection-labels", []);
@@ -519,7 +574,8 @@
                         beginAtZero: true
                     }
                 }
-            }
+            },
+            emptyText: "No collection data is available for the selected reporting period."
         });
 
         var overdueAgeingLabels = window.ReportCharts.parseJsonScript("invoice-overdue-ageing-labels", []);
@@ -548,7 +604,8 @@
                         beginAtZero: true
                     }
                 }
-            }
+            },
+            emptyText: "No overdue invoice values are available for the selected filters."
         });
 
         var topOutstandingCustomers = window.ReportCharts.parseJsonScript("invoice-top-outstanding-customers-data", []);
@@ -561,8 +618,8 @@
                 {
                     label: "Outstanding Amount (SGD)",
                     data: topOutstandingCustomers.map(function (row) { return row.outstanding_amount; }),
-                    backgroundColor: "#ff7f73",
-                    borderColor: "#f06d62",
+                    backgroundColor: "#ffb703",
+                    borderColor: "#f59e0b",
                     borderWidth: 1
                 }
             ],
@@ -577,7 +634,8 @@
                         beginAtZero: true
                     }
                 }
-            }
+            },
+            emptyText: "No customer outstanding balances are available for the selected filters."
         });
     })();
 </script>

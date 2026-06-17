@@ -25,6 +25,8 @@ class EmployeeUploadForm(forms.Form):
 
 
 class PayrollRecordForm(forms.ModelForm):
+    DUPLICATE_ERROR = "A payroll record already exists for this employee and payment date."
+
     payment_date = forms.DateField(
         input_formats=["%d-%m-%Y", "%Y-%m-%d"],
         widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "DD-MM-YYYY"}),
@@ -115,6 +117,26 @@ class PayrollRecordForm(forms.ModelForm):
         if not Employee.objects.filter(employee_code=employee_id).exists():
             raise forms.ValidationError("Employee ID not found in employee records.")
         return employee_id
+
+    def clean(self):
+        cleaned_data = super().clean()
+        employee_id = (cleaned_data.get("employee_id") or "").strip()
+        payment_date = cleaned_data.get("payment_date")
+
+        if not employee_id or payment_date is None:
+            return cleaned_data
+
+        duplicate_qs = PayrollRecord.objects.filter(
+            employee_id=employee_id,
+            payment_date=payment_date,
+        )
+        if self.instance and self.instance.pk:
+            duplicate_qs = duplicate_qs.exclude(pk=self.instance.pk)
+
+        if duplicate_qs.exists():
+            raise forms.ValidationError(self.DUPLICATE_ERROR)
+
+        return cleaned_data
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

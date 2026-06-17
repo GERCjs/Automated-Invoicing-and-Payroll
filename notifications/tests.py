@@ -99,3 +99,36 @@ class PaymentReminderServiceTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_past_due_draft_invoice_does_not_receive_overdue_reminder(self):
+        past_due_draft = Invoice.objects.create(
+            invoice_number="REM-DRAFT-001",
+            customer=self.customer,
+            status=Invoice.STATUS_DRAFT,
+            issue_date=timezone.localdate() - timedelta(days=10),
+            due_date=timezone.localdate() - timedelta(days=1),
+            subtotal=100,
+            tax_amount=0,
+            total_amount=100,
+            created_by=self.admin_user,
+        )
+
+        summary = run_payment_reminder_check(
+            triggered_by=self.admin_user,
+            base_url="https://example.test",
+            simulate=False,
+        )
+
+        self.assertEqual(summary["checked_invoices"], 0)
+        self.assertEqual(summary["processed"], 0)
+        self.assertEqual(summary["sent"], 0)
+        self.assertEqual(len(mail.outbox), 0)
+        past_due_draft.refresh_from_db()
+        self.assertEqual(past_due_draft.status, Invoice.STATUS_DRAFT)
+        self.assertFalse(
+            EmailDeliveryLog.objects.filter(
+                related_object_type="invoice",
+                related_object_id=str(past_due_draft.id),
+                template_key__startswith="payment_reminder_",
+            ).exists()
+        )

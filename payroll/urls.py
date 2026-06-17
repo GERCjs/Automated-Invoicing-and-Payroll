@@ -23,6 +23,7 @@ urlpatterns = [
     path("<int:pk>/pdf/", views.payslip_pdf_download, name="payslip-pdf-download"),
     path("<int:pk>/email-send/", views.payslip_email_send, name="payslip-email-send"),
     path("upload-preview/", views.payroll_upload_preview, name="payroll-upload-preview"),
+    path("upload-preview/invalid-rows/download/", views.download_invalid_rows, name="payroll-download-invalid-rows"),
     path("upload-confirm-save/", views.payroll_upload_confirm_save, name="payroll-upload-confirm-save"),
     path("template/", views.payroll_template_download, name="payroll-template-download"),
 ]

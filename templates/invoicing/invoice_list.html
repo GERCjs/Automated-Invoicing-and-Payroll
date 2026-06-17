@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Invoices | Automated Invoicing & Payroll{% endblock %}
 
@@ -9,7 +10,7 @@
         <p class="page-subtitle">Track invoice lifecycle, payment progress, and customer balances.</p>
     </div>
     <div class="d-flex gap-2 flex-wrap invoice-list-actions">
-        <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary invoice-action-btn">Upload CSV</a>
+        <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary invoice-action-btn">Upload Invoice File</a>
         <a href="{% url 'invoice-dashboard' %}" class="btn btn-outline-secondary invoice-action-btn">Finance Officer Dashboard</a>
         <a href="{% url 'invoice-create' %}" class="btn btn-primary invoice-action-btn">Create Invoice</a>
     </div>
@@ -48,12 +49,13 @@
                 </ul>
             </div>
         </div>
-        <form method="get" class="row g-3 align-items-end invoice-search-form">
+        <form method="get" class="row g-3 align-items-end invoice-search-form" id="invoiceListSearchForm">
             {% if selected_filter %}
             <input type="hidden" name="status" value="{{ selected_filter }}">
             {% endif %}
             <div class="col-lg-5 col-md-12">
                 <input
+                    id="invoiceListSearch"
                     type="text"
                     class="form-control"
                     name="q"
@@ -70,6 +72,7 @@
                     name="issue_date_from"
                     value="{{ issue_date_from }}"
                     aria-label="Issue date from"
+                    aria-describedby="invoiceDateRangeHelp invoiceDateRangeMessage"
                 >
             </div>
             <div class="col-lg-2 col-md-6">
@@ -81,13 +84,22 @@
                     name="issue_date_to"
                     value="{{ issue_date_to }}"
                     aria-label="Issue date to"
+                    aria-describedby="invoiceDateRangeHelp invoiceDateRangeMessage"
                 >
             </div>
             <div class="col-lg-3 col-md-12">
                 <div class="d-flex gap-2 invoice-search-actions">
-                    <button type="submit" class="btn btn-outline-primary invoice-action-btn">Search</button>
-                    <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary invoice-action-btn">Reset</a>
+                    <button type="submit" class="btn btn-outline-primary invoice-action-btn" id="invoiceListSearchButton">Search</button>
+                    <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary invoice-action-btn" id="invoiceListResetButton">Reset</a>
                 </div>
+            </div>
+            <div class="col-12">
+                <div id="invoiceDateRangeHelp" class="form-text">Choose a date range to limit invoices by issue date.</div>
+                <div
+                    id="invoiceDateRangeMessage"
+                    class="invalid-feedback d-block invoice-date-range-message{% if not issue_date_error %} d-none{% endif %}"
+                    aria-live="polite"
+                >{{ issue_date_error }}</div>
             </div>
         </form>
         <p class="text-muted mb-0 mt-2">
@@ -194,39 +206,5 @@
     </div>
     </form>
 </div>
-<script>
-    (function () {
-        var selectAll = document.getElementById("selectAllInvoices");
-        if (!selectAll) {
-            return;
-        }
-
-        var checkboxes = Array.from(document.querySelectorAll(".js-invoice-batch-checkbox"));
-        if (!checkboxes.length) {
-            selectAll.disabled = true;
-            return;
-        }
-
-        var syncSelectAll = function () {
-            var checkedCount = checkboxes.filter(function (checkbox) {
-                return checkbox.checked;
-            }).length;
-            selectAll.checked = checkedCount > 0 && checkedCount === checkboxes.length;
-            selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
-        };
-
-        selectAll.addEventListener("change", function () {
-            checkboxes.forEach(function (checkbox) {
-                checkbox.checked = selectAll.checked;
-            });
-            syncSelectAll();
-        });
-
-        checkboxes.forEach(function (checkbox) {
-            checkbox.addEventListener("change", syncSelectAll);
-        });
-
-        syncSelectAll();
-    })();
-</script>
+<script src="{% static 'js/invoice_list.js' %}"></script>
 {% endblock %}
