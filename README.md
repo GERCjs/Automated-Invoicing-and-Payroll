@@ -43,6 +43,17 @@ BANK_TRANSFER_INSTRUCTIONS=Enter the payment reference in your bank transfer com
 
 Each payable invoice gets one stable manual payment reference. Admin/Finance users confirm the transfer after matching that reference in the banking app.
 
+## Payment reminder scheduling
+Payment reminder settings control which invoices are eligible for before-due, due-date, after-due, and repeat-overdue reminder emails. The website also provides an Admin Console button to send currently due reminders manually.
+
+For automatic daily reminders after deployment, configure the hosting platform scheduler, cron, Windows Task Scheduler, or equivalent to run:
+
+```bash
+python manage.py send_payment_reminders --base-url https://client-domain.com
+```
+
+The scheduler should run once per day. The repeat-overdue setting uses the last sent repeat reminder date, so invoices are skipped until they are due for another reminder.
+
 ## How to use (exact steps)
 1. Open `PROMPTS.md`.
 2. Choose one prompt key from the key map:

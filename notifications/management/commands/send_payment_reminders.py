@@ -31,13 +31,14 @@ class Command(BaseCommand):
             metadata={**summary, "source": "scheduled_command"},
         )
         mode = "simulation" if simulate else "send"
+        skipped_count = summary["skipped_already_logged_today"] + summary.get("skipped_not_due", 0)
         self.stdout.write(
             self.style.SUCCESS(
                 (
                     f"Reminder {mode} complete. Matched: {summary['checked_invoices']}, "
                     f"processed: {summary['processed']}, sent: {summary['sent']}, "
                     f"simulated: {summary['simulated']}, failed: {summary['failed']}, "
-                    f"already logged today: {summary['skipped_already_logged_today']}."
+                    f"skipped: {skipped_count}."
                 )
             )
         )

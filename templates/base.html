@@ -104,12 +104,18 @@
                 <a class="portal-nav-link" href="{% url 'admin-dashboard' %}">Admin Console</a>
                 {% endif %}
 
+                {% if current_user_role == "finance" or current_user_role == "hr" %}
+                <a class="portal-nav-link" href="{% url 'support-ticket-list' %}">Support Tickets</a>
+                {% endif %}
+
                 {% if current_user_role == "customer" %}
                 <a class="portal-nav-link" href="{% url 'customer-invoice-dashboard' %}">My Invoices</a>
+                <a class="portal-nav-link" href="{% url 'support-ticket-list' %}">Support</a>
                 {% endif %}
 
                 {% if current_user_role == "staff" %}
                 <a class="portal-nav-link" href="{% url 'my-payslips' %}">My Payslips</a>
+                <a class="portal-nav-link" href="{% url 'support-ticket-list' %}">Support</a>
                 {% endif %}
             </div>
         </div>

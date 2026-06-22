@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Support Tickets | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{% if can_handle_tickets %}Support Tickets{% else %}My Support Requests{% endif %}</h1>
+        <p class="page-subtitle">Track invoice, payment, payroll, and account support requests.</p>
+    </div>
+    <a href="{% url 'support-ticket-create' %}" class="btn btn-primary">New Support Request</a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label small">Status</label>
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">All statuses</option>
+                    {% for value, label in status_choices %}
+                    <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Category</label>
+                <select name="category" class="form-select form-select-sm">
+                    <option value="">All categories</option>
+                    {% for value, label in category_choices %}
+                    <option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Priority</label>
+                <select name="priority" class="form-select form-select-sm">
+                    <option value="">All priorities</option>
+                    {% for value, label in priority_choices %}
+                    <option value="{{ value }}" {% if selected_priority == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Search</label>
+                <input type="search" name="q" value="{{ search_query }}" class="form-control form-control-sm" placeholder="Subject, reference, requester">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-sm btn-primary w-100">Filter</button>
+            </div>
+        </form>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-clean table-hover table-striped table-sm align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Created</th>
+                    <th>Category</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Assigned To</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ticket in tickets %}
+                <tr>
+                    <td class="text-nowrap">{{ ticket.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ ticket.get_category_display }}</td>
+                    <td>
+                        <a class="fw-semibold" href="{% url 'support-ticket-detail' ticket.id %}">{{ ticket.subject }}</a>
+                        {% if ticket.related_reference %}
+                        <div class="text-muted small">{{ ticket.related_reference }}</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ ticket.get_status_display }}</td>
+                    <td>{{ ticket.get_priority_display }}</td>
+                    <td>{{ ticket.assigned_to.username|default:"Unassigned" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-center py-4"><div class="empty-state">No support tickets match the filters.</div></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

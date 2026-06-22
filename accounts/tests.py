@@ -786,7 +786,7 @@ class AccountsPhaseOneTests(TestCase):
         self.assertTrue(reminder_settings.overdue_repeat_enabled)
         self.assertEqual(reminder_settings.overdue_repeat_days, 4)
 
-    def test_run_reminder_check_simulation_creates_pending_reminder_log(self):
+    def test_send_payment_reminders_creates_sent_reminder_log(self):
         admin = User.objects.create_user(username="reminder_sim_admin", password="TempPass123!")
         admin.role_profile.role = ADMIN
         admin.role_profile.save(update_fields=["role", "updated_at"])
@@ -809,7 +809,7 @@ class AccountsPhaseOneTests(TestCase):
         settings_obj.save()
 
         self.client.login(username="reminder_sim_admin", password="TempPass123!")
-        response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "simulate"})
+        response = self.client.post(reverse("payment-reminder-run-check"))
         self.assertEqual(response.status_code, 302)
 
         log = EmailDeliveryLog.objects.filter(
@@ -818,8 +818,8 @@ class AccountsPhaseOneTests(TestCase):
             template_key="payment_reminder_due_date",
         ).first()
         self.assertIsNotNone(log)
-        self.assertEqual(log.status, EmailDeliveryLog.STATUS_PENDING)
-        self.assertTrue(log.metadata.get("simulate"))
+        self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)
+        self.assertFalse(log.metadata.get("simulate"))
 
     def test_run_reminder_check_send_marks_log_sent(self):
         admin = User.objects.create_user(username="reminder_send_admin", password="TempPass123!")
@@ -844,7 +844,7 @@ class AccountsPhaseOneTests(TestCase):
         settings_obj.save()
 
         self.client.login(username="reminder_send_admin", password="TempPass123!")
-        response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "send"})
+        response = self.client.post(reverse("payment-reminder-run-check"))
         self.assertEqual(response.status_code, 302)
 
         log = EmailDeliveryLog.objects.filter(
@@ -855,7 +855,7 @@ class AccountsPhaseOneTests(TestCase):
         self.assertIsNotNone(log)
         self.assertEqual(log.status, EmailDeliveryLog.STATUS_SENT)
 
-    def test_run_reminder_check_send_after_simulation_marks_log_sent(self):
+    def test_send_payment_reminders_skips_duplicate_same_day(self):
         admin = User.objects.create_user(username="reminder_sim_then_send_admin", password="TempPass123!")
         admin.role_profile.role = ADMIN
         admin.role_profile.save(update_fields=["role", "updated_at"])
@@ -878,18 +878,16 @@ class AccountsPhaseOneTests(TestCase):
         settings_obj.save()
 
         self.client.login(username="reminder_sim_then_send_admin", password="TempPass123!")
-        simulate_response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "simulate"})
-        self.assertEqual(simulate_response.status_code, 302)
-        send_response = self.client.post(reverse("payment-reminder-run-check"), data={"mode": "send"})
-        self.assertEqual(send_response.status_code, 302)
+        first_response = self.client.post(reverse("payment-reminder-run-check"))
+        self.assertEqual(first_response.status_code, 302)
+        second_response = self.client.post(reverse("payment-reminder-run-check"))
+        self.assertEqual(second_response.status_code, 302)
 
         logs = EmailDeliveryLog.objects.filter(
             related_object_type="invoice",
             related_object_id=str(invoice.id),
             template_key="payment_reminder_due_date",
         ).order_by("attempted_at")
-        self.assertEqual(logs.count(), 2)
-        self.assertEqual(logs[0].status, EmailDeliveryLog.STATUS_PENDING)
-        self.assertTrue(logs[0].metadata.get("simulate"))
-        self.assertEqual(logs[1].status, EmailDeliveryLog.STATUS_SENT)
-        self.assertFalse(logs[1].metadata.get("simulate"))
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs[0].status, EmailDeliveryLog.STATUS_SENT)
+        self.assertFalse(logs[0].metadata.get("simulate"))

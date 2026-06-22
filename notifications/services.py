@@ -716,6 +716,7 @@ def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulat
     )
 
     candidates: dict[int, tuple[Invoice, str]] = {}
+    skipped_not_due = 0
 
     def add_candidates(queryset, reminder_type: str):
         for invoice in queryset:
@@ -737,7 +738,24 @@ def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulat
     if settings_obj.overdue_repeat_enabled and settings_obj.overdue_repeat_days > 0:
         for invoice in invoice_scope.filter(status=Invoice.STATUS_OVERDUE, due_date__lt=today):
             overdue_days = (today - invoice.due_date).days
-            if overdue_days > 0 and overdue_days % settings_obj.overdue_repeat_days == 0:
+            last_repeat_log = (
+                EmailDeliveryLog.objects.filter(
+                    Q(status=EmailDeliveryLog.STATUS_SENT)
+                    | Q(status=EmailDeliveryLog.STATUS_PENDING, metadata__simulate=False),
+                    related_object_type="invoice",
+                    related_object_id=str(invoice.id),
+                    template_key=REMINDER_TEMPLATE_KEYS["overdue_repeat"],
+                )
+                .order_by("-attempted_at")
+                .first()
+            )
+            if last_repeat_log and (today - last_repeat_log.attempted_at.date()).days < settings_obj.overdue_repeat_days:
+                skipped_not_due += 1
+                continue
+            if not last_repeat_log and overdue_days < settings_obj.overdue_repeat_days:
+                skipped_not_due += 1
+                continue
+            if overdue_days > 0:
                 if invoice.id not in candidates:
                     candidates[invoice.id] = (invoice, "overdue_repeat")
 
@@ -794,5 +812,6 @@ def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulat
         "failed": failed_count,
         "simulated": simulated_count,
         "skipped_already_logged_today": skipped_already_logged,
+        "skipped_not_due": skipped_not_due,
         "log_ids": [log.id for log in reminder_logs],
     }
