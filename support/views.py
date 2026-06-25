@@ -1,7 +1,9 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from accounts.permissions import get_user_role, role_required
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
@@ -48,6 +50,7 @@ def _can_manage_ticket(user, ticket):
 
 
 @login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
 def support_ticket_list(request):
     role = get_user_role(request.user)
     selected_status = request.GET.get("status", "").strip()
@@ -88,7 +91,7 @@ def support_ticket_list(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN, FINANCE, HR, STAFF, CUSTOMER)
+@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
 def support_ticket_create(request):
     role = get_user_role(request.user)
     if request.method == "POST":
@@ -118,6 +121,69 @@ def support_ticket_create(request):
 
 
 @login_required
+@require_POST
+@role_required(SUPERADMIN, ADMIN, FINANCE, HR, STAFF, CUSTOMER)
+def support_ticket_chat_create(request):
+    role = get_user_role(request.user)
+    message = request.POST.get("message", "").strip()
+    if not message:
+        return JsonResponse({"ok": False, "errors": {"message": ["Please enter a message."]}}, status=400)
+
+    category = _chat_category_for(role, message)
+    subject = _chat_subject_from(message)
+    ticket = SupportTicket.objects.create(
+        category=category,
+        subject=subject,
+        message=message,
+        created_by=request.user,
+    )
+    log_event(
+        action="support.ticket.created",
+        user=request.user,
+        target_type="support_ticket",
+        target_id=str(ticket.id),
+        metadata={
+            "category": ticket.category,
+            "priority": ticket.priority,
+            "status": ticket.status,
+            "related_reference": ticket.related_reference,
+            "source": "chat_widget",
+        },
+        ip_address=get_client_ip(request),
+    )
+    return JsonResponse(
+        {
+            "ok": True,
+            "ticket_id": ticket.id,
+            "message": "Your support request has been sent. Our team will follow up from the ticket.",
+        }
+    )
+
+
+def _chat_category_for(role, message):
+    normalized = message.lower()
+    if role == STAFF:
+        if any(keyword in normalized for keyword in ["account", "login", "password", "profile"]):
+            return SupportTicket.CATEGORY_ACCOUNT
+        return SupportTicket.CATEGORY_PAYROLL
+    if any(keyword in normalized for keyword in ["payment", "paid", "pay", "card", "stripe", "receipt"]):
+        return SupportTicket.CATEGORY_PAYMENT
+    if any(keyword in normalized for keyword in ["account", "login", "password", "profile"]):
+        return SupportTicket.CATEGORY_ACCOUNT
+    if any(keyword in normalized for keyword in ["invoice", "bill", "amount", "overdue"]):
+        return SupportTicket.CATEGORY_INVOICE
+    return SupportTicket.CATEGORY_OTHER
+
+
+def _chat_subject_from(message):
+    first_line = message.splitlines()[0].strip()
+    if len(first_line) <= 72:
+        return first_line or "Support chat message"
+    return f"{first_line[:69].rstrip()}..."
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE, HR)
 def support_ticket_detail(request, ticket_id):
     ticket = get_object_or_404(_ticket_queryset_for(request.user), pk=ticket_id)
     role = get_user_role(request.user)

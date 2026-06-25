@@ -18,9 +18,9 @@ class SupportTicketFlowTests(TestCase):
         user.role_profile.save(update_fields=["role", "updated_at"])
         return user
 
-    def test_customer_can_create_and_view_own_ticket(self):
-        customer = self._make_user("ticket_customer", CUSTOMER)
-        self.client.force_login(customer)
+    def test_admin_can_create_ticket_from_full_page_form(self):
+        admin = self._make_user("ticket_admin", ADMIN)
+        self.client.force_login(admin)
 
         response = self.client.post(
             reverse("support-ticket-create"),
@@ -34,8 +34,55 @@ class SupportTicketFlowTests(TestCase):
 
         ticket = SupportTicket.objects.get(subject="Invoice amount looks wrong")
         self.assertRedirects(response, reverse("support-ticket-detail", args=[ticket.id]))
-        self.assertEqual(ticket.created_by, customer)
+        self.assertEqual(ticket.created_by, admin)
         self.assertEqual(ticket.status, SupportTicket.STATUS_OPEN)
+
+    def test_customer_can_create_ticket_from_chat_message(self):
+        customer = self._make_user("chat_customer", CUSTOMER)
+        self.client.force_login(customer)
+
+        response = self.client.post(
+            reverse("support-ticket-chat-create"),
+            data={
+                "message": "Can I get a payment receipt for PAY-2002?",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        ticket = SupportTicket.objects.get(subject="Can I get a payment receipt for PAY-2002?")
+        self.assertEqual(ticket.created_by, customer)
+        self.assertEqual(ticket.category, SupportTicket.CATEGORY_PAYMENT)
+        self.assertEqual(ticket.message, "Can I get a payment receipt for PAY-2002?")
+
+    def test_customer_invoice_page_shows_chat_widget_without_support_tab(self):
+        customer = self._make_user("widget_customer", CUSTOMER)
+        self.client.force_login(customer)
+
+        response = self.client.get(reverse("customer-invoice-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "support-chat-widget")
+        self.assertContains(response, "Vaniday Support")
+        self.assertNotContains(response, 'class="portal-nav-link" href="/support/"')
+
+    def test_customer_cannot_view_support_ticket_history(self):
+        customer = self._make_user("history_customer", CUSTOMER)
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Invoice help",
+            message="Please check this invoice.",
+            created_by=customer,
+        )
+        self.client.force_login(customer)
+
+        list_response = self.client.get(reverse("support-ticket-list"))
+        detail_response = self.client.get(reverse("support-ticket-detail", args=[ticket.id]))
+
+        self.assertEqual(list_response.status_code, 403)
+        self.assertEqual(detail_response.status_code, 403)
 
     def test_finance_can_view_invoice_ticket_but_hr_cannot(self):
         customer = self._make_user("invoice_customer", CUSTOMER)

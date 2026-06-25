@@ -1,0 +1,33 @@
+{% load static %}
+<div class="support-chat-widget" data-support-chat>
+    <button class="support-chat-launcher" type="button" data-support-chat-toggle aria-expanded="false" aria-controls="support-chat-panel">
+        <span class="support-chat-launcher-icon" aria-hidden="true">?</span>
+        <span>Chat</span>
+    </button>
+
+    <section class="support-chat-panel" id="support-chat-panel" aria-label="Support chat" hidden>
+        <div class="support-chat-header">
+            <div>
+                <div class="support-chat-title">Vaniday Support</div>
+                <div class="support-chat-status">Send us a message and our team will follow up</div>
+            </div>
+            <button class="support-chat-close" type="button" data-support-chat-toggle aria-label="Close support chat">x</button>
+        </div>
+
+        <div class="support-chat-messages" data-support-chat-messages>
+            <div class="support-chat-message support-chat-message-bot">
+                Hi {{ user.username }}, how can we help today?
+            </div>
+        </div>
+
+        <form class="support-chat-form" method="post" action="{% url 'support-ticket-chat-create' %}" data-support-chat-form>
+            {% csrf_token %}
+            <label class="visually-hidden" for="support-chat-message">Message</label>
+            <div class="support-chat-composer">
+                <textarea class="support-chat-control support-chat-textarea" id="support-chat-message" name="message" rows="1" required placeholder="Write a message..." data-support-chat-input></textarea>
+                <button class="support-chat-submit" type="submit" data-support-chat-submit aria-label="Send message">Send</button>
+            </div>
+        </form>
+    </section>
+</div>
+<script src="{% static 'js/support_chat_widget.js' %}?v=20260626"></script>
