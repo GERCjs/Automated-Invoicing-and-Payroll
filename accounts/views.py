@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Count, Max, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils.dateparse import parse_date
 from django.utils import timezone
 
 from core.audit import get_client_ip, log_event
@@ -829,17 +830,14 @@ def payment_reminder_settings_update(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def payment_reminder_run_check(request):
-    # Manual reminder check must be submitted by POST.
+    # Manual reminder sending must be submitted by POST.
     if request.method != "POST":
         return redirect("payment-reminder-settings-update")
 
-    # "send" sends real emails; every other mode simulates only.
-    mode = request.POST.get("mode", "simulate").strip().lower()
-    simulate = mode != "send"
     summary = run_payment_reminder_check(
         triggered_by=request.user,
         base_url=request.build_absolute_uri("/").rstrip("/"),
-        simulate=simulate,
+        simulate=False,
     )
     # Audit the reminder run summary.
     log_event(
@@ -849,24 +847,11 @@ def payment_reminder_run_check(request):
         metadata=summary,
         ip_address=get_client_ip(request),
     )
-    if simulate:
-        messages.success(
-            request,
-            (
-                f"Reminder check simulation complete. Matched: {summary['checked_invoices']}, "
-                f"simulated logs: {summary['simulated']}, failed: {summary['failed']}, "
-                f"already logged today: {summary['skipped_already_logged_today']}."
-            ),
-        )
-    else:
-        messages.success(
-            request,
-            (
-                f"Reminder check complete. Matched: {summary['checked_invoices']}, "
-                f"sent: {summary['sent']}, failed: {summary['failed']}, "
-                f"already logged today: {summary['skipped_already_logged_today']}."
-            ),
-        )
+    skipped_count = summary["skipped_already_logged_today"] + summary.get("skipped_not_due", 0)
+    messages.success(
+        request,
+        f"Sent {summary['sent']}, failed {summary['failed']}, skipped {skipped_count} not due for another reminder yet.",
+    )
     return redirect("payment-reminder-settings-update")
 
 
@@ -942,6 +927,8 @@ def email_delivery_log_list(request):
     selected_type = request.GET.get("type", "").strip()
     selected_status = request.GET.get("status", "").strip()
     search_query = request.GET.get("q", "").strip()
+    date_from = parse_date(request.GET.get("date_from", "").strip())
+    date_to = parse_date(request.GET.get("date_to", "").strip())
 
     # Only show admin mass email and payment reminder logs here.
     logs = EmailDeliveryLog.objects.select_related("triggered_by").filter(
@@ -953,6 +940,10 @@ def email_delivery_log_list(request):
         logs = logs.filter(template_key__startswith="payment_reminder_")
     if selected_status:
         logs = logs.filter(status=selected_status)
+    if date_from:
+        logs = logs.filter(attempted_at__date__gte=date_from)
+    if date_to:
+        logs = logs.filter(attempted_at__date__lte=date_to)
     if search_query:
         # Search email logs by recipient, subject, related object, or metadata.
         logs = logs.filter(
@@ -970,6 +961,8 @@ def email_delivery_log_list(request):
             "selected_type": selected_type,
             "selected_status": selected_status,
             "search_query": search_query,
+            "date_from": date_from.isoformat() if date_from else "",
+            "date_to": date_to.isoformat() if date_to else "",
             "status_choices": EmailDeliveryLog.STATUS_CHOICES,
         },
     )

@@ -54,7 +54,10 @@ AUDIT_ACTION_LABELS = {
     "admin.account.deleted": "Account deleted",
     "admin.payment_reminders.updated": "Reminder settings updated",
     "admin.payment_reminders.run_check": "Reminder check executed",
-    "admin.mass_email.sent": "Announcement email sent",
+    "admin.mass_email.sent": "Mass email sent",
+    "support.ticket.created": "Support ticket created",
+    "support.ticket.updated": "Support ticket updated",
+
 }
 
 
@@ -121,7 +124,10 @@ def explain_audit_action(action):
         "admin.account.deleted": "An admin deleted a user account.",
         "admin.payment_reminders.updated": "An admin updated reminder settings.",
         "admin.payment_reminders.run_check": "An admin ran the reminder check job.",
-        "admin.mass_email.sent": "An admin sent an announcement email.",
+        "admin.mass_email.sent": "An admin sent a mass email.",
+        "support.ticket.created": "A user submitted a support ticket.",
+        "support.ticket.updated": "An authorized user updated a support ticket.",
+
     }
     return descriptions.get(action, describe_audit_action(action))
 
