@@ -8,6 +8,7 @@ from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 
 from accounts.models import UserRole
@@ -941,7 +942,7 @@ class PayrollReportPlacementAndAccessTests(TestCase):
             deductions=50,
             cpf_contribution=600,
             net_salary=2500,
-            payment_date=date(2026, 6, 1),
+            payment_date=timezone.localdate(),
         )
 
         self.client.force_login(hr_user)

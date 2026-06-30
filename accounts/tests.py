@@ -872,6 +872,30 @@ class AccountsPhaseOneTests(TestCase):
             due_date=timezone.localdate(),
             total_amount=300,
         )
+        draft_invoice = Invoice.objects.create(
+            invoice_number="INV-REM-0003-DRAFT",
+            customer=customer,
+            status=Invoice.STATUS_DRAFT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate(),
+            total_amount=150,
+        )
+        paid_invoice = Invoice.objects.create(
+            invoice_number="INV-REM-0003-PAID",
+            customer=customer,
+            status=Invoice.STATUS_PAID,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate(),
+            total_amount=175,
+        )
+        refunded_invoice = Invoice.objects.create(
+            invoice_number="INV-REM-0003-REFUNDED",
+            customer=customer,
+            status=Invoice.STATUS_REFUNDED,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate(),
+            total_amount=200,
+        )
 
         settings_obj = PaymentReminderSettings.load()
         settings_obj.before_due_reminders_enabled = False
@@ -883,19 +907,56 @@ class AccountsPhaseOneTests(TestCase):
         self.client.login(username="reminder_sim_then_send_admin", password="TempPass123!")
         first_response = self.client.post(reverse("payment-reminder-run-check"))
         self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
         second_response = self.client.post(reverse("payment-reminder-run-check"))
         self.assertEqual(second_response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 1)
+
+        audit_logs = list(
+            AuditLog.objects.filter(
+                action="admin.payment_reminders.run_check",
+                user=admin,
+                target_type="payment_reminder_check",
+            ).order_by("created_at")
+        )
+        self.assertEqual(len(audit_logs), 2)
+        self.assertEqual(audit_logs[0].metadata["sent"], 1)
+        self.assertEqual(audit_logs[0].metadata["processed"], 1)
+        self.assertEqual(audit_logs[0].metadata["skipped_already_logged_today"], 0)
+        self.assertFalse(audit_logs[0].metadata["simulate"])
+        self.assertEqual(audit_logs[1].metadata["sent"], 0)
+        self.assertEqual(audit_logs[1].metadata["processed"], 0)
+        self.assertEqual(audit_logs[1].metadata["skipped_already_logged_today"], 1)
+        self.assertFalse(audit_logs[1].metadata["simulate"])
 
         logs = EmailDeliveryLog.objects.filter(
             related_object_type="invoice",
             related_object_id=str(invoice.id),
             template_key="payment_reminder_due_date",
-        ).order_by("attempted_at")
-        self.assertEqual(logs.count(), 2)
-        self.assertEqual(logs[0].status, EmailDeliveryLog.STATUS_PENDING)
-        self.assertTrue(logs[0].metadata.get("simulate"))
-        self.assertEqual(logs[1].status, EmailDeliveryLog.STATUS_SENT)
-        self.assertFalse(logs[1].metadata.get("simulate"))
+        )
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs.first().status, EmailDeliveryLog.STATUS_SENT)
+        self.assertFalse(logs.first().metadata.get("simulate"))
+        self.assertEqual(
+            EmailDeliveryLog.objects.filter(
+                related_object_type="invoice",
+                related_object_id=str(invoice.id),
+                template_key="payment_reminder_due_date",
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).count(),
+            1,
+        )
+        self.assertFalse(
+            EmailDeliveryLog.objects.filter(
+                related_object_type="invoice",
+                related_object_id__in=[
+                    str(draft_invoice.id),
+                    str(paid_invoice.id),
+                    str(refunded_invoice.id),
+                ],
+                template_key__startswith="payment_reminder_",
+            ).exists()
+        )
 
 
 class AnnouncementEmailTests(TestCase):

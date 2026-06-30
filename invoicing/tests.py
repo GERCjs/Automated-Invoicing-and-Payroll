@@ -1465,7 +1465,7 @@ class InvoiceCollectionReportingTests(TestCase):
         self.assertContains(response, unpaid_invoice.invoice_number)
 
     def test_invoice_dashboard_counts_confirmed_bank_transfer_using_paid_at(self):
-        month_start = self._month_start(0)
+        today = timezone.localdate()
         invoice = self._create_invoice(
             invoice_number="INV-COLL-2005",
             status=Invoice.STATUS_PAID,
@@ -1480,7 +1480,7 @@ class InvoiceCollectionReportingTests(TestCase):
             status=PaymentRecord.STATUS_SUCCEEDED,
             amount=Decimal("54.50"),
             currency="SGD",
-            paid_at=self._aware_datetime(month_start + timedelta(days=1)),
+            paid_at=self._aware_datetime(today),
         )
 
         self.client.force_login(self.finance_user)

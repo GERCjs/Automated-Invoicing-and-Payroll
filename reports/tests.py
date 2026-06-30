@@ -999,12 +999,32 @@ class InvoiceCustomerReportTests(TestCase):
 
     def test_invoice_customer_report_this_month_quick_range(self):
         user = self._make_user("invoice_report_this_month_finance", FINANCE)
+        current_month_invoice = Invoice.objects.create(
+            invoice_number="INV-CUS-THIS-MONTH",
+            customer=self.customer_1,
+            status=Invoice.STATUS_PAID,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("30.00"),
+            tax_amount=Decimal("2.70"),
+            total_amount=Decimal("32.70"),
+        )
+        PaymentRecord.objects.create(
+            invoice=current_month_invoice,
+            payment_reference="PAY-CUS-THIS-MONTH",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=Decimal("32.70"),
+            currency="SGD",
+            paid_at=timezone.now(),
+        )
 
         response = self._report_response(user, date_type="payment_date", quick_range="this_month")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Quick Range: This Month")
-        self.assertContains(response, self.invoice_paid.invoice_number)
+        self.assertContains(response, current_month_invoice.invoice_number)
 
     def test_invoice_customer_report_previous_month_quick_range(self):
         user = self._make_user("invoice_report_previous_month_finance", FINANCE)
@@ -1029,13 +1049,33 @@ class InvoiceCustomerReportTests(TestCase):
             currency="SGD",
             paid_at=timezone.make_aware(datetime.combine(previous_month_day, time(11, 0))),
         )
+        current_month_invoice = Invoice.objects.create(
+            invoice_number="INV-CUS-CURRENT",
+            customer=self.customer_1,
+            status=Invoice.STATUS_PAID,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("30.00"),
+            tax_amount=Decimal("2.70"),
+            total_amount=Decimal("32.70"),
+        )
+        PaymentRecord.objects.create(
+            invoice=current_month_invoice,
+            payment_reference="PAY-CUS-CURRENT",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=Decimal("32.70"),
+            currency="SGD",
+            paid_at=timezone.now(),
+        )
 
         response = self._report_response(user, date_type="payment_date", quick_range="previous_month")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Quick Range: Previous Month")
         self.assertContains(response, previous_invoice.invoice_number)
-        self.assertNotContains(response, self.invoice_paid.invoice_number)
+        self.assertNotContains(response, current_month_invoice.invoice_number)
 
     def test_invoice_customer_report_invalid_date_shows_error_without_server_error(self):
         user = self._make_user("invoice_report_invalid_date_finance", FINANCE)
@@ -1413,6 +1453,7 @@ class CollectionDateAccuracyReportTests(TestCase):
 
     def test_payment_report_excludes_failed_and_cancelled_payments_from_collected_total(self):
         month_start = self._month_start(0)
+        today = timezone.localdate()
         paid_invoice = Invoice.objects.create(
             invoice_number="INV-REPORT-COLLECT-4",
             customer=self.customer,
@@ -1453,7 +1494,7 @@ class CollectionDateAccuracyReportTests(TestCase):
             status=PaymentRecord.STATUS_SUCCEEDED,
             amount=Decimal("109.00"),
             currency="SGD",
-            paid_at=self._aware_datetime(month_start + timedelta(days=2)),
+            paid_at=self._aware_datetime(today),
         )
         PaymentRecord.objects.create(
             invoice=failed_invoice,
@@ -1481,6 +1522,7 @@ class CollectionDateAccuracyReportTests(TestCase):
 
     def test_management_dashboard_and_invoice_dashboard_match_current_month_collection(self):
         month_start = self._month_start(0)
+        today = timezone.localdate()
         invoice = Invoice.objects.create(
             invoice_number="INV-REPORT-COLLECT-7",
             customer=self.customer,
@@ -1499,7 +1541,7 @@ class CollectionDateAccuracyReportTests(TestCase):
             status=PaymentRecord.STATUS_SUCCEEDED,
             amount=Decimal("76.30"),
             currency="SGD",
-            paid_at=self._aware_datetime(month_start + timedelta(days=6)),
+            paid_at=self._aware_datetime(today),
         )
 
         self.client.force_login(self.admin_user)
