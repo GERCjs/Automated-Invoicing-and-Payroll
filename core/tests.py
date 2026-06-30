@@ -8,11 +8,12 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.roles import ADMIN, CUSTOMER, STAFF, SUPERADMIN
+from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from imports.models import ImportJob
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
 from payments.models import PaymentRecord
+from payroll.models import Employee
 from .models import AuditLog
 
 User = get_user_model()
@@ -41,12 +42,15 @@ class CorePhaseOneTests(TestCase):
 
     def test_login_logout_and_dashboard_flow(self):
         user = User.objects.create_user(username="coreuser", password="TempPass123!")
+        user.role_profile.role = ADMIN
+        user.role_profile.save(update_fields=["role", "updated_at"])
 
         login_response = self.client.post(
             reverse("login"),
             data={"username": "coreuser", "password": "TempPass123!"},
         )
         self.assertEqual(login_response.status_code, 302)
+        self.assertEqual(login_response.headers["Location"], reverse("dashboard"))
 
         dashboard_response = self.client.get(reverse("dashboard"))
         self.assertEqual(dashboard_response.status_code, 200)
@@ -307,7 +311,7 @@ class CoreCollectionReportingTests(TestCase):
         self.assertNotContains(response, overdue_invoice.invoice_number)
         self.assertContains(response, "report-attention-table")
 
-    def test_management_dashboard_links_authorised_roles_and_hides_company_health_from_staff(self):
+    def test_management_dashboard_is_reserved_for_management_roles(self):
         superadmin = User.objects.create_superuser(
             username="core_super",
             email="core_super@example.com",
@@ -322,11 +326,19 @@ class CoreCollectionReportingTests(TestCase):
         staff_user = User.objects.create_user(username="core_staff", password="TempPass123!")
         staff_user.role_profile.role = STAFF
         staff_user.role_profile.save(update_fields=["role", "updated_at"])
+        Employee.objects.create(
+            user=staff_user,
+            employee_code="STF-900001",
+            first_name="Core",
+            last_name="Staff",
+            email="core_staff@example.com",
+            hire_date=timezone.localdate(),
+            base_salary=Decimal("2500.00"),
+        )
         self.client.force_login(staff_user)
         staff_response = self.client.get(reverse("dashboard"))
-        self.assertEqual(staff_response.status_code, 200)
-        self.assertNotContains(staff_response, "Collected This Month")
-        self.assertNotContains(staff_response, "Management Attention")
+        self.assertEqual(staff_response.status_code, 302)
+        self.assertEqual(staff_response.url, reverse("my-payslips"))
 
     def test_customer_is_redirected_to_customer_dashboard_from_management_dashboard(self):
         customer_user = User.objects.create_user(username="core_customer", password="TempPass123!")
@@ -338,6 +350,138 @@ class CoreCollectionReportingTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("customer-invoice-dashboard"))
+
+    def test_dashboard_redirects_finance_hr_and_staff_to_role_landing_pages(self):
+        finance_user = User.objects.create_user(username="core_finance", password="TempPass123!")
+        finance_user.role_profile.role = FINANCE
+        finance_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        hr_user = User.objects.create_user(username="core_hr", password="TempPass123!")
+        hr_user.role_profile.role = HR
+        hr_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        staff_user = User.objects.create_user(username="core_staff_portal", password="TempPass123!")
+        staff_user.role_profile.role = STAFF
+        staff_user.role_profile.save(update_fields=["role", "updated_at"])
+        Employee.objects.create(
+            user=staff_user,
+            employee_code="STF-900002",
+            first_name="Portal",
+            last_name="Staff",
+            email="core_staff_portal@example.com",
+            hire_date=timezone.localdate(),
+            base_salary=Decimal("2300.00"),
+        )
+
+        cases = (
+            (finance_user, reverse("invoice-dashboard")),
+            (hr_user, reverse("payroll-dashboard")),
+            (staff_user, reverse("my-payslips")),
+        )
+
+        for user, expected_location in cases:
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get(reverse("dashboard"))
+
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.url, expected_location)
+                self.client.logout()
+
+    def test_direct_unauthorised_dashboard_access_is_blocked(self):
+        finance_user = User.objects.create_user(username="direct_finance", password="TempPass123!")
+        finance_user.role_profile.role = FINANCE
+        finance_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        hr_user = User.objects.create_user(username="direct_hr", password="TempPass123!")
+        hr_user.role_profile.role = HR
+        hr_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        staff_user = User.objects.create_user(username="direct_staff", password="TempPass123!")
+        staff_user.role_profile.role = STAFF
+        staff_user.role_profile.save(update_fields=["role", "updated_at"])
+        Employee.objects.create(
+            user=staff_user,
+            employee_code="STF-900003",
+            first_name="Direct",
+            last_name="Staff",
+            email="direct_staff@example.com",
+            hire_date=timezone.localdate(),
+            base_salary=Decimal("2200.00"),
+        )
+
+        cases = (
+            (finance_user, "payroll-dashboard"),
+            (hr_user, "invoice-dashboard"),
+            (staff_user, "invoice-dashboard"),
+        )
+
+        for user, blocked_route_name in cases:
+            with self.subTest(user=user.username, route=blocked_route_name):
+                self.client.force_login(user)
+                response = self.client.get(reverse(blocked_route_name))
+
+                self.assertEqual(response.status_code, 403)
+                self.client.logout()
+
+    def test_navigation_links_match_each_role_landing_page(self):
+        admin_user = User.objects.create_user(username="nav_admin", password="TempPass123!")
+        admin_user.role_profile.role = ADMIN
+        admin_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        finance_user = User.objects.create_user(username="nav_finance", password="TempPass123!")
+        finance_user.role_profile.role = FINANCE
+        finance_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        hr_user = User.objects.create_user(username="nav_hr", password="TempPass123!")
+        hr_user.role_profile.role = HR
+        hr_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        staff_user = User.objects.create_user(
+            username="nav_staff",
+            email="nav_staff@example.com",
+            password="TempPass123!",
+        )
+        staff_user.role_profile.role = STAFF
+        staff_user.role_profile.save(update_fields=["role", "updated_at"])
+        Employee.objects.create(
+            user=staff_user,
+            employee_code="STF-900004",
+            first_name="Nav",
+            last_name="Staff",
+            email="nav_staff@example.com",
+            hire_date=timezone.localdate(),
+            base_salary=Decimal("2100.00"),
+        )
+
+        customer_user = User.objects.create_user(
+            username="nav_customer",
+            email="nav_customer@example.com",
+            password="TempPass123!",
+        )
+        customer_user.role_profile.role = CUSTOMER
+        customer_user.role_profile.save(update_fields=["role", "updated_at"])
+        Customer.objects.create(name="Nav Customer", email="nav_customer@example.com")
+
+        cases = (
+            (admin_user, reverse("dashboard"), ["Management Dashboard", "Admin Console", "Invoices"], ["My Payslips", "My Invoices"]),
+            (finance_user, reverse("invoice-dashboard"), ["Finance Dashboard", "Support Tickets"], ["Management Dashboard", "Admin Console", "My Payslips"]),
+            (hr_user, reverse("payroll-dashboard"), ["Payroll Dashboard", "Support Tickets"], ["Management Dashboard", "Admin Console", "Finance Dashboard"]),
+            (staff_user, reverse("my-payslips"), ["My Payslips"], ["Management Dashboard", "Admin Console", "Support Tickets"]),
+            (customer_user, reverse("customer-invoice-dashboard"), ["My Invoices"], ["Management Dashboard", "Admin Console", "Support Tickets"]),
+        )
+
+        for user, route, expected_texts, excluded_texts in cases:
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get(route)
+
+                self.assertEqual(response.status_code, 200)
+                for text in expected_texts:
+                    self.assertContains(response, text)
+                for text in excluded_texts:
+                    self.assertNotContains(response, text)
+                self.client.logout()
 
     def test_test_settings_keep_email_backend_in_memory(self):
         self.assertEqual(settings.EMAIL_BACKEND, "django.core.mail.backends.locmem.EmailBackend")

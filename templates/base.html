@@ -68,12 +68,14 @@
                 <a class="portal-nav-link" href="{% url 'dashboard' %}">Management Dashboard</a>
                 {% endif %}
 
-                {% if current_user_role == "finance" or current_user_role == "hr" %}
-                <a class="portal-nav-link" href="{% url 'dashboard' %}">Dashboard</a>
+                {% if current_user_role == "hr" %}
+                <a class="portal-nav-link" href="{% url 'payroll-dashboard' %}">Payroll Dashboard</a>
                 {% endif %}
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
-                <a class="portal-nav-link" href="{% url 'invoice-dashboard' %}">Invoices</a>
+                <a class="portal-nav-link" href="{% url 'invoice-dashboard' %}">
+                    {% if current_user_role == "finance" %}Finance Dashboard{% else %}Invoices{% endif %}
+                </a>
                 {% endif %}
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}

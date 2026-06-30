@@ -4,7 +4,17 @@ from django.contrib.auth.mixins import UserPassesTestMixin
 from django.core.exceptions import PermissionDenied
 
 from core.audit import get_client_ip, log_event
-from .roles import SUPERADMIN
+from .roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
+
+
+ROLE_LANDING_ROUTE_NAMES = {
+    SUPERADMIN: "dashboard",
+    ADMIN: "dashboard",
+    FINANCE: "invoice-dashboard",
+    HR: "payroll-dashboard",
+    STAFF: "my-payslips",
+    CUSTOMER: "customer-invoice-dashboard",
+}
 
 
 def get_user_role(user):
@@ -27,6 +37,11 @@ def user_has_role(user, allowed_roles):
         return False
     role = get_user_role(user)
     return role in set(allowed_roles)
+
+
+def get_role_landing_route_name(user):
+    # Return the most useful landing page for the current user's role.
+    return ROLE_LANDING_ROUTE_NAMES.get(get_user_role(user), "dashboard")
 
 
 def role_required(*allowed_roles):

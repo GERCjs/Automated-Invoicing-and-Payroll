@@ -1147,7 +1147,14 @@ def my_payslips(request):
             request,
             "Your account is not linked to an employee profile yet. Ask admin to link your account in Employees.",
         )
-        return redirect("dashboard")
+        return render(
+            request,
+            "payroll/my_payslips.html",
+            {
+                "employee": None,
+                "payslip_records": PayrollRecord.objects.none(),
+            },
+        )
 
     payslip_records = PayrollRecord.objects.filter(employee_id=employee.employee_code)
     return render(

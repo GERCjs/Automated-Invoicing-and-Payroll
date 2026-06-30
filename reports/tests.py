@@ -245,7 +245,8 @@ class PaymentStripeReportNavigationPlacementTests(TestCase):
         finance = self._make_user("dash_finance", FINANCE)
         self.client.force_login(finance)
         finance_response = self.client.get(reverse("dashboard"))
-        self.assertNotContains(finance_response, reverse("payment-stripe-report"))
+        self.assertEqual(finance_response.status_code, 302)
+        self.assertEqual(finance_response.url, reverse("invoice-dashboard"))
 
     def test_invoice_dashboard_shows_report_link_for_finance_roles(self):
         superadmin = self._make_user("inv_super", SUPERADMIN)
@@ -1293,7 +1294,8 @@ class InvoiceCustomerReportTests(TestCase):
         finance = self._make_user("invoice_report_link_finance_dashboard", FINANCE)
         self.client.force_login(finance)
         finance_response = self.client.get(reverse("dashboard"))
-        self.assertNotContains(finance_response, reverse("invoice-customer-report"))
+        self.assertEqual(finance_response.status_code, 302)
+        self.assertEqual(finance_response.url, reverse("invoice-dashboard"))
 
     def test_management_dashboard_does_not_count_past_due_draft_as_overdue(self):
         draft_invoice = Invoice.objects.create(

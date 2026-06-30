@@ -25,16 +25,33 @@ class AccountsPhaseOneTests(TestCase):
         self.assertTrue(hasattr(user, "role_profile"))
         self.assertTrue(user.role_profile.code_id.startswith("STF-"))
 
-    def test_hr_user_can_open_finance_console(self):
-        user = User.objects.create_user(username="hr1", password="TempPass123!")
-        profile = user.role_profile
-        profile.role = HR
-        profile.save()
+    def test_authorized_roles_are_redirected_from_finance_console_to_payroll_dashboard(self):
+        hr_user = User.objects.create_user(username="hr1", password="TempPass123!")
+        hr_user.role_profile.role = HR
+        hr_user.role_profile.save(update_fields=["role", "updated_at"])
+        admin_user = User.objects.create_user(username="finance_console_admin", password="TempPass123!")
+        admin_user.role_profile.role = ADMIN
+        admin_user.role_profile.save(update_fields=["role", "updated_at"])
+        superadmin = User.objects.create_superuser(
+            username="rootsa",
+            email="rootsa@example.com",
+            password="TempPass123!",
+        )
 
-        self.client.login(username="hr1", password="TempPass123!")
-        response = self.client.get(reverse("finance-console"))
+        cases = (
+            ("hr1", "TempPass123!"),
+            ("finance_console_admin", "TempPass123!"),
+            ("rootsa", "TempPass123!"),
+        )
 
-        self.assertEqual(response.status_code, 200)
+        for username, password in cases:
+            with self.subTest(username=username):
+                self.client.logout()
+                self.client.login(username=username, password=password)
+                response = self.client.get(reverse("finance-console"))
+
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], reverse("payroll-dashboard"))
 
     def test_finance_user_is_forbidden_from_finance_console(self):
         user = User.objects.create_user(username="finance1", password="TempPass123!")
@@ -151,10 +168,54 @@ class AccountsPhaseOneTests(TestCase):
             data={"username": "email_login_user@vaniday.com", "password": "TempPass123!"},
         )
         self.assertEqual(response.status_code, 302)
-        self.assertIn(reverse("dashboard"), response.headers["Location"])
+        self.assertEqual(response.headers["Location"], reverse("my-payslips"))
         self.assertTrue(
             AuditLog.objects.filter(action="auth.login", user=user).exists()
         )
+
+    def test_login_redirects_each_role_to_expected_landing_page(self):
+        admin_user = User.objects.create_user(username="landing_admin", password="TempPass123!")
+        admin_user.role_profile.role = ADMIN
+        admin_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        finance_user = User.objects.create_user(username="landing_finance", password="TempPass123!")
+        finance_user.role_profile.role = FINANCE
+        finance_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        hr_user = User.objects.create_user(username="landing_hr", password="TempPass123!")
+        hr_user.role_profile.role = HR
+        hr_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        staff_user = User.objects.create_user(username="landing_staff", password="TempPass123!")
+        staff_user.role_profile.role = STAFF
+        staff_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        customer_user = User.objects.create_user(
+            username="landing_customer",
+            email="landing_customer@example.com",
+            password="TempPass123!",
+        )
+        customer_user.role_profile.role = CUSTOMER
+        customer_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        cases = (
+            ("landing_admin", reverse("dashboard")),
+            ("landing_finance", reverse("invoice-dashboard")),
+            ("landing_hr", reverse("payroll-dashboard")),
+            ("landing_staff", reverse("my-payslips")),
+            ("landing_customer", reverse("customer-invoice-dashboard")),
+        )
+
+        for username, expected_location in cases:
+            with self.subTest(username=username):
+                self.client.logout()
+                response = self.client.post(
+                    reverse("login"),
+                    data={"username": username, "password": "TempPass123!"},
+                )
+
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], expected_location)
 
     def test_unverified_account_login_shows_verification_message(self):
         user = User.objects.create_user(
@@ -353,17 +414,18 @@ class AccountsPhaseOneTests(TestCase):
             ).exists()
         )
 
-    def test_superadmin_user_can_open_finance_console(self):
+    def test_superadmin_role_is_preserved_when_opening_finance_console_redirect(self):
         superadmin = User.objects.create_superuser(
-            username="rootsa",
-            email="rootsa@example.com",
+            username="finance_redirect_super",
+            email="finance_redirect_super@example.com",
             password="TempPass123!",
         )
 
-        self.client.login(username="rootsa", password="TempPass123!")
+        self.client.login(username="finance_redirect_super", password="TempPass123!")
         response = self.client.get(reverse("finance-console"))
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], reverse("payroll-dashboard"))
         superadmin.refresh_from_db()
         self.assertEqual(superadmin.role_profile.role, SUPERADMIN)
 
@@ -396,8 +458,9 @@ class AccountsPhaseOneTests(TestCase):
         user.role_profile.save()
 
         self.client.login(username="finance_no_admin_link", password="TempPass123!")
-        response = self.client.get(reverse("dashboard"))
+        response = self.client.get(reverse("invoice-dashboard"))
 
+        self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "Admin Console")
 
     def test_customer_is_redirected_from_management_dashboard_to_my_invoices(self):

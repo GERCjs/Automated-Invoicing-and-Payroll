@@ -29,7 +29,7 @@ from .forms import (
     RegistrationForm,
 )
 from .models import EmailVerificationToken, LoginSecurityPolicy
-from .permissions import get_user_role, role_required
+from .permissions import get_role_landing_route_name, get_user_role, role_required
 from .roles import ADMIN, CUSTOMER, ROLE_CHOICES, STAFF, SUPERADMIN
 
 User = get_user_model()
@@ -177,6 +177,10 @@ class UserLoginView(LoginView):
     authentication_form = LoginForm
     # Already-logged-in users are redirected instead of seeing the login page.
     redirect_authenticated_user = True
+
+    def get_default_redirect_url(self):
+        # Send each role to its primary working page after login.
+        return reverse(get_role_landing_route_name(self.request.user))
 
 
 class UserLogoutView(LogoutView):

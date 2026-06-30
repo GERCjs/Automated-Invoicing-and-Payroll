@@ -6,10 +6,15 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">My Payslips</h1>
+        {% if employee %}
         <p class="page-subtitle">Employee: {{ employee.first_name }} {{ employee.last_name }} ({{ employee.employee_code }})</p>
+        {% else %}
+        <p class="page-subtitle">Your account is not linked to an employee profile yet.</p>
+        {% endif %}
     </div>
 </div>
 
+{% if employee %}
 <div class="card">
     <div class="table-responsive">
         <table class="table table-clean table-hover mb-0">
@@ -48,4 +53,9 @@
         </table>
     </div>
 </div>
+{% else %}
+<div class="alert alert-warning">
+    Your account is not linked to an employee profile yet. Ask admin to link your account in Employees.
+</div>
+{% endif %}
 {% endblock %}

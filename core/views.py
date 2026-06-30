@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.db import DatabaseError
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
@@ -6,7 +7,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.permissions import get_user_role, role_required
+from accounts.permissions import get_role_landing_route_name, get_user_role, role_required
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, SUPERADMIN
 from imports.models import ImportJob, ImportRowError
 from invoicing.models import Customer, Invoice
@@ -218,8 +219,11 @@ def customer_entry(request):
 @login_required
 def dashboard(request):
     role = get_user_role(request.user)
-    if role == CUSTOMER:
-        return redirect("customer-invoice-dashboard")
+    if role not in {SUPERADMIN, ADMIN}:
+        landing_route_name = get_role_landing_route_name(request.user)
+        if landing_route_name == "dashboard":
+            raise PermissionDenied("You do not have permission to access this page.")
+        return redirect(landing_route_name)
 
     can_view_admin_stats = role in {SUPERADMIN, ADMIN}
     can_view_invoice_stats = role in {SUPERADMIN, ADMIN, FINANCE}
@@ -595,4 +599,4 @@ def validation_error_list(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def finance_console(request):
-    return render(request, "core/finance_console.html")
+    return redirect("payroll-dashboard")

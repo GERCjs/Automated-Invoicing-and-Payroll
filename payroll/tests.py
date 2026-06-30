@@ -885,12 +885,8 @@ class PayrollReportPlacementAndAccessTests(TestCase):
         user = self._make_user("hr_nav_user", HR)
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard"))
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(
-            response,
-            f'<a class="nav-link" href="{reverse("payroll-report")}">Payroll Report</a>',
-            html=True,
-        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("payroll-dashboard"))
 
     def test_payroll_dashboard_shows_payroll_report_link_for_hr(self):
         user = self._make_user("hr_dashboard_user", HR)
