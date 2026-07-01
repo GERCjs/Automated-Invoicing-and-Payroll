@@ -65,10 +65,6 @@ document.addEventListener("DOMContentLoaded", function () {
         hasInitialServerMessage = false;
 
         fromInput.addEventListener("change", function () {
-            if (toInput.value && fromInput.value && toInput.value < fromInput.value) {
-                toInput.value = "";
-                setMessage("The To date was cleared because it was earlier than the From date.");
-            }
             validateDateRange();
         });
 

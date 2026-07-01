@@ -17,7 +17,7 @@ from invoicing.services import refresh_overdue_invoices
 from notifications.models import EmailDeliveryLog
 from notifications.models import PaymentReminderSettings
 from payments.models import PaymentRecord
-from payments.services import _import_stripe, _require_stripe_secret_key, successful_payments_queryset
+from payments.services import successful_payments_queryset
 from payroll.models import Employee, PayrollRecord
 from payroll.services import cpf_for_2026
 
@@ -31,6 +31,24 @@ def _to_float(value):
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _build_chart_summary(labels, values):
+    numeric_values = [float(value or 0) for value in values]
+    total_value = sum(numeric_values)
+    has_data = any(value > 0 for value in numeric_values)
+    peak_label = ""
+    peak_value = 0.0
+    if has_data and labels and numeric_values:
+        peak_index = max(range(len(numeric_values)), key=numeric_values.__getitem__)
+        peak_label = labels[peak_index]
+        peak_value = numeric_values[peak_index]
+    return {
+        "has_data": has_data,
+        "six_month_total": total_value,
+        "peak_label": peak_label,
+        "peak_value": peak_value,
+    }
 
 
 def _recent_month_starts(today, total_months=6):
@@ -993,6 +1011,7 @@ def payment_stripe_report(request):
     today = timezone.localdate()
     month_start = today.replace(day=1)
     year_start = today.replace(month=1, day=1)
+    report_generated_at = timezone.localtime()
     month_starts = _recent_month_starts(today, total_months=6)
     payment_trend_labels = [month.strftime("%b %Y") for month in month_starts]
     month_keys = [month.strftime("%Y-%m") for month in month_starts]
@@ -1018,6 +1037,8 @@ def payment_stripe_report(request):
             filter_date_from,
             filter_date_to,
         )
+    failed_payments = payment_records.filter(status=PaymentRecord.STATUS_FAILED)
+    cancelled_payments = payment_records.filter(status=PaymentRecord.STATUS_CANCELLED)
     failed_cancelled_payments = payment_records.filter(
         status__in=[PaymentRecord.STATUS_FAILED, PaymentRecord.STATUS_CANCELLED]
     )
@@ -1048,179 +1069,21 @@ def payment_stripe_report(request):
         "total_amount",
     )
 
-    stripe_payments = payment_records.filter(provider=PaymentRecord.PROVIDER_STRIPE)
     status_count_map = {
         row["status"]: row["total"]
         for row in payment_records.values("status").annotate(total=Count("id"))
     }
     payment_status_summary = [
+        {"status": "pending", "label": "Pending", "total": status_count_map.get(PaymentRecord.STATUS_PENDING, 0)},
         {"status": "succeeded", "label": "Successful", "total": status_count_map.get(PaymentRecord.STATUS_SUCCEEDED, 0)},
         {"status": "failed", "label": "Failed", "total": status_count_map.get(PaymentRecord.STATUS_FAILED, 0)},
         {"status": "cancelled", "label": "Cancelled", "total": status_count_map.get(PaymentRecord.STATUS_CANCELLED, 0)},
         {"status": "refunded", "label": "Refunded", "total": status_count_map.get(PaymentRecord.STATUS_REFUNDED, 0)},
     ]
-    recent_stripe_transactions = stripe_payments.select_related("invoice", "invoice__customer").order_by(
-        "-created_at"
-    )[:8]
-
-    recent_payments = (
-        payment_records.select_related("invoice", "invoice__customer").order_by("-created_at")[:20]
-    )
-
-    stripe_total = stripe_payments.count()
-    manual_total = payment_records.filter(provider=PaymentRecord.PROVIDER_MANUAL).count()
-
-    payment_method_summary = [
-        {
-            "method": "Stripe",
-            "available": stripe_total > 0,
-            "has_count": True,
-            "count": stripe_total,
-            "note": (
-                "Current integrated prototype method."
-                if stripe_total > 0 and manual_total == 0
-                else "Stripe payment records."
-            ),
-        },
-    ]
-    if manual_total > 0:
-        payment_method_summary.append(
-            {
-                "method": "Manual / Bank transfer",
-                "available": True,
-                "has_count": True,
-                "count": manual_total,
-                "note": "Stored as provider=manual records.",
-            }
-        )
-
-    stripe_succeeded_payments = succeeded_payments.filter(provider=PaymentRecord.PROVIDER_STRIPE)
-
-    stripe_card_brand_totals = {}
-    stripe_paynow_total = 0
-    stripe_unknown_total = 0
-    stripe_records = list(
-        stripe_succeeded_payments.exclude(external_transaction_id__exact="")
-        .only("id", "external_transaction_id")
-        .order_by("id")
-    )
-
-    try:
-        stripe = _import_stripe()
-        stripe.api_key = _require_stripe_secret_key()
-    except Exception:
-        stripe_unknown_total = stripe_succeeded_payments.count()
-    else:
-        for record in stripe_records:
-            method_type = ""
-            card_brand = ""
-            try:
-                payment_intent = stripe.PaymentIntent.retrieve(
-                    record.external_transaction_id,
-                    expand=["latest_charge"],
-                )
-                method_types = list(getattr(payment_intent, "payment_method_types", []) or [])
-                if method_types:
-                    method_type = str(method_types[0]).strip().lower()
-                latest_charge = getattr(payment_intent, "latest_charge", None)
-                method_details = getattr(latest_charge, "payment_method_details", None)
-                if method_details is not None:
-                    details_type_value = getattr(method_details, "type", "")
-                    if not details_type_value and hasattr(method_details, "get"):
-                        details_type_value = method_details.get("type")
-                    details_type = (
-                        str(details_type_value or "")
-                        .strip()
-                        .lower()
-                    )
-                    if details_type:
-                        method_type = details_type
-                    if details_type == "card":
-                        card_details = getattr(method_details, "card", None)
-                        if card_details is None and hasattr(method_details, "get"):
-                            card_details = method_details.get("card")
-                        if card_details is not None:
-                            brand_value = getattr(card_details, "brand", "")
-                            if not brand_value and hasattr(card_details, "get"):
-                                brand_value = card_details.get("brand")
-                            card_brand = (
-                                str(brand_value or "")
-                                .strip()
-                                .lower()
-                            )
-            except Exception:
-                method_type = ""
-                card_brand = ""
-
-            if method_type == "paynow":
-                stripe_paynow_total += 1
-            elif method_type == "card":
-                if card_brand:
-                    stripe_card_brand_totals[card_brand] = stripe_card_brand_totals.get(card_brand, 0) + 1
-                else:
-                    stripe_unknown_total += 1
-            else:
-                stripe_unknown_total += 1
-
-    stripe_card_total = sum(stripe_card_brand_totals.values())
-
-    # Successful Stripe records without payment_intent IDs cannot be resolved to method type.
-    stripe_unknown_total += max(
-        stripe_succeeded_payments.count() - (stripe_card_total + stripe_paynow_total + stripe_unknown_total),
-        0,
-    )
-
-    brand_display_map = {
-        "amex": "American Express",
-        "mastercard": "Mastercard",
-        "visa": "Visa",
-        "discover": "Discover",
-        "jcb": "JCB",
-        "diners": "Diners Club",
-        "unionpay": "UnionPay",
-    }
-
-    payment_method_table_summary = []
-    for brand, total in sorted(stripe_card_brand_totals.items(), key=lambda row: (-row[1], row[0])):
-        payment_method_table_summary.append(
-            {
-                "method": brand_display_map.get(brand, brand.replace("_", " ").title()),
-                "available": total > 0,
-                "has_count": True,
-                "count": total,
-                "note": "Successful Stripe card payments used by customers.",
-            }
-        )
-
-    payment_method_table_summary.append(
-        {
-            "method": "PayNow",
-            "available": stripe_paynow_total > 0,
-            "has_count": True,
-            "count": stripe_paynow_total,
-            "note": "Successful Stripe PayNow payments used by customers.",
-        }
-    )
-    if stripe_unknown_total > 0:
-        payment_method_table_summary.append(
-            {
-                "method": "Stripe (Unknown)",
-                "available": True,
-                "has_count": True,
-                "count": stripe_unknown_total,
-                "note": "Method could not be determined from stored Stripe details. ",
-            }
-        )
-    if manual_total > 0:
-        payment_method_table_summary.append(
-            {
-                "method": "Manual / Bank transfer",
-                "available": True,
-                "has_count": True,
-                "count": manual_total,
-                "note": "Stored as provider=manual records.",
-            }
-        )
+    recent_payments = payment_records.select_related("invoice", "invoice__customer").order_by(
+        "-paid_at",
+        "-created_at",
+    )[:20]
 
     monthly_successful_rows = list(
         succeeded_payments.filter(paid_at__isnull=False)
@@ -1230,17 +1093,14 @@ def payment_stripe_report(request):
         .order_by("month")
     )
     monthly_successful_amount_map = {}
-    monthly_successful_count_map = {}
     for row in monthly_successful_rows:
         month_value = row.get("month")
         if not month_value:
             continue
         month_key = month_value.strftime("%Y-%m")
         monthly_successful_amount_map[month_key] = _to_float(row.get("total_amount"))
-        monthly_successful_count_map[month_key] = int(row.get("payment_count") or 0)
 
     monthly_payment_amount_values = [monthly_successful_amount_map.get(month_key, 0.0) for month_key in month_keys]
-    monthly_successful_count_values = [monthly_successful_count_map.get(month_key, 0) for month_key in month_keys]
     attention_payments = payment_records.select_related("invoice", "invoice__customer").filter(
         status__in=[
             PaymentRecord.STATUS_PENDING,
@@ -1250,12 +1110,67 @@ def payment_stripe_report(request):
         ]
     ).order_by("-created_at")[:10]
     refunded_amount = _safe_sum(refunded_payments, "amount")
+    failed_payment_count = failed_payments.count()
+    cancelled_payment_count = cancelled_payments.count()
+    status_chart_summary = [
+        {
+            "label": "Successful",
+            "value": str(succeeded_payments.count()),
+        },
+        {
+            "label": "Pending",
+            "value": str(payment_records.filter(status=PaymentRecord.STATUS_PENDING).count()),
+        },
+        {
+            "label": "Failed",
+            "value": str(failed_payment_count),
+        },
+        {
+            "label": "Refunded",
+            "value": str(refunded_payments.count()),
+        },
+    ]
+    collection_chart_summary = _build_chart_summary(payment_trend_labels, monthly_payment_amount_values)
     active_filter_badges = []
-    if filter_date_from or filter_date_to:
-        date_range_start = filter_date_from.strftime("%d %b %Y") if filter_date_from else "Start"
-        date_range_end = filter_date_to.strftime("%d %b %Y") if filter_date_to else "Today"
-        active_filter_badges.append(f"Payment Date: {date_range_start} to {date_range_end}")
+    if filter_date_from and filter_date_to:
+        active_filter_badges.append(
+            f"Payment Date: {filter_date_from.strftime('%d %b %Y')} to {filter_date_to.strftime('%d %b %Y')}"
+        )
+    elif filter_date_from:
+        active_filter_badges.append(f"Payment Date: from {filter_date_from.strftime('%d %b %Y')}")
+    elif filter_date_to:
+        active_filter_badges.append(f"Payment Date: up to {filter_date_to.strftime('%d %b %Y')}")
     has_active_filters = bool(raw_date_from or raw_date_to)
+    reporting_period_label = month_start.strftime("%B %Y")
+    if filter_date_from and filter_date_to:
+        reporting_period_label = f"{filter_date_from.strftime('%d %b %Y')} to {filter_date_to.strftime('%d %b %Y')}"
+    elif filter_date_from:
+        reporting_period_label = f"From {filter_date_from.strftime('%d %b %Y')}"
+    elif filter_date_to:
+        reporting_period_label = f"Up to {filter_date_to.strftime('%d %b %Y')}"
+
+    secondary_summary_items = [
+        {
+            "label": "Collected This Year",
+            "value": f"S${successful_year_amount:,.2f}",
+            "note": "Successful collections confirmed using paid dates within the current year.",
+        },
+        {
+            "label": "Failed Payments",
+            "value": str(failed_payment_count),
+            "note": "Failed payment attempts do not count toward collected totals.",
+        },
+        {
+            "label": "Cancelled Payments",
+            "value": str(cancelled_payment_count),
+            "note": "Cancelled or expired payment attempts remain excluded from collections.",
+        },
+        {
+            "label": "Outstanding Invoice Amount",
+            "value": f"S${outstanding_amount:,.2f}",
+            "note": "Draft, sent, viewed, and overdue invoices still awaiting collection.",
+        },
+    ]
 
     return render(
         request,
@@ -1264,27 +1179,26 @@ def payment_stripe_report(request):
             "today": today,
             "month_start": month_start,
             "year_start": year_start,
+            "report_generated_at": report_generated_at,
+            "reporting_period_label": reporting_period_label,
             "successful_month_amount": successful_month_amount,
             "successful_year_amount": successful_year_amount,
             "successful_payment_count": succeeded_payments.count(),
-            "failed_payment_count": PaymentRecord.objects.filter(status=PaymentRecord.STATUS_FAILED).count(),
-            "cancelled_payment_count": PaymentRecord.objects.filter(status=PaymentRecord.STATUS_CANCELLED).count(),
+            "failed_payment_count": failed_payment_count,
+            "cancelled_payment_count": cancelled_payment_count,
             "failed_cancelled_count": failed_cancelled_payments.count(),
             "refunded_count": refunded_payments.count(),
             "refunded_amount": refunded_amount,
             "pending_manual_payment_count": pending_manual_payments.count(),
             "outstanding_amount": outstanding_amount,
-            "stripe_total": stripe_total,
             "payment_status_summary": payment_status_summary,
-            "recent_stripe_transactions": recent_stripe_transactions,
-            "payment_method_summary": payment_method_summary,
-            "payment_method_table_summary": payment_method_table_summary,
             "recent_payments": recent_payments,
             "attention_payments": attention_payments,
-            "is_stripe_only_prototype": stripe_total > 0 and manual_total == 0,
             "payment_trend_labels": payment_trend_labels,
             "monthly_payment_amount_values": monthly_payment_amount_values,
-            "monthly_successful_count_values": monthly_successful_count_values,
+            "collection_chart_summary": collection_chart_summary,
+            "status_chart_summary": status_chart_summary,
+            "secondary_summary_items": secondary_summary_items,
             "date_from": date_from.isoformat() if date_from else raw_date_from,
             "date_to": date_to.isoformat() if date_to else raw_date_to,
             "date_filter_error": date_filter_error,

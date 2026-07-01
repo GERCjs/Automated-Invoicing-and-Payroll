@@ -173,6 +173,13 @@ a:visited {
     color: #d4d4d4;
 }
 
+.portal-nav-link.is-active,
+.portal-nav-link.dropdown-toggle.show {
+    background: #3a3e49;
+    border-color: #7a8394;
+    color: #ffffff;
+}
+
 .portal-main {
     padding-top: 0.5rem;
 }
@@ -1081,6 +1088,71 @@ textarea.form-control:focus {
     padding: 0.55rem 0.95rem;
 }
 
+.payment-report-page .card,
+.payment-report-page .dashboard-card {
+    border-radius: 16px;
+}
+
+.payment-report-page .payment-report-filters .form-control {
+    min-height: 46px;
+}
+
+.payment-report-page .payment-report-filter-actions .btn {
+    min-height: 44px;
+}
+
+.payment-report-page .payment-report-date-message {
+    min-height: 1.2rem;
+}
+
+.payment-report-page .report-kpi-card .card-body {
+    min-height: 220px;
+}
+
+.payment-report-page .report-summary-strip {
+    gap: 1rem;
+}
+
+.payment-report-page .report-summary-card {
+    border-top: 4px solid #d8e0ea;
+    min-height: 170px;
+    padding: 1.1rem 1.15rem;
+}
+
+.payment-report-page .report-summary-note {
+    font-size: 0.93rem;
+    line-height: 1.5;
+}
+
+.payment-report-page .report-attention-table .table th,
+.payment-report-page .report-attention-table .table td {
+    padding: 0.95rem 1rem;
+}
+
+.payment-report-page .payment-report-actions {
+    align-items: flex-end;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.payment-report-page .payment-report-action-button {
+    color: #9a6b01;
+    font-weight: 700;
+    padding: 0;
+    text-decoration: none;
+}
+
+.payment-report-page .payment-report-action-button:hover,
+.payment-report-page .payment-report-action-button:focus {
+    color: #7c5200;
+    text-decoration: underline;
+}
+
+.payment-report-page .payment-report-chart-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .management-dashboard-page .card-header > span:first-child {
     color: var(--portal-heading);
     font-size: 1.06rem;
@@ -1271,6 +1343,10 @@ textarea.form-control:focus {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .payment-report-page .payment-report-chart-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .management-dashboard-page .report-kpi-card .card-body {
         min-height: 228px;
     }
@@ -1317,6 +1393,10 @@ textarea.form-control:focus {
     .report-summary-strip,
     .report-detail-links-list,
     .report-chart-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .payment-report-page .payment-report-chart-summary {
         grid-template-columns: 1fr;
     }
 

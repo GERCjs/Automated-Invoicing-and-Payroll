@@ -65,7 +65,7 @@ class PaymentStripeReportAccessTests(TestCase):
         response = self.client.get(reverse("payment-stripe-report"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Payment & Stripe Report")
+        self.assertContains(response, "Payment Report")
 
     def test_admin_can_access_report(self):
         user = self._make_user("report_admin", ADMIN)
@@ -74,7 +74,7 @@ class PaymentStripeReportAccessTests(TestCase):
         response = self.client.get(reverse("payment-stripe-report"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Recent Payments")
+        self.assertContains(response, "Detailed Payment Records")
 
     def test_finance_can_access_report(self):
         user = self._make_user("report_finance", FINANCE)
@@ -83,7 +83,7 @@ class PaymentStripeReportAccessTests(TestCase):
         response = self.client.get(reverse("payment-stripe-report"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Recent Stripe Transactions")
+        self.assertContains(response, "Payment Status Breakdown")
 
     def test_customer_cannot_access_report(self):
         user = self._make_user("report_customer", CUSTOMER)
@@ -122,12 +122,46 @@ class PaymentStripeReportAccessTests(TestCase):
         )
         self.assertContains(response, "Collected This Month")
         self.assertContains(response, "Successful Payments")
+        self.assertContains(response, "Pending Bank Transfers")
+        self.assertContains(response, "Refunded Amount")
+        self.assertContains(response, "Collected This Year")
         self.assertContains(response, "Payment Attention")
         self.assertContains(response, "No urgent payment issues were found for the current report data.")
         self.assertContains(response, "S$109.00")
-        self.assertContains(response, "Recent Stripe Transactions")
-        self.assertContains(response, "View Related Invoice")
+        self.assertContains(response, "Detailed Payment Records")
+        self.assertContains(response, "Open invoice")
+        self.assertNotContains(response, "View Related Invoice")
         self.assertNotContains(response, ">Open<")
+
+    def test_payment_report_shows_pending_manual_bank_transfer_confirmation_action(self):
+        user = self._make_user("report_manual_attention", FINANCE)
+        pending_invoice = Invoice.objects.create(
+            invoice_number="INV-REPORT-1003",
+            customer=self.customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=10),
+            currency="SGD",
+            subtotal=Decimal("80.00"),
+            tax_amount=Decimal("7.20"),
+            total_amount=Decimal("87.20"),
+        )
+        PaymentRecord.objects.create(
+            invoice=pending_invoice,
+            payment_reference="PAY-REPORT-003",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=Decimal("87.20"),
+            currency="SGD",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("payment-stripe-report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Confirm bank transfer")
+        self.assertContains(response, reverse("payment-bank-transfer-confirm", args=[pending_invoice.pk]))
+        self.assertContains(response, pending_invoice.invoice_number)
 
     def test_payment_report_includes_date_range_hooks_and_shared_script(self):
         user = self._make_user("report_payment_dates_ui", FINANCE)
@@ -207,6 +241,26 @@ class PaymentStripeReportAccessTests(TestCase):
         self.assertContains(response, 'name="date_to"', html=False)
         self.assertContains(response, 'value="2026-06-14"', html=False)
         self.assertContains(response, "PAY-REPORT-001")
+
+    def test_payment_report_allows_from_only_and_to_only_date_filters(self):
+        user = self._make_user("report_payment_dates_partial", FINANCE)
+        self.client.force_login(user)
+
+        from_only_response = self.client.get(
+            reverse("payment-stripe-report"),
+            data={"date_from": "2026-06-14"},
+        )
+        to_only_response = self.client.get(
+            reverse("payment-stripe-report"),
+            data={"date_to": "2026-06-14"},
+        )
+
+        self.assertEqual(from_only_response.status_code, 200)
+        self.assertEqual(to_only_response.status_code, 200)
+        self.assertContains(from_only_response, "Payment Date: from 14 Jun 2026")
+        self.assertContains(to_only_response, "Payment Date: up to 14 Jun 2026")
+        self.assertContains(from_only_response, 'value="2026-06-14"', html=False)
+        self.assertContains(to_only_response, 'value="2026-06-14"', html=False)
 
 
 class PaymentStripeReportNavigationPlacementTests(TestCase):

@@ -425,6 +425,11 @@ class CoreCollectionReportingTests(TestCase):
                 self.client.logout()
 
     def test_navigation_links_match_each_role_landing_page(self):
+        superadmin_user = User.objects.create_superuser(
+            username="nav_superadmin",
+            email="nav_superadmin@example.com",
+            password="TempPass123!",
+        )
         admin_user = User.objects.create_user(username="nav_admin", password="TempPass123!")
         admin_user.role_profile.role = ADMIN
         admin_user.role_profile.save(update_fields=["role", "updated_at"])
@@ -464,14 +469,72 @@ class CoreCollectionReportingTests(TestCase):
         Customer.objects.create(name="Nav Customer", email="nav_customer@example.com")
 
         cases = (
-            (admin_user, reverse("dashboard"), ["Management Dashboard", "Admin Console", "Invoices"], ["My Payslips", "My Invoices"]),
-            (finance_user, reverse("invoice-dashboard"), ["Finance Dashboard", "Support Tickets"], ["Management Dashboard", "Admin Console", "My Payslips"]),
-            (hr_user, reverse("payroll-dashboard"), ["Payroll Dashboard", "Support Tickets"], ["Management Dashboard", "Admin Console", "Finance Dashboard"]),
-            (staff_user, reverse("my-payslips"), ["My Payslips"], ["Management Dashboard", "Admin Console", "Support Tickets"]),
-            (customer_user, reverse("customer-invoice-dashboard"), ["My Invoices"], ["Management Dashboard", "Admin Console", "Support Tickets"]),
+            (
+                superadmin_user,
+                reverse("dashboard"),
+                ["Management Dashboard", "Invoicing", "Payments", "Admin Console"],
+                ["My Payslips", "My Invoices", "Finance Dashboard"],
+                [],
+            ),
+            (
+                admin_user,
+                reverse("dashboard"),
+                ["Management Dashboard", "Invoicing", "Payments", "Admin Console"],
+                ["My Payslips", "My Invoices", "Finance Dashboard"],
+                [],
+            ),
+            (
+                finance_user,
+                reverse("invoice-dashboard"),
+                ["Invoicing", "Payments", "Support Tickets"],
+                ["Management Dashboard", "Admin Console", "My Payslips", "Finance Dashboard"],
+                [],
+            ),
+            (
+                hr_user,
+                reverse("payroll-dashboard"),
+                ["Payroll Dashboard", "Support Tickets"],
+                ["Management Dashboard", "Admin Console"],
+                [
+                    f'href="{reverse("invoice-dashboard")}"',
+                    f'href="{reverse("invoice-list")}"',
+                    f'href="{reverse("invoice-create")}"',
+                    f'href="{reverse("invoice-csv-upload")}"',
+                    f'href="{reverse("invoice-customer-create")}"',
+                    f'href="{reverse("payment-stripe-report")}"',
+                ],
+            ),
+            (
+                staff_user,
+                reverse("my-payslips"),
+                ["My Payslips"],
+                ["Management Dashboard", "Admin Console", "Support Tickets"],
+                [
+                    f'href="{reverse("invoice-dashboard")}"',
+                    f'href="{reverse("invoice-list")}"',
+                    f'href="{reverse("invoice-create")}"',
+                    f'href="{reverse("invoice-csv-upload")}"',
+                    f'href="{reverse("invoice-customer-create")}"',
+                    f'href="{reverse("payment-stripe-report")}"',
+                ],
+            ),
+            (
+                customer_user,
+                reverse("customer-invoice-dashboard"),
+                ["My Invoices"],
+                ["Management Dashboard", "Admin Console", "Support Tickets"],
+                [
+                    f'href="{reverse("invoice-dashboard")}"',
+                    f'href="{reverse("invoice-list")}"',
+                    f'href="{reverse("invoice-create")}"',
+                    f'href="{reverse("invoice-csv-upload")}"',
+                    f'href="{reverse("invoice-customer-create")}"',
+                    f'href="{reverse("payment-stripe-report")}"',
+                ],
+            ),
         )
 
-        for user, route, expected_texts, excluded_texts in cases:
+        for user, route, expected_texts, excluded_texts, excluded_html_fragments in cases:
             with self.subTest(user=user.username):
                 self.client.force_login(user)
                 response = self.client.get(route)
@@ -481,7 +544,58 @@ class CoreCollectionReportingTests(TestCase):
                     self.assertContains(response, text)
                 for text in excluded_texts:
                     self.assertNotContains(response, text)
+                for fragment in excluded_html_fragments:
+                    self.assertNotContains(response, fragment, html=False)
                 self.client.logout()
+
+    def test_invoicing_dropdown_links_use_existing_routes_and_old_top_level_invoice_link_is_removed(self):
+        finance_user = User.objects.create_user(username="nav_invoice_finance", password="TempPass123!")
+        finance_user.role_profile.role = FINANCE
+        finance_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.client.force_login(finance_user)
+        response = self.client.get(reverse("invoice-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Invoicing")
+        self.assertContains(response, f'href="{reverse("invoice-dashboard")}"', html=False)
+        self.assertContains(response, f'href="{reverse("invoice-list")}"', html=False)
+        self.assertContains(response, f'href="{reverse("invoice-create")}"', html=False)
+        self.assertContains(response, f'href="{reverse("invoice-csv-upload")}"', html=False)
+        self.assertContains(response, f'href="{reverse("invoice-customer-create")}"', html=False)
+        self.assertContains(response, f'href="{reverse("payment-stripe-report")}"', html=False)
+        self.assertNotContains(
+            response,
+            f'<a class="portal-nav-link" href="{reverse("invoice-dashboard")}">',
+            html=False,
+        )
+        self.assertNotContains(response, "Finance Dashboard")
+
+    def test_invoicing_dropdown_is_active_on_invoice_and_customer_management_pages(self):
+        finance_user = User.objects.create_user(username="nav_invoice_active", password="TempPass123!")
+        finance_user.role_profile.role = FINANCE
+        finance_user.role_profile.save(update_fields=["role", "updated_at"])
+        customer = Customer.objects.create(name="Active Nav Customer", email="active-nav@example.com")
+        invoice = Invoice.objects.create(
+            invoice_number="INV-NAV-1001",
+            customer=customer,
+            status=Invoice.STATUS_DRAFT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate(),
+            currency="SGD",
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("9.00"),
+            total_amount=Decimal("109.00"),
+        )
+
+        self.client.force_login(finance_user)
+        invoice_response = self.client.get(reverse("invoice-detail", args=[invoice.pk]))
+        customer_response = self.client.get(reverse("invoice-customer-create"))
+
+        self.assertEqual(invoice_response.status_code, 200)
+        self.assertContains(invoice_response, 'portal-nav-link dropdown-toggle is-active', html=False)
+        self.assertEqual(customer_response.status_code, 200)
+        self.assertContains(customer_response, 'portal-nav-link dropdown-toggle is-active', html=False)
 
     def test_test_settings_keep_email_backend_in_memory(self):
         self.assertEqual(settings.EMAIL_BACKEND, "django.core.mail.backends.locmem.EmailBackend")

@@ -2,401 +2,315 @@
 {% load static %}
 {% load humanize %}
 
-{% block title %}Payment & Stripe Report{% endblock %}
+{% block title %}Payment Report{% endblock %}
+{% block page_container_class %}container-xl management-dashboard-container{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Payment & Stripe Report</h1>
-        <p class="page-subtitle">Use this report to review successful payments, failed attempts, bank transfers and refunds requiring attention.</p>
-    </div>
-</div>
-
-{% if is_stripe_only_prototype %}
-<div class="alert alert-info">
-    Stripe is the current prototype payment method. Bank transfer not available yet.
-</div>
-{% endif %}
-
-<div class="card mb-3">
-    <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-            <h2 class="section-heading mb-0">Filters</h2>
-            {% if has_active_filters %}
-            <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
-            {% endif %}
+<div class="report-page management-dashboard-page payment-report-page">
+    <section class="report-header report-section">
+        <div>
+            <h1 class="page-title">Payment Report</h1>
+            <p class="page-subtitle">Use this report to review successful payments, failed attempts, bank transfers and refunds requiring attention.</p>
+            <div class="report-header-meta">
+                <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
+                <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
+            </div>
         </div>
-        <form id="paymentReportFilterForm" method="get" class="row g-3 align-items-end" data-date-range-form>
-            <div class="col-md-4">
-                <label for="paymentDateFrom" class="form-label">Payment Date From</label>
-                <input
-                    id="paymentDateFrom"
-                    type="date"
-                    name="date_from"
-                    value="{{ date_from }}"
-                    class="form-control"
-                    data-date-from
-                >
+    </section>
+
+    <section class="report-section">
+        <div class="card">
+            <div class="card-body payment-report-filters">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <div>
+                        <div class="report-summary-label">Date Filters</div>
+                        <div class="text-muted small">Filter successful collections by payment date. Same-day, From-only, and To-only ranges are supported.</div>
+                    </div>
+                    {% if has_active_filters %}
+                    <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+                    {% endif %}
+                </div>
+                <form id="paymentReportFilterForm" method="get" class="row g-3 align-items-end" data-date-range-form>
+                    <div class="col-md-4 col-xl-3">
+                        <label for="paymentDateFrom" class="form-label">Payment Date From</label>
+                        <input
+                            id="paymentDateFrom"
+                            type="date"
+                            name="date_from"
+                            value="{{ date_from }}"
+                            class="form-control"
+                            data-date-from
+                        >
+                    </div>
+                    <div class="col-md-4 col-xl-3">
+                        <label for="paymentDateTo" class="form-label">Payment Date To</label>
+                        <input
+                            id="paymentDateTo"
+                            type="date"
+                            name="date_to"
+                            value="{{ date_to }}"
+                            class="form-control"
+                            data-date-to
+                        >
+                    </div>
+                    <div class="col-md-4 col-xl-6">
+                        <div class="d-flex flex-wrap gap-2 payment-report-filter-actions">
+                            <button type="submit" class="btn btn-primary">Apply Filters</button>
+                            <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div
+                            id="paymentReportDateMessage"
+                            class="form-text text-danger payment-report-date-message{% if not date_filter_error %} d-none{% endif %}"
+                            data-date-error
+                        >{{ date_filter_error }}</div>
+                    </div>
+                </form>
+                {% if has_active_filters and active_filter_badges %}
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    {% for badge in active_filter_badges %}
+                    <span class="report-period">{{ badge }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
             </div>
-            <div class="col-md-4">
-                <label for="paymentDateTo" class="form-label">Payment Date To</label>
-                <input
-                    id="paymentDateTo"
-                    type="date"
-                    name="date_to"
-                    value="{{ date_to }}"
-                    class="form-control"
-                    data-date-to
-                >
-            </div>
-            <div class="col-md-4">
-                <div class="d-flex flex-wrap gap-2">
-                    <button type="submit" class="btn btn-primary">Apply Filters</button>
-                    <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="row g-3 report-kpi-grid">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Collected This Month</div>
+                        <div class="report-kpi-value">S${{ successful_month_amount|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Successful collections confirmed with `paid_at` during the current month.</div>
+                    </div>
                 </div>
             </div>
-            <div class="col-12">
-                <div
-                    id="paymentReportDateMessage"
-                    class="form-text text-danger{% if not date_filter_error %} d-none{% endif %}"
-                    data-date-error
-                >{{ date_filter_error }}</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Successful Payments</div>
+                        <div class="report-kpi-value">{{ successful_payment_count }}</div>
+                        <div class="small text-muted">Succeeded Stripe and confirmed manual bank transfer payments only.</div>
+                    </div>
+                </div>
             </div>
-        </form>
-        {% if has_active_filters and active_filter_badges %}
-        <div class="d-flex flex-wrap gap-2 mt-3">
-            {% for badge in active_filter_badges %}
-            <span class="badge bg-secondary">{{ badge }}</span>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Pending Bank Transfers</div>
+                        <div class="report-kpi-value">{{ pending_manual_payment_count }}</div>
+                        <div class="small text-muted">Manual payment records still waiting for finance confirmation.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Refunded Amount</div>
+                        <div class="report-kpi-value">S${{ refunded_amount|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Refunded payments stay excluded from net collected totals.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="report-summary-strip">
+            {% for item in secondary_summary_items %}
+            <div class="report-summary-card">
+                <div class="report-summary-label">{{ item.label }}</div>
+                <div class="report-summary-value">{{ item.value }}</div>
+                <div class="report-summary-note">{{ item.note }}</div>
+            </div>
             {% endfor %}
         </div>
-        {% endif %}
-    </div>
-</div>
+    </section>
 
-<div class="row g-3 mb-3">
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Collected This Month</div>
-                <div class="h4 mb-0">S${{ successful_month_amount|floatformat:2|intcomma }}</div>
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Payment Attention</span>
+                <span class="text-muted small">Review pending bank transfers, failed attempts, cancellations, and refunds that may need action.</span>
+            </div>
+            <div class="card-body p-0">
+                {% if attention_payments %}
+                <div class="table-responsive report-attention-table">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Priority</th>
+                                <th>Payment Date</th>
+                                <th>Invoice</th>
+                                <th>Customer</th>
+                                <th>Method</th>
+                                <th>Status</th>
+                                <th class="text-end">Amount</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for payment in attention_payments %}
+                            <tr>
+                                <td>
+                                    {% if payment.provider == "manual" and payment.status == "pending" %}
+                                    <span class="status-badge status-warning">Manual Review</span>
+                                    {% elif payment.status == "failed" %}
+                                    <span class="status-badge status-danger">High</span>
+                                    {% elif payment.status == "cancelled" %}
+                                    <span class="status-badge status-neutral">Medium</span>
+                                    {% else %}
+                                    <span class="status-badge status-warning">Follow Up</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
+                                <td>{{ payment.invoice.invoice_number }}</td>
+                                <td>{{ payment.invoice.customer.name }}</td>
+                                <td>{{ payment.get_provider_display }}</td>
+                                <td>{{ payment.get_status_display }}</td>
+                                <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
+                                <td class="text-end">
+                                    <div class="payment-report-actions">
+                                        {% if payment.provider == "manual" and payment.status == "pending" %}
+                                        <form method="post" action="{% url 'payment-bank-transfer-confirm' payment.invoice.pk %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-link btn-sm payment-report-action-button">Confirm bank transfer</button>
+                                        </form>
+                                        {% endif %}
+                                        <a href="{% url 'invoice-detail' payment.invoice.pk %}" class="report-link">Open invoice</a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state m-3">No urgent payment issues were found for the current report data.</div>
+                {% endif %}
             </div>
         </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Collected This Year</div>
-                <div class="h4 mb-0">S${{ successful_year_amount|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Successful Payments</div>
-                <div class="display-6 mb-0 text-success">{{ successful_payment_count }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Failed Payments</div>
-                <div class="display-6 mb-0 text-danger">{{ failed_payment_count }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Cancelled Payments</div>
-                <div class="display-6 mb-0 text-warning">{{ cancelled_payment_count }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Refunded Payments</div>
-                <div class="display-6 mb-0">{{ refunded_count }}</div>
-            </div>
-        </div>
-    </div>
-</div>
+    </section>
 
-<div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Payment Attention</span>
-        <span class="text-muted small">Use this section to review failed, cancelled, pending or refunded activity.</span>
-    </div>
-    <div class="card-body">
-        {% if attention_payments %}
-        <div class="row g-3 mb-3">
-            <div class="col-md-4">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Pending Manual Payments</div>
-                    <div class="h4 mb-1">{{ pending_manual_payment_count }}</div>
-                    <div class="text-muted small">Manual bank-transfer records still awaiting confirmation.</div>
+    <section class="report-section">
+        <h2 class="section-heading mb-3">Useful Charts</h2>
+        <div class="row g-3">
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Monthly Successful Payment Amount</div>
+                    <div class="report-chart-body">
+                        <canvas id="monthlyPaymentAmountChart" class="report-chart-canvas" aria-label="Monthly successful payment amount chart" role="img"></canvas>
+                        <div id="monthlyPaymentAmountChartEmpty" class="report-chart-empty d-none">No successful payment trend data is available yet.</div>
+                    </div>
+                    <div class="px-3 text-muted small">Shows the amount collected from successful payments in each of the last 6 months using `paid_at`.</div>
+                    {% if collection_chart_summary.has_data %}
+                    <div class="report-chart-summary">
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">Current month</span>
+                            <span class="report-chart-stat-value">S${{ successful_month_amount|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">6-month total</span>
+                            <span class="report-chart-stat-value">S${{ collection_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">Highest month</span>
+                            <span class="report-chart-stat-value">{{ collection_chart_summary.peak_label }}: S${{ collection_chart_summary.peak_value|floatformat:2|intcomma }}</span>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="report-chart-summary">
+                        <div class="report-chart-stat w-100">
+                            <span class="report-chart-stat-value">No successful payment trend data is available yet.</span>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Refunded Amount</div>
-                    <div class="h4 mb-1">S${{ refunded_amount|floatformat:2|intcomma }}</div>
-                    <div class="text-muted small">Refunded payments stay excluded from collected totals.</div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Outstanding Invoice Amount</div>
-                    <div class="h4 mb-1">S${{ outstanding_amount|floatformat:2|intcomma }}</div>
-                    <div class="text-muted small">Unpaid invoice value still waiting to be collected.</div>
-                </div>
-            </div>
-        </div>
-        <div class="table-responsive">
-            <table class="table table-clean table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Invoice</th>
-                        <th>Customer</th>
-                        <th>Provider</th>
-                        <th>Status</th>
-                        <th class="text-end">Amount</th>
-                        <th class="text-end">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for payment in attention_payments %}
-                    <tr>
-                        <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
-                        <td>{{ payment.invoice.invoice_number }}</td>
-                        <td>{{ payment.invoice.customer.name }}</td>
-                        <td>{{ payment.get_provider_display }}</td>
-                        <td>{{ payment.get_status_display }}</td>
-                        <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
-                        <td class="text-end"><a href="{% url 'invoice-detail' payment.invoice.pk %}" class="btn btn-sm btn-outline-primary">View Related Invoice</a></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="empty-state">No urgent payment issues were found for the current report data.</div>
-        {% endif %}
-    </div>
-</div>
-
-<h2 class="section-heading mb-3">Useful Charts</h2>
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Monthly Payment Collection Trend</div>
-            <div class="report-chart-body">
-                <canvas id="monthlyPaymentAmountChart" class="report-chart-canvas" aria-label="Monthly payment collection trend chart" role="img"></canvas>
-                <div id="monthlyPaymentAmountChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-            </div>
-            <div class="px-3 pb-3 text-muted small">Shows the value of successful payments in each of the last 6 months.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Payment Status Breakdown</div>
-            <div class="report-chart-body">
-                <canvas id="paymentStatusChart" class="report-chart-canvas" aria-label="Payment status breakdown chart" role="img"></canvas>
-                <div id="paymentStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-            </div>
-            <div class="px-3 pb-3 text-muted small">Visible counts: Successful {{ successful_payment_count }}, Failed {{ failed_payment_count }}, Cancelled {{ cancelled_payment_count }}, Refunded {{ refunded_count }}.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Payment Method Summary</div>
-            <div class="report-chart-body">
-                <canvas id="paymentMethodChart" class="report-chart-canvas" aria-label="Payment method summary chart" role="img"></canvas>
-                <div id="paymentMethodChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-            </div>
-            <div class="px-3 pb-3 text-muted small">Summarises which payment methods were actually used in stored payment records.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Successful Payment Count Trend</div>
-            <div class="report-chart-body">
-                <canvas id="successfulPaymentCountChart" class="report-chart-canvas" aria-label="Successful payment count trend chart" role="img"></canvas>
-                <div id="successfulPaymentCountChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-            </div>
-            <div class="px-3 pb-3 text-muted small">Shows how many successful payments were recorded each month.</div>
-        </div>
-    </div>
-</div>
-
-<div class="row g-3 mb-3">
-    <div class="col-md-4">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Outstanding Invoice Amount</div>
-                <div class="h4 mb-0">S${{ outstanding_amount|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Total Stripe Payments</div>
-                <div class="display-6 mb-0">{{ stripe_total }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Reporting Window</div>
-                <div class="mb-0">Month start: {{ month_start|date:"d M Y" }}</div>
-                <div class="mb-0">Year start: {{ year_start|date:"d M Y" }}</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header">Payment Status Summary</div>
-            <div class="table-responsive">
-                <table class="table table-clean mb-0">
-                    <thead>
-                        <tr>
-                            <th>Status</th>
-                            <th class="text-end">Count</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in payment_status_summary %}
-                        <tr>
-                            <td>{{ row.label }}</td>
-                            <td class="text-end">{{ row.total }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="2" class="text-center py-3">No payment status data yet.</td></tr>
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Payment Status Breakdown</div>
+                    <div class="report-chart-body">
+                        <canvas id="paymentStatusChart" class="report-chart-canvas" aria-label="Payment status breakdown chart" role="img"></canvas>
+                        <div id="paymentStatusChartEmpty" class="report-chart-empty d-none">No payment status data is available yet.</div>
+                    </div>
+                    <div class="px-3 text-muted small">Shows how current payment records are split across successful, pending, failed, cancelled, and refunded states.</div>
+                    <div class="report-chart-summary payment-report-chart-summary">
+                        {% for item in status_chart_summary %}
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">{{ item.label }}</span>
+                            <span class="report-chart-stat-value">{{ item.value }}</span>
+                        </div>
                         {% endfor %}
-                    </tbody>
-                </table>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header">Payment Method Summary</div>
-            <div class="table-responsive">
-                <table class="table table-clean mb-0">
-                    <thead>
-                        <tr>
-                            <th>Method</th>
-                            <th>Available</th>
-                            <th class="text-end">Count</th>
-                            <th>Note</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for method in payment_method_table_summary %}
-                        <tr>
-                            <td>{{ method.method }}</td>
-                            <td>
-                                {% if method.available %}
-                                <span class="badge bg-success">Yes</span>
-                                {% else %}
-                                <span class="badge bg-secondary">No</span>
-                                {% endif %}
-                            </td>
-                            <td class="text-end">{% if method.has_count %}{{ method.count }}{% else %}-{% endif %}</td>
-                            <td>{{ method.note }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    </section>
+
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Detailed Payment Records</span>
+                <span class="text-muted small">Recent payment records across Stripe and manual bank transfer activity.</span>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_payments %}
+                <div class="table-responsive">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Payment Date</th>
+                                <th>Invoice</th>
+                                <th>Customer</th>
+                                <th>Method</th>
+                                <th>Status</th>
+                                <th>Payment Reference</th>
+                                <th class="text-end">Amount</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for payment in recent_payments %}
+                            <tr>
+                                <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
+                                <td>{{ payment.invoice.invoice_number }}</td>
+                                <td>{{ payment.invoice.customer.name }}</td>
+                                <td>{{ payment.get_provider_display }}</td>
+                                <td>{{ payment.get_status_display }}</td>
+                                <td>{{ payment.payment_reference }}</td>
+                                <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
+                                <td class="text-end">
+                                    <div class="payment-report-actions">
+                                        {% if payment.provider == "manual" and payment.status == "pending" %}
+                                        <form method="post" action="{% url 'payment-bank-transfer-confirm' payment.invoice.pk %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-link btn-sm payment-report-action-button">Confirm bank transfer</button>
+                                        </form>
+                                        {% endif %}
+                                        <a href="{% url 'invoice-detail' payment.invoice.pk %}" class="report-link">Open invoice</a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state m-3">No payment records were found for this report.</div>
+                {% endif %}
             </div>
         </div>
-    </div>
-</div>
-
-<h2 class="section-heading mb-3">Detailed Records</h2>
-<div class="card mb-3">
-    <div class="card-header">Recent Stripe Transactions</div>
-    <div class="table-responsive">
-        <table class="table table-clean table-hover mb-0">
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Invoice</th>
-                    <th>Customer</th>
-                    <th class="text-end">Amount</th>
-                    <th>Status</th>
-                    <th>Payment Reference</th>
-                    <th>Session ID</th>
-                    <th class="text-end">Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for payment in recent_stripe_transactions %}
-                <tr>
-                    <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
-                    <td>{{ payment.invoice.invoice_number }}</td>
-                    <td>{{ payment.invoice.customer.name }}</td>
-                    <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
-                    <td>{{ payment.get_status_display }}</td>
-                    <td>{{ payment.payment_reference }}</td>
-                    <td><span class="small text-muted">{{ payment.stripe_checkout_session_id|default:"-" }}</span></td>
-                    <td class="text-end"><a href="{% url 'invoice-detail' payment.invoice.pk %}" class="btn btn-sm btn-outline-primary">View Related Invoice</a></td>
-                </tr>
-                {% empty %}
-                <tr><td colspan="8" class="text-center py-3">No Stripe transactions were found for this report.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-header">Recent Payments</div>
-    <div class="table-responsive">
-        <table class="table table-clean table-hover mb-0">
-            <thead>
-                <tr>
-                    <th>Payment Date</th>
-                    <th>Invoice Number</th>
-                    <th>Customer</th>
-                    <th class="text-end">Amount</th>
-                    <th>Method</th>
-                    <th>Status</th>
-                    <th class="text-end">Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for payment in recent_payments %}
-                <tr>
-                    <td>{{ payment.paid_at|default:payment.created_at|date:"d M Y, H:i" }}</td>
-                    <td>{{ payment.invoice.invoice_number }}</td>
-                    <td>{{ payment.invoice.customer.name }}</td>
-                    <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
-                    <td>{{ payment.get_provider_display }}</td>
-                    <td>{{ payment.get_status_display }}</td>
-                    <td class="text-end"><a href="{% url 'invoice-detail' payment.invoice.pk %}" class="btn btn-sm btn-outline-secondary">View Related Invoice</a></td>
-                </tr>
-                {% empty %}
-                <tr><td colspan="7" class="text-center py-3">No payment records were found for this report.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    </section>
 </div>
 
 {{ payment_trend_labels|json_script:"payment-trend-labels-data" }}
 {{ monthly_payment_amount_values|json_script:"payment-trend-amount-values-data" }}
 {{ payment_status_summary|json_script:"payment-status-summary-data" }}
-{{ payment_method_summary|json_script:"payment-method-data" }}
-{{ monthly_successful_count_values|json_script:"payment-trend-success-count-values-data" }}
 <script src="{% static 'js/date-range-filters.js' %}"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 <script src="{% static 'js/report_charts.js' %}"></script>
@@ -444,7 +358,7 @@
                 {
                     label: "Payment Count",
                     data: paymentStatusSummary.map(function (row) { return row.total; }),
-                    backgroundColor: ["#198754", "#dc3545", "#ff7f73", "#64748b"],
+                    backgroundColor: ["#f59e0b", "#198754", "#dc3545", "#64748b", "#7c3aed"],
                     borderColor: "#ffffff",
                     borderWidth: 2
                 }
@@ -456,60 +370,6 @@
                 }
             },
             emptyText: "No payment status data is available yet."
-        });
-
-        var methodSummary = window.ReportCharts.parseJsonScript("payment-method-data", []);
-        window.ReportCharts.renderChart({
-            canvasId: "paymentMethodChart",
-            emptyStateId: "paymentMethodChartEmpty",
-            type: "doughnut",
-            labels: methodSummary.map(function (method) { return method.method; }),
-            datasets: [
-                {
-                    label: "Method Count",
-                    data: methodSummary.map(function (method) { return method.has_count ? method.count : 0; }),
-                    backgroundColor: ["#ff7f73", "#64748b", "#94a3b8"],
-                    borderColor: "#ffffff",
-                    borderWidth: 2
-                }
-            ],
-            options: {
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: "bottom" }
-                }
-            },
-            emptyText: "No payment method data is available yet."
-        });
-
-        var paymentTrendCountValues = window.ReportCharts.parseJsonScript("payment-trend-success-count-values-data", []);
-        window.ReportCharts.renderChart({
-            canvasId: "successfulPaymentCountChart",
-            emptyStateId: "successfulPaymentCountChartEmpty",
-            type: "bar",
-            labels: paymentTrendLabels,
-            datasets: [
-                {
-                    label: "Successful Payments",
-                    data: paymentTrendCountValues,
-                    backgroundColor: "#198754",
-                    borderColor: "#64748b",
-                    borderWidth: 1
-                }
-            ],
-            options: {
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        precision: 0
-                    }
-                }
-            },
-            emptyText: "No successful payment count trend is available yet."
         });
     })();
 </script>
