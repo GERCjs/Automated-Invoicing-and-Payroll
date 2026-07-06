@@ -7,3 +7,4 @@ staticfiles/
 *.log
 EDGE_TEST_AGENT.md
 EDGE_TEST_FINDINGS.md
+VISIBLE_FIXES_SUMMARY.md
