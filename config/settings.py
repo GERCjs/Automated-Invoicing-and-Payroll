@@ -72,6 +72,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "accounts.context_processors.user_role",
+                "support.context_processors.support_chat_options",
             ],
         },
     },
@@ -151,6 +152,7 @@ REGISTERED_OFFICE_TEXT = os.getenv(
 INVOICE_PAYMENT_TERM_DAYS = int(os.getenv("INVOICE_PAYMENT_TERM_DAYS", "30"))
 INVOICE_IMPORT_MAX_UPLOAD_BYTES = int(os.getenv("INVOICE_IMPORT_MAX_UPLOAD_BYTES", "2097152"))
 INVOICE_IMPORT_MAX_ROWS = int(os.getenv("INVOICE_IMPORT_MAX_ROWS", "1000"))
+SUPPORT_TICKET_SLA_DAYS = int(os.getenv("SUPPORT_TICKET_SLA_DAYS", "3"))
 INVOICE_BANK_TEXT = os.getenv("INVOICE_BANK_TEXT", "")
 INVOICE_PAYMENT_NOTES = os.getenv(
     "INVOICE_PAYMENT_NOTES",

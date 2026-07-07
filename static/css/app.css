@@ -1270,6 +1270,41 @@ textarea.form-control:focus {
     margin-left: auto;
 }
 
+.support-chat-quick-group {
+    margin-bottom: 0.7rem;
+}
+
+.support-chat-quick-replies {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.42rem;
+    margin-top: 0.45rem;
+}
+
+.support-chat-chip {
+    background: #ffffff;
+    border: 1px solid #cfd7e3;
+    border-radius: 999px;
+    color: #344154;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.25;
+    padding: 0.42rem 0.66rem;
+    text-align: left;
+}
+
+.support-chat-chip:hover,
+.support-chat-chip:focus {
+    background: var(--portal-primary-soft);
+    border-color: #f2b4ad;
+    color: #963f39;
+}
+
+.support-chat-chip:disabled {
+    cursor: default;
+    opacity: 0.58;
+}
+
 .support-chat-form {
     background: #ffffff;
     border-top: 1px solid #edf1f5;
@@ -1328,6 +1363,37 @@ textarea.form-control:focus {
 
 .support-chat-submit:disabled {
     opacity: 0.72;
+}
+
+.support-ticket-overdue > td {
+    --bs-table-bg: #fff1f2;
+    --bs-table-bg-type: #fff1f2;
+    --bs-table-striped-bg: #fff1f2;
+    --bs-table-hover-bg: #ffe4e6;
+    background: #fff1f2 !important;
+    border-top-color: #fecdd3 !important;
+    box-shadow: inset 0 0 0 9999px #fff1f2 !important;
+}
+
+.support-ticket-sla-badge {
+    background: #ffe4e6;
+    border: 1px solid #fda4af;
+    border-radius: 999px;
+    color: #be123c;
+    display: inline-flex;
+    font-size: 0.78rem;
+    font-weight: 800;
+    padding: 0.26rem 0.55rem;
+    white-space: nowrap;
+}
+
+.support-ticket-row {
+    cursor: pointer;
+}
+
+.support-ticket-row:focus {
+    outline: 2px solid #e11d48;
+    outline-offset: -2px;
 }
 
 @media (max-width: 991.98px) {

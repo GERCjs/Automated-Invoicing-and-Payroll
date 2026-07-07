@@ -19,9 +19,13 @@
                 Hi {{ user.username }}, how can we help today?
             </div>
         </div>
+        {{ support_chat_options|json_script:"support-chat-options" }}
 
         <form class="support-chat-form" method="post" action="{% url 'support-ticket-chat-create' %}" data-support-chat-form>
             {% csrf_token %}
+            <input type="hidden" name="category" data-support-chat-category>
+            <input type="hidden" name="issue_label" data-support-chat-issue>
+            <input type="hidden" name="related_reference" data-support-chat-reference>
             <label class="visually-hidden" for="support-chat-message">Message</label>
             <div class="support-chat-composer">
                 <textarea class="support-chat-control support-chat-textarea" id="support-chat-message" name="message" rows="1" required placeholder="Write a message..." data-support-chat-input></textarea>
@@ -30,4 +34,4 @@
         </form>
     </section>
 </div>
-<script src="{% static 'js/support_chat_widget.js' %}?v=20260626"></script>
+<script src="{% static 'js/support_chat_widget.js' %}?v=20260707"></script>

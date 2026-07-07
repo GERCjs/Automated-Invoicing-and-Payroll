@@ -1,10 +1,6 @@
 from django import forms
-from django.contrib.auth import get_user_model
-
-from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
+from accounts.roles import ADMIN, CUSTOMER, STAFF, SUPERADMIN
 from .models import SupportTicket
-
-User = get_user_model()
 
 
 class SupportTicketCreateForm(forms.ModelForm):
@@ -46,21 +42,16 @@ class SupportTicketCreateForm(forms.ModelForm):
 class SupportTicketUpdateForm(forms.ModelForm):
     class Meta:
         model = SupportTicket
-        fields = ("status", "priority", "assigned_to", "resolution_note")
+        fields = ("status", "priority", "assigned_role", "resolution_note")
         widgets = {
             "status": forms.Select(attrs={"class": "form-select"}),
             "priority": forms.Select(attrs={"class": "form-select"}),
-            "assigned_to": forms.Select(attrs={"class": "form-select"}),
+            "assigned_role": forms.Select(attrs={"class": "form-select"}),
             "resolution_note": forms.Textarea(attrs={"class": "form-control", "rows": 4}),
         }
 
     def __init__(self, *args, actor_role=None, **kwargs):
         super().__init__(*args, **kwargs)
-        internal_roles = [SUPERADMIN, ADMIN, FINANCE, HR]
-        self.fields["assigned_to"].queryset = (
-            User.objects.select_related("role_profile")
-            .filter(role_profile__role__in=internal_roles)
-            .order_by("username")
-        )
+        self.fields["assigned_role"].choices = [("", "Unassigned"), *SupportTicket.ASSIGNED_ROLE_CHOICES]
         if actor_role not in {SUPERADMIN, ADMIN}:
-            self.fields["assigned_to"].disabled = True
+            self.fields["assigned_role"].disabled = True

@@ -4,6 +4,15 @@ from django.utils import timezone
 
 
 class SupportTicket(models.Model):
+    ASSIGNED_ROLE_ADMIN = "admin"
+    ASSIGNED_ROLE_FINANCE = "finance"
+    ASSIGNED_ROLE_PAYROLL = "hr"
+    ASSIGNED_ROLE_CHOICES = [
+        (ASSIGNED_ROLE_FINANCE, "Finance"),
+        (ASSIGNED_ROLE_PAYROLL, "Payroll"),
+        (ASSIGNED_ROLE_ADMIN, "Admin"),
+    ]
+
     CATEGORY_INVOICE = "invoice"
     CATEGORY_PAYMENT = "payment"
     CATEGORY_PAYROLL = "payroll"
@@ -20,12 +29,10 @@ class SupportTicket(models.Model):
     STATUS_OPEN = "open"
     STATUS_IN_PROGRESS = "in_progress"
     STATUS_RESOLVED = "resolved"
-    STATUS_CLOSED = "closed"
     STATUS_CHOICES = [
         (STATUS_OPEN, "Open"),
         (STATUS_IN_PROGRESS, "In Progress"),
         (STATUS_RESOLVED, "Resolved"),
-        (STATUS_CLOSED, "Closed"),
     ]
 
     PRIORITY_LOW = "low"
@@ -66,6 +73,7 @@ class SupportTicket(models.Model):
         related_name="support_tickets_assigned",
         db_constraint=False,
     )
+    assigned_role = models.CharField(max_length=20, choices=ASSIGNED_ROLE_CHOICES, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -83,8 +91,31 @@ class SupportTicket(models.Model):
     def __str__(self) -> str:
         return f"{self.get_category_display()} - {self.subject}"
 
+    @property
+    def is_resolved(self):
+        return self.status == self.STATUS_RESOLVED
+
+    @property
+    def unresolved_age_days(self):
+        if self.is_resolved:
+            return 0
+        created_date = timezone.localtime(self.created_at).date()
+        return max((timezone.localdate() - created_date).days, 0)
+
+    @property
+    def is_sla_breached(self):
+        return not self.is_resolved and self.unresolved_age_days >= settings.SUPPORT_TICKET_SLA_DAYS
+
+    @property
+    def assigned_display(self):
+        if self.assigned_role:
+            return self.get_assigned_role_display()
+        if self.assigned_to_id:
+            return self.assigned_to.username
+        return "Unassigned"
+
     def mark_resolution_timestamp(self):
-        if self.status in {self.STATUS_RESOLVED, self.STATUS_CLOSED} and self.resolved_at is None:
+        if self.status == self.STATUS_RESOLVED and self.resolved_at is None:
             self.resolved_at = timezone.now()
-        if self.status not in {self.STATUS_RESOLVED, self.STATUS_CLOSED}:
+        if self.status != self.STATUS_RESOLVED:
             self.resolved_at = None

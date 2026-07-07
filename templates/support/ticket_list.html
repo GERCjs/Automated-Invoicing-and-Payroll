@@ -6,10 +6,15 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">{% if can_handle_tickets %}Support Tickets{% else %}My Support Requests{% endif %}</h1>
-        <p class="page-subtitle">Track invoice, payment, payroll, and account support requests.</p>
+        <p class="page-subtitle">Track invoice, payment, payroll, and account support requests. Tickets open for {{ support_ticket_sla_days }} days are highlighted.</p>
     </div>
-    <a href="{% url 'support-ticket-create' %}" class="btn btn-primary">New Support Request</a>
 </div>
+
+{% if sla_breached_count %}
+<div class="alert alert-danger portal-alert">
+    {{ sla_breached_count }} unresolved support ticket{{ sla_breached_count|pluralize }} reached the {{ support_ticket_sla_days }} day response target.
+</div>
+{% endif %}
 
 <div class="card">
     <div class="card-header">
@@ -58,30 +63,53 @@
                     <th>Category</th>
                     <th>Subject</th>
                     <th>Status</th>
+                    <th>Response Target</th>
                     <th>Priority</th>
                     <th>Assigned To</th>
                 </tr>
             </thead>
             <tbody>
                 {% for ticket in tickets %}
-                <tr>
+                <tr class="support-ticket-row {% if ticket.is_sla_breached %}support-ticket-overdue{% endif %}" data-ticket-url="{% url 'support-ticket-detail' ticket.id %}" role="link" tabindex="0">
                     <td class="text-nowrap">{{ ticket.created_at|date:"Y-m-d H:i" }}</td>
                     <td>{{ ticket.get_category_display }}</td>
                     <td>
-                        <a class="fw-semibold" href="{% url 'support-ticket-detail' ticket.id %}">{{ ticket.subject }}</a>
+                        <span class="fw-semibold">{{ ticket.subject }}</span>
                         {% if ticket.related_reference %}
                         <div class="text-muted small">{{ ticket.related_reference }}</div>
                         {% endif %}
                     </td>
                     <td>{{ ticket.get_status_display }}</td>
+                    <td>
+                        {% if ticket.is_resolved %}
+                        <span class="badge bg-success">Resolved</span>
+                        {% elif ticket.is_sla_breached %}
+                        <span class="support-ticket-sla-badge">Overdue {{ ticket.unresolved_age_days }}d</span>
+                        {% else %}
+                        <span class="text-muted small">{{ ticket.unresolved_age_days }}d open</span>
+                        {% endif %}
+                    </td>
                     <td>{{ ticket.get_priority_display }}</td>
-                    <td>{{ ticket.assigned_to.username|default:"Unassigned" }}</td>
+                    <td>{{ ticket.assigned_display }}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6" class="text-center py-4"><div class="empty-state">No support tickets match the filters.</div></td></tr>
+                <tr><td colspan="7" class="text-center py-4"><div class="empty-state">No support tickets match the filters.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 </div>
+<script>
+document.querySelectorAll("[data-ticket-url]").forEach((row) => {
+    row.addEventListener("click", () => {
+        window.location.href = row.dataset.ticketUrl;
+    });
+    row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            window.location.href = row.dataset.ticketUrl;
+        }
+    });
+});
+</script>
 {% endblock %}

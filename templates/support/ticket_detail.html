@@ -11,6 +11,12 @@
     <a href="{% url 'support-ticket-list' %}" class="btn btn-outline-secondary">Back</a>
 </div>
 
+{% if ticket.is_sla_breached %}
+<div class="alert alert-danger portal-alert">
+    This ticket has been unresolved for {{ ticket.unresolved_age_days }} days. The current response target is {{ support_ticket_sla_days }} days.
+</div>
+{% endif %}
+
 <div class="row g-3">
     <div class="col-lg-7">
         <div class="card">
@@ -24,7 +30,7 @@
                     <dt class="col-sm-4">Reference</dt>
                     <dd class="col-sm-8">{{ ticket.related_reference|default:"-" }}</dd>
                     <dt class="col-sm-4">Assigned To</dt>
-                    <dd class="col-sm-8">{{ ticket.assigned_to.username|default:"Unassigned" }}</dd>
+                    <dd class="col-sm-8">{{ ticket.assigned_display }}</dd>
                     <dt class="col-sm-4">Created</dt>
                     <dd class="col-sm-8">{{ ticket.created_at|date:"Y-m-d H:i" }}</dd>
                     <dt class="col-sm-4">Resolved</dt>
@@ -59,7 +65,7 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Assigned To</label>
-                        {{ form.assigned_to }}
+                        {{ form.assigned_role }}
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Resolution Note</label>

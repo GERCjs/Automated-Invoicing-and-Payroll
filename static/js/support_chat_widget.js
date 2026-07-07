@@ -10,6 +10,12 @@
     const messages = widget.querySelector("[data-support-chat-messages]");
     const messageInput = widget.querySelector("[data-support-chat-input]");
     const submitButton = widget.querySelector("[data-support-chat-submit]");
+    const categoryInput = widget.querySelector("[data-support-chat-category]");
+    const issueInput = widget.querySelector("[data-support-chat-issue]");
+    const referenceInput = widget.querySelector("[data-support-chat-reference]");
+    const optionsScript = widget.querySelector("#support-chat-options");
+    const chatOptions = optionsScript ? JSON.parse(optionsScript.textContent) : { options: [], references: [] };
+    let activeOption = null;
 
     function appendMessage(text, type) {
         const bubble = document.createElement("div");
@@ -17,6 +23,76 @@
         bubble.textContent = text;
         messages.appendChild(bubble);
         messages.scrollTop = messages.scrollHeight;
+    }
+
+    function appendQuickReplies(prompt, replies, onSelect) {
+        if (!replies.length) {
+            return;
+        }
+
+        const group = document.createElement("div");
+        group.className = "support-chat-quick-group";
+
+        const promptBubble = document.createElement("div");
+        promptBubble.className = "support-chat-message support-chat-message-bot";
+        promptBubble.textContent = prompt;
+        group.appendChild(promptBubble);
+
+        const chips = document.createElement("div");
+        chips.className = "support-chat-quick-replies";
+        replies.forEach((reply) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "support-chat-chip";
+            button.textContent = reply.meta ? `${reply.label} (${reply.meta})` : reply.label;
+            button.addEventListener("click", () => {
+                chips.querySelectorAll("button").forEach((chip) => {
+                    chip.disabled = true;
+                });
+                onSelect(reply);
+            });
+            chips.appendChild(button);
+        });
+        group.appendChild(chips);
+        messages.appendChild(group);
+        messages.scrollTop = messages.scrollHeight;
+    }
+
+    function resetConversationMetadata() {
+        activeOption = null;
+        categoryInput.value = "";
+        issueInput.value = "";
+        referenceInput.value = "";
+        messageInput.placeholder = "Write a message...";
+    }
+
+    function showTopicOptions(prompt) {
+        appendQuickReplies(prompt, chatOptions.options || [], (option) => {
+            activeOption = option;
+            categoryInput.value = option.category || "";
+            issueInput.value = option.label || "";
+            referenceInput.value = "";
+            appendMessage(option.label, "user");
+
+            const references = option.referenceKind ? chatOptions.references || [] : [];
+            if (references.length) {
+                appendQuickReplies(option.prompt || "Which record is this about?", references, (reference) => {
+                    referenceInput.value = reference.value || "";
+                    appendMessage(reference.label, "user");
+                    appendMessage(option.detailPrompt || "Tell us more about the issue.", "bot");
+                    messageInput.placeholder = option.detailPrompt || "Write a message...";
+                    messageInput.focus();
+                });
+                return;
+            }
+
+            const noReferencePrompt = option.referenceKind
+                ? "I could not find linked records to show here. Type the reference in your message if you have it."
+                : option.prompt || "Tell us more about the issue.";
+            appendMessage(noReferencePrompt, "bot");
+            messageInput.placeholder = option.detailPrompt || "Write a message...";
+            messageInput.focus();
+        });
     }
 
     function setOpen(isOpen) {
@@ -33,6 +109,11 @@
         toggle.addEventListener("click", () => {
             setOpen(panel.hidden);
         });
+    });
+
+    messageInput.addEventListener("input", () => {
+        messageInput.style.height = "auto";
+        messageInput.style.height = `${Math.min(messageInput.scrollHeight, 92)}px`;
     });
 
     messageInput.addEventListener("keydown", (event) => {
@@ -71,6 +152,9 @@
             }
             appendMessage(payload.message, "bot");
             form.reset();
+            messageInput.style.height = "";
+            resetConversationMetadata();
+            showTopicOptions("Need help with anything else?");
             messageInput.focus();
         } catch (error) {
             appendMessage("The request could not be sent right now. Please try again in a moment.", "bot");
@@ -79,4 +163,7 @@
             submitButton.textContent = "Send";
         }
     });
+
+    resetConversationMetadata();
+    showTopicOptions("Choose a topic so we can route this correctly.");
 })();
