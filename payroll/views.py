@@ -464,16 +464,39 @@ def payroll_upload_preview(request):
             )
             preview_rows = upload_result["valid_rows"]
             invalid_rows = upload_result["invalid_rows"]
+            employee_lookup = {
+                employee.employee_code: employee
+                for employee in Employee.objects.filter(
+                    employee_code__in=[str(row.get("employee_code") or "").strip() for row in preview_rows]
+                )
+            }
             filtered_valid_rows = []
             for row in preview_rows:
                 employee_code = str(row.get("employee_code") or "").strip()
-                if not Employee.objects.filter(employee_code=employee_code).exists():
+                employee = employee_lookup.get(employee_code)
+                row_errors = []
+                if employee is None:
+                    row_errors.append("Employee code not found in employee records.")
+                else:
+                    expected_name = f"{employee.first_name} {employee.last_name}".strip()
+                    if expected_name and str(row.get("employee_name") or "").strip() != expected_name:
+                        row_errors.append("Employee name does not match employee records.")
+                    uploaded_dob = _parse_date_ddmmyyyy(row.get("employee_birthofdate"))
+                    if employee.date_of_birth and uploaded_dob and employee.date_of_birth != uploaded_dob:
+                        row_errors.append("Employee birthofdate does not match employee records.")
+                    if PayrollRecord.objects.filter(
+                        employee_id=employee_code,
+                        payment_date=form.cleaned_data["payment_date"],
+                    ).exists():
+                        row_errors.append("A payroll record already exists for this employee and payment date.")
+
+                if row_errors:
                     invalid_rows.append(
                         {
                             "row_number": row.get("row_number"),
                             "employee_code": employee_code,
                             "employee_name": row.get("employee_name", ""),
-                            "errors": ["Employee code not found in employee records."],
+                            "errors": row_errors,
                             "raw_values": row.get("__raw_values", {}),
                         }
                     )
@@ -864,6 +887,8 @@ def employee_upload_preview(request):
             valid_gender = {choice[0] for choice in Employee.GENDER_CHOICES}
             valid_payment_method = {choice[0] for choice in Employee.PAYMENT_METHOD_CHOICES}
             used_employee_codes = set(Employee.objects.values_list("employee_code", flat=True))
+            seen_upload_employee_codes = {}
+            seen_upload_emails = {}
 
             for row_number, row in enumerate(raw_rows[1:], start=2):
                 if row is None or all(value in (None, "") for value in row):
@@ -884,6 +909,8 @@ def employee_upload_preview(request):
                     row_errors.append("Last name is required.")
                 if not parsed_row["email"]:
                     row_errors.append("Email is required.")
+                elif "@" not in parsed_row["email"] or "." not in parsed_row["email"].split("@")[-1]:
+                    row_errors.append("Email must be a valid email address.")
 
                 for date_field in ("date_of_birth", "date_of_appointment"):
                     raw_value = parsed_row[date_field]
@@ -897,6 +924,11 @@ def employee_upload_preview(request):
                         row_errors.append(f"{date_field.replace('_', ' ').title()} must be DD-MM-YYYY.")
                     else:
                         parsed_row[date_field] = parsed_date.strftime("%d-%m-%Y")
+
+                parsed_birth_date = _parse_date_ddmmyyyy(parsed_row.get("date_of_birth"))
+                parsed_appointment_date = _parse_date_ddmmyyyy(parsed_row.get("date_of_appointment"))
+                if parsed_birth_date and parsed_appointment_date and parsed_appointment_date < parsed_birth_date:
+                    row_errors.append("Date of appointment cannot be earlier than date of birth.")
 
                 for bool_field in ("sdl_exempt", "cpf_exempt"):
                     raw_value = parsed_row[bool_field].lower()
@@ -917,8 +949,32 @@ def employee_upload_preview(request):
                     row_errors.append("Employee code must follow STF-000000 format.")
                 if parsed_row["employee_code"] and Employee.objects.filter(employee_code=parsed_row["employee_code"]).exists():
                     row_errors.append("Employee code already exists.")
+                if parsed_row["employee_code"]:
+                    first_seen_row = seen_upload_employee_codes.get(parsed_row["employee_code"])
+                    if first_seen_row is not None:
+                        row_errors.append(
+                            f"Employee code is duplicated in this upload file. First duplicate appears on row {first_seen_row}."
+                        )
+                    else:
+                        seen_upload_employee_codes[parsed_row["employee_code"]] = row_number
                 if Employee.objects.filter(email__iexact=parsed_row["email"]).exists():
                     row_errors.append("Email already exists in employee records.")
+                if parsed_row["email"]:
+                    email_key = parsed_row["email"].lower()
+                    first_seen_row = seen_upload_emails.get(email_key)
+                    if first_seen_row is not None:
+                        row_errors.append(
+                            f"Email is duplicated in this upload file. First duplicate appears on row {first_seen_row}."
+                        )
+                    else:
+                        seen_upload_emails[email_key] = row_number
+                if parsed_row["payment_method"] == Employee.PAYMENT_METHOD_GIRO:
+                    if not parsed_row["bank_name"]:
+                        row_errors.append("Bank name is required when payment method is GIRO.")
+                    if not parsed_row["bank_account_number"]:
+                        row_errors.append("Bank account number is required when payment method is GIRO.")
+                    if not parsed_row["bank_branch_code"]:
+                        row_errors.append("Bank branch code is required when payment method is GIRO.")
 
                 if row_errors:
                     invalid_rows.append(
