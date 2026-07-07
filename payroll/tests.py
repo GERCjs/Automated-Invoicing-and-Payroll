@@ -820,6 +820,16 @@ class PayrollDuplicatePreventionTests(TestCase):
                 self.assertEqual(upload_response.status_code, 302)
                 self.client.logout()
 
+    def test_manual_payroll_creation_uses_employee_dropdown(self):
+        self.client.force_login(get_user_model().objects.get(username="payroll_hr"))
+
+        response = self.client.get(reverse("payroll-create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<select name="employee_id"', html=False)
+        self.assertContains(response, "Select an employee ID")
+        self.assertContains(response, f"{self.employee.employee_code} - Alex Tan")
+
     def test_staff_and_customer_cannot_use_manual_payroll_creation_or_upload_confirmation(self):
         for username, role in [
             ("payroll_staff", STAFF),

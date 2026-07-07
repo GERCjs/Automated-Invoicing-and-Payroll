@@ -26,6 +26,12 @@ class EmployeeUploadForm(forms.Form):
 
 class PayrollRecordForm(forms.ModelForm):
     DUPLICATE_ERROR = "A payroll record already exists for this employee and payment date."
+    EMPLOYEE_PLACEHOLDER = [("", "Select an employee ID")]
+
+    employee_id = forms.ChoiceField(
+        choices=EMPLOYEE_PLACEHOLDER,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
 
     payment_date = forms.DateField(
         input_formats=["%d-%m-%Y", "%Y-%m-%d"],
@@ -96,8 +102,7 @@ class PayrollRecordForm(forms.ModelForm):
             "payment_date",
         ]
         widgets = {
-            "employee_name": forms.TextInput(attrs={"class": "form-control"}),
-            "employee_id": forms.TextInput(attrs={"class": "form-control", "placeholder": "STF-00000"}),
+            "employee_name": forms.TextInput(attrs={"class": "form-control", "readonly": "readonly"}),
             "basic_salary": forms.NumberInput(attrs={"class": "form-control", "step": "0.01"}),
             "cpf_contribution": forms.NumberInput(
                 attrs={
@@ -140,6 +145,14 @@ class PayrollRecordForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        employee_choices = self.EMPLOYEE_PLACEHOLDER + [
+            (
+                employee.employee_code,
+                f"{employee.employee_code} - {employee.first_name} {employee.last_name}".strip(),
+            )
+            for employee in Employee.objects.order_by("employee_code")
+        ]
+        self.fields["employee_id"].choices = employee_choices
         if self.instance and self.instance.pk:
             self.fields["physical_products_commission"].initial = (
                 self.instance.physical_products_commission or 0
