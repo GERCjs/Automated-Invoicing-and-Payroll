@@ -21,7 +21,8 @@ from notifications.services import (
     send_stripe_payment_success_email,
 )
 
-from .models import PaymentRecord
+from .forms import PaymentBankDetailsForm
+from .models import PaymentBankDetails, PaymentRecord
 from .services import (
     WEBHOOK_EVENT_ASYNC_FAILED,
     WEBHOOK_EVENT_ASYNC_SUCCEEDED,
@@ -35,6 +36,7 @@ from .services import (
     create_full_refund_for_payment,
     create_checkout_for_invoice,
     finalize_checkout_success_from_redirect,
+    mask_bank_account_number,
     process_webhook_event,
     retrieve_checkout_session,
 )
@@ -370,6 +372,54 @@ def confirm_bank_transfer_payment_for_invoice(request, pk):
         f"Bank transfer confirmed for invoice {invoice.invoice_number}.",
     )
     return redirect("invoice-detail", pk=invoice.pk)
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def bank_transfer_settings(request):
+    details = PaymentBankDetails.load()
+    if request.method != "POST":
+        return render(
+            request,
+            "payments/bank_transfer_settings.html",
+            {"form": PaymentBankDetailsForm(instance=details), "details": details},
+        )
+
+    previous_account_number = details.account_number
+    form = PaymentBankDetailsForm(request.POST, instance=details)
+    if form.is_valid():
+        changed_fields = list(form.changed_data)
+        if changed_fields:
+            settings_obj = form.save(commit=False)
+            settings_obj.updated_by = request.user
+            settings_obj.save()
+
+            metadata = {"changed_fields": changed_fields}
+            if "account_number" in changed_fields:
+                metadata.update(
+                    {
+                        "account_number_before": mask_bank_account_number(previous_account_number),
+                        "account_number_after": mask_bank_account_number(settings_obj.account_number),
+                    }
+                )
+            log_event(
+                action="payment.bank_transfer_details.updated",
+                user=request.user,
+                target_type="payment_bank_details",
+                target_id=str(settings_obj.id),
+                metadata=metadata,
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Bank transfer details updated.")
+        else:
+            messages.info(request, "No bank transfer detail changes to save.")
+        return redirect("payment-bank-transfer-settings")
+
+    return render(
+        request,
+        "payments/bank_transfer_settings.html",
+        {"form": form, "details": details},
+    )
 
 
 @login_required

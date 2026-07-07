@@ -12,6 +12,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from payments.services import get_bank_transfer_details
+
 from .models import Invoice
 
 
@@ -25,10 +27,9 @@ def build_export_context(invoice: Invoice) -> dict:
         "company_reg_no": settings.COMPANY_REG_NO,
         "registered_office_text": settings.REGISTERED_OFFICE_TEXT,
         "invoice_payment_term_days": settings.INVOICE_PAYMENT_TERM_DAYS,
-        "invoice_bank_text": settings.INVOICE_BANK_TEXT,
+        "bank_transfer_details": get_bank_transfer_details(),
         "invoice_payment_notes": settings.INVOICE_PAYMENT_NOTES,
         "invoice_attention_email": getattr(settings, "COMPANY_EMAIL", "finance@vaniday.com"),
-        "paynow_uen": getattr(settings, "COMPANY_REG_NO", "201535968M"),
         "invoice": invoice,
         "items": items,
     }
@@ -220,22 +221,24 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     story.append(Spacer(1, 8))
     story.append(Paragraph(f"Due Date: {invoice.due_date.strftime('%d %b %Y')}", body))
     story.append(Paragraph(f"Payment Term: {context['invoice_payment_term_days']} Days", body))
-    story.append(Spacer(1, 6))
-    story.append(Paragraph("<b>Bank Transfer Details</b>", body))
-    story.append(Paragraph("Please arrange payment via bank transfer to:", body))
-
-    for line in context["invoice_bank_text"].split("\n"):
-        if line.strip():
-            story.append(Paragraph(line, body))
-
-    story.append(Spacer(1, 4))
-    story.append(Paragraph(f"<b>PayNow UEN:</b> {context['paynow_uen']}", body))
-    story.append(
-        Paragraph(
-            "Please include your invoice number and salon name as payment reference.",
-            body,
-        )
-    )
+    bank_transfer_details = context["bank_transfer_details"]
+    if bank_transfer_details:
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("<b>Bank Transfer Details</b>", body))
+        story.append(Paragraph("Please arrange payment via bank transfer to:", body))
+        detail_lines = [
+            ("Account Name", bank_transfer_details.get("account_name", "")),
+            ("Bank", bank_transfer_details.get("bank_name", "")),
+            ("Account Number", bank_transfer_details.get("account_number", "")),
+            ("PayNow ID", bank_transfer_details.get("paynow_id", "")),
+            ("BIC/SWIFT", bank_transfer_details.get("bic", "")),
+        ]
+        for label, value in detail_lines:
+            if value:
+                story.append(Paragraph(f"<b>{label}:</b> {value}", body))
+        for line in bank_transfer_details.get("instructions", "").split("\n"):
+            if line.strip():
+                story.append(Paragraph(line, body))
 
     story.append(Spacer(1, 4))
     for line in context["invoice_payment_notes"].split("\n"):

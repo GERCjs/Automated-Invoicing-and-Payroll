@@ -74,7 +74,16 @@
                 <p class="mb-1"><strong>Bank:</strong> {{ bank_transfer_details.bank_name }}</p>
                 {% endif %}
                 {% if bank_transfer_details.account_number %}
-                <p class="mb-2"><strong>Account Number:</strong> {{ bank_transfer_details.account_number }}</p>
+                <p class="mb-1"><strong>Account Number:</strong> {{ bank_transfer_details.account_number }}</p>
+                {% endif %}
+                {% if bank_transfer_details.paynow_id %}
+                <p class="mb-1"><strong>PayNow ID:</strong> {{ bank_transfer_details.paynow_id }}</p>
+                {% endif %}
+                {% if bank_transfer_details.bic %}
+                <p class="mb-1"><strong>BIC / SWIFT:</strong> {{ bank_transfer_details.bic }}</p>
+                {% endif %}
+                {% if bank_transfer_details.instructions %}
+                <p class="mb-2 text-muted">{{ bank_transfer_details.instructions }}</p>
                 {% endif %}
                 <form method="post" action="{% url 'payment-bank-transfer-confirm' invoice.pk %}">
                     {% csrf_token %}

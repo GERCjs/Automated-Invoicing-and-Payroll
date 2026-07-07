@@ -17,8 +17,9 @@ from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from core.models import AuditLog
 from imports.models import ImportJob
 from notifications.models import EmailDeliveryLog
-from payments.models import PaymentRecord
+from payments.models import PaymentBankDetails, PaymentRecord
 
+from .exports import build_export_context
 from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow
 from .services import (
     apply_overdue_status,
@@ -948,6 +949,27 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/pdf")
         self.assertIn(f'{invoice.invoice_number}.pdf', response["Content-Disposition"])
         self.assertTrue(response.content.startswith(b"%PDF"))
+
+    def test_invoice_pdf_context_uses_editable_bank_transfer_details(self):
+        PaymentBankDetails.objects.update_or_create(
+            pk=1,
+            defaults={
+                "account_name": "PDF Billing Pte Ltd",
+                "bank_name": "PDF Web Bank",
+                "account_number": "555-444333-2",
+                "paynow_id": "PDF-UEN",
+                "bic": "PDFSGSG",
+                "instructions": "Use the web-managed payment reference.",
+            },
+        )
+        invoice = self._create_invoice_with_item()
+
+        context = build_export_context(invoice)
+
+        self.assertEqual(context["bank_transfer_details"]["account_name"], "PDF Billing Pte Ltd")
+        self.assertEqual(context["bank_transfer_details"]["bank_name"], "PDF Web Bank")
+        self.assertEqual(context["bank_transfer_details"]["account_number"], "555-444333-2")
+        self.assertNotIn("invoice_bank_text", context)
 
     def test_finance_can_download_invoice_excel_and_values_match(self):
         invoice = self._create_invoice_with_item()

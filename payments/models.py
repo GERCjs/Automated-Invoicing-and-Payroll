@@ -3,6 +3,50 @@ from django.core.validators import MinValueValidator
 from django.db import models
 
 
+# A PaymentBankDetails row stores the current company bank-transfer instructions.
+class PaymentBankDetails(models.Model):
+    account_name = models.CharField(max_length=255, blank=True, default="")
+    bank_name = models.CharField(max_length=100, default="")
+    account_number = models.CharField(max_length=64, default="")
+    paynow_id = models.CharField(max_length=100, blank=True, default="")
+    bic = models.CharField(max_length=50, blank=True, default="")
+    instructions = models.TextField(blank=True, default="")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payment_bank_details_updates",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "payment_bank_details"
+        verbose_name = "Payment bank details"
+        verbose_name_plural = "Payment bank details"
+
+    def __str__(self) -> str:
+        return "Payment bank details"
+
+    @classmethod
+    def load(cls):
+        details, _ = cls.objects.get_or_create(pk=1)
+        return details
+
+    def is_complete(self) -> bool:
+        return bool(self.bank_name.strip() and self.account_number.strip())
+
+    def as_display_dict(self) -> dict[str, str]:
+        return {
+            "account_name": self.account_name.strip(),
+            "bank_name": self.bank_name.strip(),
+            "account_number": self.account_number.strip(),
+            "paynow_id": self.paynow_id.strip(),
+            "bic": self.bic.strip(),
+            "instructions": self.instructions.strip(),
+        }
+
+
 # A PaymentRecord stores one payment attempt or payment result for an invoice.
 class PaymentRecord(models.Model):
     # "manual" means the payment was recorded by a person/system outside Stripe.

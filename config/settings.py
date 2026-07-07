@@ -151,14 +151,7 @@ REGISTERED_OFFICE_TEXT = os.getenv(
 INVOICE_PAYMENT_TERM_DAYS = int(os.getenv("INVOICE_PAYMENT_TERM_DAYS", "30"))
 INVOICE_IMPORT_MAX_UPLOAD_BYTES = int(os.getenv("INVOICE_IMPORT_MAX_UPLOAD_BYTES", "2097152"))
 INVOICE_IMPORT_MAX_ROWS = int(os.getenv("INVOICE_IMPORT_MAX_ROWS", "1000"))
-INVOICE_BANK_TEXT = os.getenv(
-    "INVOICE_BANK_TEXT",
-    f"{COMPANY_NAME}\n"
-    "Bank: DBS\n"
-    "BIC/SWIFT: DBSSSGSG\n"
-    "Account Number: 001-234567-8\n"
-    "Payment reference: use the bank transfer reference shown on the invoice.",
-)
+INVOICE_BANK_TEXT = os.getenv("INVOICE_BANK_TEXT", "")
 INVOICE_PAYMENT_NOTES = os.getenv(
     "INVOICE_PAYMENT_NOTES",
     "Please include your invoice number and salon name as reference for electronic payments.\n"
@@ -180,14 +173,11 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
-BANK_TRANSFER_ACCOUNT_NAME = os.getenv("BANK_TRANSFER_ACCOUNT_NAME", COMPANY_NAME)
-BANK_TRANSFER_BANK_NAME = os.getenv("BANK_TRANSFER_BANK_NAME", "DBS")
-BANK_TRANSFER_ACCOUNT_NUMBER = os.getenv("BANK_TRANSFER_ACCOUNT_NUMBER", "001-234567-8")
+BANK_TRANSFER_ACCOUNT_NAME = os.getenv("BANK_TRANSFER_ACCOUNT_NAME", "")
+BANK_TRANSFER_BANK_NAME = os.getenv("BANK_TRANSFER_BANK_NAME", "")
+BANK_TRANSFER_ACCOUNT_NUMBER = os.getenv("BANK_TRANSFER_ACCOUNT_NUMBER", "")
 BANK_TRANSFER_PAYNOW_ID = os.getenv("BANK_TRANSFER_PAYNOW_ID", "")
-BANK_TRANSFER_BIC = os.getenv("BANK_TRANSFER_BIC", "DBSSSGSG")
-BANK_TRANSFER_INSTRUCTIONS = os.getenv(
-    "BANK_TRANSFER_INSTRUCTIONS",
-    "Enter the payment reference in your bank transfer comments/reference field.",
-)
+BANK_TRANSFER_BIC = os.getenv("BANK_TRANSFER_BIC", "")
+BANK_TRANSFER_INSTRUCTIONS = os.getenv("BANK_TRANSFER_INSTRUCTIONS", "")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

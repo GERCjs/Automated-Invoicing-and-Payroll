@@ -4,6 +4,8 @@ from . import views
 
 # Each path connects a browser/API URL to a function in payments/views.py.
 urlpatterns = [
+    # Admin users edit the current company bank transfer details here.
+    path("bank-transfer/settings/", views.bank_transfer_settings, name="payment-bank-transfer-settings"),
     # Public invoice page posts here to start Stripe Checkout.
     path("checkout/public/<str:token>/", views.checkout_public_invoice, name="payment-checkout-public"),
     # Logged-in customer invoice page posts here to start Stripe Checkout.

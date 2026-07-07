@@ -10,7 +10,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.roles import CUSTOMER, FINANCE, STAFF
+from accounts.roles import ADMIN, CUSTOMER, FINANCE, STAFF, SUPERADMIN
 from core.models import AuditLog
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
@@ -21,7 +21,7 @@ from notifications.services import (
     send_stripe_refund_success_email,
 )
 
-from .models import PaymentRecord, StripeWebhookEvent
+from .models import PaymentBankDetails, PaymentRecord, StripeWebhookEvent
 from .services import create_checkout_for_invoice, create_full_refund_for_payment
 
 User = get_user_model()
@@ -65,6 +65,17 @@ class StripePaymentsPhaseTests(TestCase):
             subtotal=Decimal("100.00"),
             tax_amount=Decimal("9.00"),
             total_amount=Decimal("109.00"),
+        )
+        PaymentBankDetails.objects.update_or_create(
+            pk=1,
+            defaults={
+                "account_name": "Automated Billing Pte Ltd",
+                "bank_name": "Test Receiving Bank",
+                "account_number": "987-654321-0",
+                "paynow_id": "201535968M",
+                "bic": "TESTSGSG",
+                "instructions": "Use the reference exactly as shown.",
+            },
         )
 
     @patch("payments.views.retrieve_checkout_session")
@@ -157,14 +168,6 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(response.url, reverse("customer-invoice-detail", args=[self.invoice.pk]))
         create_checkout_mock.assert_not_called()
 
-    @override_settings(
-        BANK_TRANSFER_ACCOUNT_NAME="Automated Billing Pte Ltd",
-        BANK_TRANSFER_BANK_NAME="DBS Bank",
-        BANK_TRANSFER_ACCOUNT_NUMBER="001-234567-8",
-        BANK_TRANSFER_PAYNOW_ID="201535968M",
-        BANK_TRANSFER_BIC="DBSSSGSG",
-        BANK_TRANSFER_INSTRUCTIONS="Use the reference exactly as shown.",
-    )
     def test_public_bank_transfer_reference_is_stable_per_invoice(self):
         first_response = self.client.get(reverse("invoice-public-view", args=[self.invoice.public_view_token]))
         payment_record = PaymentRecord.objects.get(
@@ -176,8 +179,9 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
         self.assertContains(first_response, "Bank Transfer")
-        self.assertContains(first_response, "DBS Bank")
-        self.assertContains(first_response, "001-234567-8")
+        self.assertContains(first_response, "Test Receiving Bank")
+        self.assertContains(first_response, "987-654321-0")
+        self.assertContains(first_response, "TESTSGSG")
         self.assertContains(first_response, payment_record.payment_reference)
         self.assertContains(second_response, payment_record.payment_reference)
         self.assertEqual(
@@ -189,7 +193,6 @@ class StripePaymentsPhaseTests(TestCase):
             1,
         )
 
-    @override_settings(BANK_TRANSFER_BANK_NAME="DBS Bank")
     def test_customer_invoice_detail_shows_bank_transfer_reference(self):
         self.client.login(username="customer_stripe", password="TempPass123!")
 
@@ -203,19 +206,95 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertContains(response, "Bank Transfer")
         self.assertContains(response, payment_record.payment_reference)
 
-    @override_settings(
-        BANK_TRANSFER_BANK_NAME="",
-        BANK_TRANSFER_ACCOUNT_NUMBER="",
-        BANK_TRANSFER_BIC="",
-    )
-    def test_bank_transfer_uses_default_dbs_account_when_env_values_are_blank(self):
+    def test_bank_transfer_is_hidden_when_required_bank_details_are_blank(self):
+        PaymentBankDetails.objects.update_or_create(
+            pk=1,
+            defaults={
+                "account_name": "",
+                "bank_name": "",
+                "account_number": "",
+                "paynow_id": "",
+                "bic": "",
+                "instructions": "",
+            },
+        )
+
         response = self.client.get(reverse("invoice-public-view", args=[self.invoice.public_view_token]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Bank Transfer")
-        self.assertContains(response, "DBS")
-        self.assertContains(response, "001-234567-8")
-        self.assertContains(response, "DBSSSGSG")
+        self.assertNotContains(response, "Bank Transfer")
+        self.assertNotContains(response, "001-234567-8")
+        self.assertFalse(
+            PaymentRecord.objects.filter(
+                invoice=self.invoice,
+                provider=PaymentRecord.PROVIDER_MANUAL,
+            ).exists()
+        )
+
+    def test_admin_can_update_bank_transfer_details_from_webpage(self):
+        admin = User.objects.create_user(username="bank_settings_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save(update_fields=["role", "updated_at"])
+        self.client.login(username="bank_settings_admin", password="TempPass123!")
+
+        get_response = self.client.get(reverse("payment-bank-transfer-settings"))
+        self.assertEqual(get_response.status_code, 200)
+        self.assertContains(get_response, "Bank Transfer Details")
+
+        response = self.client.post(
+            reverse("payment-bank-transfer-settings"),
+            data={
+                "account_name": "Updated Billing Pte Ltd",
+                "bank_name": "Updated Bank",
+                "account_number": "111-222333-4",
+                "paynow_id": "UEN-UPDATED",
+                "bic": "UPDTSGSG",
+                "instructions": "Use the invoice reference.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("payment-bank-transfer-settings"))
+        details = PaymentBankDetails.load()
+        self.assertEqual(details.bank_name, "Updated Bank")
+        self.assertEqual(details.account_number, "111-222333-4")
+        self.assertEqual(details.updated_by, admin)
+
+        audit_log = AuditLog.objects.filter(action="payment.bank_transfer_details.updated").latest("created_at")
+        self.assertEqual(audit_log.user, admin)
+        self.assertIn("account_number", audit_log.metadata["changed_fields"])
+        self.assertEqual(audit_log.metadata["account_number_before"], "***3210")
+        self.assertEqual(audit_log.metadata["account_number_after"], "***3334")
+        self.assertNotIn("987-654321-0", str(audit_log.metadata))
+        self.assertNotIn("111-222333-4", str(audit_log.metadata))
+
+    def test_superadmin_can_open_bank_transfer_settings_page(self):
+        superadmin = User.objects.create_superuser(
+            username="bank_settings_superadmin",
+            password="TempPass123!",
+            email="bank_settings_superadmin@example.com",
+        )
+        self.assertEqual(superadmin.role_profile.role, SUPERADMIN)
+        self.client.login(username="bank_settings_superadmin", password="TempPass123!")
+
+        response = self.client.get(reverse("payment-bank-transfer-settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Company Bank Details")
+
+    def test_non_admin_roles_cannot_open_bank_transfer_settings_page(self):
+        for user in [self.finance_user, self.customer_user, self.staff_user]:
+            with self.subTest(username=user.username):
+                self.client.force_login(user)
+                response = self.client.get(reverse("payment-bank-transfer-settings"))
+                self.assertEqual(response.status_code, 403)
+                self.client.logout()
+
+    def test_anonymous_user_is_redirected_from_bank_transfer_settings_page(self):
+        response = self.client.get(reverse("payment-bank-transfer-settings"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
 
     def test_non_payable_invoice_does_not_show_bank_transfer_instructions(self):
         for status in [Invoice.STATUS_DRAFT, Invoice.STATUS_PAID, Invoice.STATUS_REFUNDED]:
@@ -247,8 +326,8 @@ class StripePaymentsPhaseTests(TestCase):
         )
         self.assertContains(response, "Confirm Bank Transfer Paid")
         self.assertContains(response, payment_record.payment_reference)
-        self.assertContains(response, "DBS")
-        self.assertContains(response, "001-234567-8")
+        self.assertContains(response, "Test Receiving Bank")
+        self.assertContains(response, "987-654321-0")
 
     def test_finance_can_confirm_bank_transfer_and_mark_invoice_paid(self):
         payment_record = PaymentRecord.objects.create(

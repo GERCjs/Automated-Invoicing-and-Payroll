@@ -14,7 +14,7 @@ from django.utils import timezone
 from core.audit import log_event
 from invoicing.models import Invoice
 
-from .models import PaymentRecord, StripeWebhookEvent
+from .models import PaymentBankDetails, PaymentRecord, StripeWebhookEvent
 
 # Stripe event names this app knows how to handle.
 WEBHOOK_EVENT_COMPLETED = "checkout.session.completed"
@@ -119,15 +119,21 @@ def _append_checkout_cancel_reference(cancel_url: str, payment_record: PaymentRe
     return f"{cancel_url}{separator}{urlencode({'payment_reference': payment_record.payment_reference})}"
 
 
-def get_bank_transfer_details() -> dict[str, str]:
-    return {
-        "account_name": (settings.BANK_TRANSFER_ACCOUNT_NAME or "").strip(),
-        "bank_name": (settings.BANK_TRANSFER_BANK_NAME or "DBS").strip(),
-        "account_number": (settings.BANK_TRANSFER_ACCOUNT_NUMBER or "001-234567-8").strip(),
-        "paynow_id": (settings.BANK_TRANSFER_PAYNOW_ID or "").strip(),
-        "bic": (settings.BANK_TRANSFER_BIC or "DBSSSGSG").strip(),
-        "instructions": (settings.BANK_TRANSFER_INSTRUCTIONS or "").strip(),
-    }
+def get_bank_transfer_details() -> dict[str, str] | None:
+    details = PaymentBankDetails.load()
+    if not details.is_complete():
+        return None
+    return details.as_display_dict()
+
+
+def mask_bank_account_number(account_number: str) -> str:
+    value = (account_number or "").strip()
+    if not value:
+        return ""
+    compact_value = "".join(ch for ch in value if ch.isalnum())
+    if len(compact_value) <= 4:
+        return "*" * len(compact_value)
+    return f"***{compact_value[-4:]}"
 
 
 def _build_bank_transfer_reference(invoice: Invoice) -> str:

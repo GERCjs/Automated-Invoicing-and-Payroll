@@ -60,8 +60,14 @@ def _bank_transfer_context(invoice: Invoice, initiated_by=None) -> dict:
             "bank_transfer_details": None,
             "bank_transfer_payment": None,
         }
+    bank_transfer_details = get_bank_transfer_details()
+    if bank_transfer_details is None:
+        return {
+            "bank_transfer_details": None,
+            "bank_transfer_payment": None,
+        }
     return {
-        "bank_transfer_details": get_bank_transfer_details(),
+        "bank_transfer_details": bank_transfer_details,
         "bank_transfer_payment": get_or_create_bank_transfer_payment(
             invoice=invoice,
             initiated_by=initiated_by,

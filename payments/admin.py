@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from .models import PaymentRecord, StripeWebhookEvent
+from .models import PaymentBankDetails, PaymentRecord, StripeWebhookEvent
+
+
+@admin.register(PaymentBankDetails)
+class PaymentBankDetailsAdmin(admin.ModelAdmin):
+    list_display = ("bank_name", "account_name", "updated_by", "updated_at")
+    readonly_fields = ("updated_at",)
 
 
 # This makes PaymentRecord visible and searchable in the Django admin page.
