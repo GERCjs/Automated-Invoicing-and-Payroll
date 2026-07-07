@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Payroll | Automated Invoicing & Payroll{% endblock %}
 
@@ -17,19 +18,59 @@
 
 <div class="card mb-3">
     <div class="card-body">
-        <form method="get" class="row g-2 align-items-center">
+        <form method="get" class="row g-2 align-items-center" data-date-range-form>
             <div class="col-md-5 col-lg-4">
-                <input type="text" class="form-control" name="q" value="{{ search_query }}" placeholder="Search employee name or employee ID">
+                <label class="form-label mb-1" for="payrollSearch">Employee Search</label>
+                <input
+                    id="payrollSearch"
+                    type="text"
+                    class="form-control"
+                    name="q"
+                    value="{{ search_query }}"
+                    placeholder="Search employee name or employee ID"
+                >
             </div>
-            <div class="col-md-3 col-lg-3">
-                <input type="month" class="form-control" name="month" value="{{ payroll_month }}">
+            <div class="col-md-3 col-lg-2">
+                <label class="form-label mb-1" for="payrollDateFrom">Start Date</label>
+                <input
+                    id="payrollDateFrom"
+                    type="date"
+                    class="form-control"
+                    name="date_from"
+                    value="{{ date_from }}"
+                    data-date-from
+                    aria-label="Start date"
+                >
             </div>
-            <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Search</button></div>
-            <div class="col-auto"><a href="{% url 'payroll-list' %}" class="btn btn-outline-secondary">Reset</a></div>
+            <div class="col-md-3 col-lg-2">
+                <label class="form-label mb-1" for="payrollDateTo">End Date</label>
+                <input
+                    id="payrollDateTo"
+                    type="date"
+                    class="form-control"
+                    name="date_to"
+                    value="{{ date_to }}"
+                    data-date-to
+                    aria-label="End date"
+                >
+            </div>
+            <div class="col-md-auto align-self-end">
+                <button type="submit" class="btn btn-outline-primary">Search</button>
+            </div>
+            <div class="col-md-auto align-self-end">
+                <a href="{% url 'payroll-list' %}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+            <div class="col-12">
+                <div
+                    class="form-text text-danger{% if not date_filter_error %} d-none{% endif %}"
+                    data-date-error
+                >{{ date_filter_error }}</div>
+            </div>
         </form>
         <p class="text-muted mb-0 mt-2">
             {% if search_query %}Search: "{{ search_query }}" | {% endif %}
-            {% if payroll_month %}Month: {{ payroll_month }} | {% endif %}
+            {% if date_from %}From: {{ date_from }} | {% endif %}
+            {% if date_to %}To: {{ date_to }} | {% endif %}
             Results: {{ result_count }}
         </p>
     </div>
@@ -81,4 +122,5 @@
         </table>
     </div>
 </div>
+<script src="{% static 'js/date-range-filters.js' %}"></script>
 {% endblock %}

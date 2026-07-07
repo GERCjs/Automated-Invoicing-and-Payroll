@@ -91,7 +91,7 @@
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
                 <div class="dropdown">
-                    <button class="portal-nav-link dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'payroll-list' or current_url_name == 'payroll-dashboard' or current_url_name == 'payroll-report' or current_url_name == 'payroll-create' or current_url_name == 'payroll-detail' or current_url_name == 'payroll-edit' or current_url_name == 'payroll-delete' or current_url_name == 'payroll-upload-preview' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                         Payroll
                     </button>
                     <ul class="dropdown-menu">

@@ -239,7 +239,31 @@ class PayrollUploadPreviewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment; filename=", response["Content-Disposition"])
 
-    def test_payroll_list_supports_month_filter(self):
+    def test_payroll_list_includes_date_range_hooks_and_shared_script(self):
+        response = self.client.get(reverse("payroll-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-date-range-form")
+        self.assertContains(response, "data-date-from")
+        self.assertContains(response, "data-date-to")
+        self.assertContains(response, "data-date-error")
+        self.assertContains(response, "js/date-range-filters.js")
+        self.assertNotContains(response, 'type="month"', html=False)
+
+    def test_payroll_list_rejects_invalid_date_range_and_preserves_values(self):
+        response = self.client.get(
+            reverse("payroll-list"),
+            {"date_from": "2026-08-02", "date_to": "2025-08-12"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "From date cannot be later than To date.")
+        self.assertContains(response, 'name="date_from"', html=False)
+        self.assertContains(response, 'value="2026-08-02"', html=False)
+        self.assertContains(response, 'name="date_to"', html=False)
+        self.assertContains(response, 'value="2025-08-12"', html=False)
+
+    def test_payroll_list_filters_by_payment_date_range(self):
         PayrollRecord.objects.create(
             employee_name="Alex Tan",
             employee_id="EMP001",
@@ -248,7 +272,7 @@ class PayrollUploadPreviewTests(TestCase):
             deductions=50,
             cpf_contribution=600,
             net_salary=2450,
-            payment_date=date(2026, 5, 24),
+            payment_date=date(2026, 8, 2),
         )
         PayrollRecord.objects.create(
             employee_name="Jamie Lim",
@@ -258,9 +282,14 @@ class PayrollUploadPreviewTests(TestCase):
             deductions=50,
             cpf_contribution=640,
             net_salary=2610,
-            payment_date=date(2026, 4, 24),
+            payment_date=date(2025, 8, 12),
         )
-        response = self.client.get(reverse("payroll-list"), {"month": "2026-05"})
+
+        response = self.client.get(
+            reverse("payroll-list"),
+            {"date_from": "2026-08-01", "date_to": "2026-08-31"},
+        )
+
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "EMP001")
         self.assertNotContains(response, "EMP002")

@@ -36,6 +36,39 @@ from .services import (
 EMPLOYEE_CODE_PATTERN = re.compile(r"^STF-[0-9]{6}$")
 
 
+def _parse_iso_date(raw_value: str):
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _parse_date_range(raw_date_from: str, raw_date_to: str):
+    date_filter_error = ""
+    date_from = None
+    date_to = None
+
+    if raw_date_from:
+        date_from = _parse_iso_date(raw_date_from)
+        if date_from is None:
+            date_filter_error = "From date is invalid. Use YYYY-MM-DD."
+
+    if raw_date_to and not date_filter_error:
+        date_to = _parse_iso_date(raw_date_to)
+        if date_to is None:
+            date_filter_error = "To date is invalid. Use YYYY-MM-DD."
+
+    if date_from and date_to and date_from > date_to:
+        date_filter_error = "From date cannot be later than To date."
+
+    filter_date_from = None if date_filter_error else date_from
+    filter_date_to = None if date_filter_error else date_to
+    return date_from, date_to, filter_date_from, filter_date_to, date_filter_error
+
+
 def _generate_next_employee_code():
     latest_code = (
         Employee.objects.filter(employee_code__regex=r"^STF-[0-9]{6}$")
@@ -182,23 +215,23 @@ def payroll_dashboard(request):
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_list(request):
     search_query = request.GET.get("q", "").strip()
-    payroll_month = request.GET.get("month", "").strip()
+    raw_date_from = (request.GET.get("date_from") or "").strip()
+    raw_date_to = (request.GET.get("date_to") or "").strip()
+    date_from, date_to, filter_date_from, filter_date_to, date_filter_error = _parse_date_range(
+        raw_date_from,
+        raw_date_to,
+    )
     payslip_records = PayrollRecord.objects.all()
     if search_query:
         payslip_records = payslip_records.filter(
             Q(employee_name__icontains=search_query)
             | Q(employee_id__icontains=search_query)
         )
-    if payroll_month:
-        try:
-            selected_month = date.fromisoformat(f"{payroll_month}-01")
-            payslip_records = payslip_records.filter(
-                payment_date__year=selected_month.year,
-                payment_date__month=selected_month.month,
-            )
-        except ValueError:
-            messages.warning(request, "Invalid month filter. Please use YYYY-MM format.")
-            payroll_month = ""
+    if not date_filter_error:
+        if filter_date_from:
+            payslip_records = payslip_records.filter(payment_date__gte=filter_date_from)
+        if filter_date_to:
+            payslip_records = payslip_records.filter(payment_date__lte=filter_date_to)
 
     return render(
         request,
@@ -206,7 +239,9 @@ def payroll_list(request):
         {
             "payslip_records": payslip_records,
             "search_query": search_query,
-            "payroll_month": payroll_month,
+            "date_from": date_from.isoformat() if date_from else raw_date_from,
+            "date_to": date_to.isoformat() if date_to else raw_date_to,
+            "date_filter_error": date_filter_error,
             "result_count": payslip_records.count(),
         },
     )
