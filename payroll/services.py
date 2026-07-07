@@ -252,6 +252,7 @@ def parse_and_validate_payroll_excel(uploaded_file, payment_date: date) -> dict[
     parsed_rows = parse_payroll_excel(uploaded_file, payment_date)
     invalid_rows: list[dict[str, Any]] = []
     valid_rows: list[dict[str, Any]] = []
+    seen_employee_rows: dict[str, int] = {}
 
     for row in parsed_rows:
         reasons: list[str] = list(row.get("__parse_errors", []))
@@ -260,6 +261,12 @@ def parse_and_validate_payroll_excel(uploaded_file, payment_date: date) -> dict[
             reasons.append("Employee code is required.")
         elif not EMPLOYEE_CODE_PATTERN.fullmatch(employee_code):
             reasons.append("Employee code must follow STF-000000 format.")
+        elif employee_code in seen_employee_rows:
+            reasons.append(
+                f"Employee code is duplicated in this upload file. First duplicate appears on row {seen_employee_rows[employee_code]}."
+            )
+        else:
+            seen_employee_rows[employee_code] = int(row.get("row_number") or 0)
         if not str(row.get("employee_name") or "").strip():
             reasons.append("Employee name is required.")
         if row.get("basic_salary") is not None and row.get("basic_salary", Decimal("0")) < 0:
@@ -268,10 +275,26 @@ def parse_and_validate_payroll_excel(uploaded_file, payment_date: date) -> dict[
             reasons.append("Working days cannot be negative.")
         if row.get("no_pay_leave_days") is not None and row.get("no_pay_leave_days", Decimal("0")) < 0:
             reasons.append("No pay leave days cannot be negative.")
+        if (
+            row.get("working_days") is not None
+            and row.get("no_pay_leave_days") is not None
+            and row.get("working_days", Decimal("0")) >= 0
+            and row.get("no_pay_leave_days", Decimal("0")) >= 0
+            and row.get("no_pay_leave_days", Decimal("0")) > row.get("working_days", Decimal("0"))
+        ):
+            reasons.append("No pay leave days cannot be more than working days.")
+        if row.get("physical_products_commission") is not None and row.get("physical_products_commission", Decimal("0")) < 0:
+            reasons.append("Physical products commission cannot be negative.")
+        if row.get("credit_commission") is not None and row.get("credit_commission", Decimal("0")) < 0:
+            reasons.append("Credit commission cannot be negative.")
+        if row.get("services_commission") is not None and row.get("services_commission", Decimal("0")) < 0:
+            reasons.append("Services commission cannot be negative.")
         if row.get("loan_deduction") is not None and row.get("loan_deduction", Decimal("0")) < 0:
             reasons.append("Loan deduction cannot be negative.")
         if row.get("other_deductions") is not None and row.get("other_deductions", Decimal("0")) < 0:
             reasons.append("Other deductions cannot be negative.")
+        if row.get("net_pay") is not None and row.get("net_pay", Decimal("0")) < 0:
+            reasons.append("Net pay cannot be negative. Check salary, commissions, and deductions.")
 
         if reasons:
             invalid_rows.append(
