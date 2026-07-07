@@ -12,6 +12,7 @@
         <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary">Upload Invoice File</a>
         <a href="{% url 'invoice-create' %}" class="btn btn-primary">Create Invoice</a>
         <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark">View Invoice List</a>
+        <a href="{% url 'invoice-template-settings' %}" class="btn btn-outline-secondary">Template Settings</a>
         <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary">Invoice / Customer Report</a>
         <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-info">Payment &amp; Stripe Report</a>
     </div>
@@ -92,6 +93,7 @@
             <a href="{% url 'invoice-csv-upload' %}" class="btn btn-outline-primary btn-sm">Upload Invoice File</a>
             <a href="{% url 'invoice-create' %}" class="btn btn-primary btn-sm">Create Invoice</a>
             <a href="{% url 'invoice-list' %}" class="btn btn-outline-dark btn-sm">View All Invoices</a>
+            <a href="{% url 'invoice-template-settings' %}" class="btn btn-outline-secondary btn-sm">Template Settings</a>
             <a href="{% url 'invoice-list' %}?status=outstanding" class="btn btn-outline-secondary btn-sm">View Outstanding</a>
             <a href="{% url 'invoice-customer-report' %}" class="btn btn-outline-secondary btn-sm">Invoice / Customer Report</a>
             <a href="{% url 'payment-stripe-report' %}" class="btn btn-outline-info btn-sm">Payment &amp; Stripe Report</a>

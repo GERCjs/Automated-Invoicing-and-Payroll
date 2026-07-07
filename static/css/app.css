@@ -1153,6 +1153,58 @@ textarea.form-control:focus {
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.payroll-report-page .card,
+.payroll-report-page .dashboard-card {
+    border-radius: 16px;
+}
+
+.payroll-report-page .payroll-report-filters .form-control {
+    min-height: 46px;
+}
+
+.payroll-report-page .payroll-report-filter-actions .btn {
+    min-height: 44px;
+}
+
+.payroll-report-page .report-kpi-card .card-body {
+    min-height: 220px;
+}
+
+.payroll-report-page .report-summary-strip {
+    gap: 1rem;
+}
+
+.payroll-report-page .report-summary-card {
+    border-top: 4px solid #d8e0ea;
+    min-height: 170px;
+    padding: 1.1rem 1.15rem;
+}
+
+.payroll-report-page .report-summary-note {
+    font-size: 0.93rem;
+    line-height: 1.5;
+}
+
+.payroll-report-page .report-attention-table .table th,
+.payroll-report-page .report-attention-table .table td {
+    padding: 0.95rem 1rem;
+}
+
+.payroll-report-page .payroll-report-actions {
+    align-items: flex-end;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.payroll-report-page .payroll-report-employee-meta {
+    line-height: 1.5;
+}
+
+.payroll-report-page .payroll-report-chart-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .management-dashboard-page .card-header > span:first-child {
     color: var(--portal-heading);
     font-size: 1.06rem;

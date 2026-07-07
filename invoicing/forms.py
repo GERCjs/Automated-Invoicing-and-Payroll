@@ -1,8 +1,18 @@
 from django import forms
 from django.conf import settings
 from django.forms import inlineformset_factory
+from PIL import Image as PilImage
+from PIL import UnidentifiedImageError
 
-from .models import Customer, Invoice, InvoiceItem
+from .models import Customer, Invoice, InvoiceItem, InvoiceTemplateSettings
+
+
+def _format_file_size_limit(max_bytes: int) -> str:
+    if max_bytes >= 1024 * 1024:
+        return f"{max_bytes // (1024 * 1024)} MB"
+    if max_bytes >= 1024:
+        return f"{max_bytes // 1024} KB"
+    return f"{max_bytes} bytes"
 
 
 class InvoiceForm(forms.ModelForm):
@@ -82,3 +92,59 @@ class CustomerCreateForm(forms.ModelForm):
             "tax_number": forms.TextInput(attrs={"class": "form-control", "placeholder": "Optional"}),
             "status": forms.Select(attrs={"class": "form-select"}),
         }
+
+
+class InvoiceTemplateSettingsForm(forms.ModelForm):
+    logo = forms.FileField(
+        required=False,
+        widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": ".png,.jpg,.jpeg"}),
+    )
+
+    class Meta:
+        model = InvoiceTemplateSettings
+        fields = [
+            "company_display_name",
+            "company_address",
+            "logo",
+            "logo_size",
+            "logo_position",
+            "address_position",
+        ]
+        widgets = {
+            "company_display_name": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "Company name shown on invoice PDFs"}
+            ),
+            "company_address": forms.Textarea(
+                attrs={"class": "form-control", "rows": 4, "placeholder": "Company address shown on invoice PDFs"}
+            ),
+            "logo_size": forms.Select(attrs={"class": "form-select"}),
+            "logo_position": forms.Select(attrs={"class": "form-select"}),
+            "address_position": forms.Select(attrs={"class": "form-select"}),
+        }
+
+    def clean_logo(self):
+        logo = self.cleaned_data.get("logo")
+        if not logo:
+            return logo
+
+        max_bytes = int(getattr(settings, "INVOICE_TEMPLATE_LOGO_MAX_UPLOAD_BYTES", 2097152))
+        if logo.size > max_bytes:
+            raise forms.ValidationError(f"Logo exceeds the maximum file size of {_format_file_size_limit(max_bytes)}.")
+
+        file_name = (getattr(logo, "name", "") or "").strip().lower()
+        if not file_name.endswith((".png", ".jpg", ".jpeg")):
+            raise forms.ValidationError("Upload a PNG or JPEG image.")
+
+        try:
+            image = PilImage.open(logo)
+            image_format = (image.format or "").upper()
+            image.verify()
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise forms.ValidationError("Upload a PNG or JPEG image.")
+        finally:
+            logo.seek(0)
+
+        if image_format not in {"PNG", "JPEG"}:
+            raise forms.ValidationError("Upload a PNG or JPEG image.")
+
+        return logo

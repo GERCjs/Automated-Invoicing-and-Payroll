@@ -1,8 +1,11 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO
+import shutil
+import tempfile
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -12,6 +15,8 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
+from PIL import Image as PilImage
+from reportlab.lib.units import mm
 
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from core.models import AuditLog
@@ -19,8 +24,14 @@ from imports.models import ImportJob
 from notifications.models import EmailDeliveryLog
 from payments.models import PaymentBankDetails, PaymentRecord
 
-from .exports import build_export_context
-from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow
+from .exports import (
+    _build_invoice_logo,
+    _build_logo_row,
+    _resolve_invoice_branding,
+    build_export_context,
+    generate_invoice_pdf,
+)
+from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow, InvoiceTemplateSettings
 from .services import (
     apply_overdue_status,
     parse_invoice_csv,
@@ -1247,7 +1258,9 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(response.status_code, 200)
         hidden_draft.refresh_from_db()
         self.assertEqual(hidden_draft.status, Invoice.STATUS_DRAFT)
-        self.assertNotContains(response, hidden_draft.invoice_number)
+        self.assertNotIn(hidden_draft, list(response.context["action_required_invoices"]))
+        self.assertNotIn(hidden_draft, list(response.context["paid_invoices"]))
+        self.assertNotContains(response, f'href="/invoices/my/{hidden_draft.pk}/"', html=False)
         self.assertContains(response, visible_sent.invoice_number)
 
     def test_customer_can_view_own_invoice_detail_and_download_pdf(self):
@@ -1372,6 +1385,335 @@ class InvoicingMvpTests(TestCase):
         self.client.login(username="staff_u", password="TempPass123!")
         response = self.client.get(reverse("invoice-csv-upload"))
         self.assertEqual(response.status_code, 403)
+
+
+class InvoiceTemplateSettingsTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp(prefix="invoice-template-tests-")
+        self.addCleanup(shutil.rmtree, self.media_root, ignore_errors=True)
+        self.media_override = override_settings(MEDIA_ROOT=self.media_root)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+
+        self.finance_user = User.objects.create_user(username="finance_template", password="TempPass123!")
+        self.finance_user.role_profile.role = FINANCE
+        self.finance_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.staff_user = User.objects.create_user(username="staff_template", password="TempPass123!")
+        self.staff_user.role_profile.role = STAFF
+        self.staff_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.customer = Customer.objects.create(
+            name="Template Customer",
+            email="template.customer@example.com",
+            billing_address="88 Customer Road\nSingapore 123456",
+            created_by=self.finance_user,
+        )
+        self.invoice = Invoice.objects.create(
+            invoice_number="INV-TEMPLATE-1001",
+            customer=self.customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=14),
+            currency="SGD",
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("9.00"),
+            total_amount=Decimal("109.00"),
+            created_by=self.finance_user,
+        )
+        InvoiceItem.objects.create(
+            invoice=self.invoice,
+            description="Template Service",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("100.00"),
+            tax_rate=Decimal("9.00"),
+            line_total=Decimal("109.00"),
+        )
+
+    def _build_logo_upload(self, *, filename="invoice-logo.png", image_format="PNG", size=(200, 80)):
+        image = PilImage.new("RGB", size, color=(24, 104, 171))
+        output = BytesIO()
+        image.save(output, format=image_format)
+        output.seek(0)
+        content_type = "image/png" if image_format == "PNG" else "image/jpeg"
+        return SimpleUploadedFile(filename, output.read(), content_type=content_type)
+
+    def _save_template_settings(
+        self,
+        *,
+        company_name="Custom Invoice Company Pte Ltd",
+        company_address="77 Custom Avenue\nSingapore 654321",
+        logo=None,
+        logo_size=InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+        logo_position=InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+        address_position=InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+    ):
+        template_settings = InvoiceTemplateSettings.load()
+        template_settings.company_display_name = company_name
+        template_settings.company_address = company_address
+        template_settings.logo_size = logo_size
+        template_settings.logo_position = logo_position
+        template_settings.address_position = address_position
+        if logo is not None:
+            template_settings.logo = logo
+        template_settings.save()
+        return template_settings
+
+    def test_authorized_user_can_open_invoice_template_settings(self):
+        self.client.force_login(self.finance_user)
+
+        response = self.client.get(reverse("invoice-template-settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Invoice Template Settings")
+
+    def test_unauthorized_user_cannot_access_invoice_template_settings(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(reverse("invoice-template-settings"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_invoice_template_settings_can_be_saved(self):
+        self.client.force_login(self.finance_user)
+
+        response = self.client.post(
+            reverse("invoice-template-settings"),
+            data={
+                "company_display_name": "Student Demo Company Pte Ltd",
+                "company_address": "1 Example Street\nSingapore 111111",
+                "logo_size": InvoiceTemplateSettings.LOGO_SIZE_LARGE,
+                "logo_position": InvoiceTemplateSettings.LOGO_POSITION_RIGHT,
+                "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        template_settings = InvoiceTemplateSettings.load()
+        self.assertEqual(template_settings.company_display_name, "Student Demo Company Pte Ltd")
+        self.assertEqual(template_settings.company_address, "1 Example Street\nSingapore 111111")
+        self.assertEqual(template_settings.logo_size, InvoiceTemplateSettings.LOGO_SIZE_LARGE)
+        self.assertEqual(template_settings.logo_position, InvoiceTemplateSettings.LOGO_POSITION_RIGHT)
+        self.assertEqual(template_settings.address_position, InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT)
+        self.assertEqual(template_settings.updated_by, self.finance_user)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="invoice.template_settings.updated",
+                target_type="invoice_template_settings",
+                target_id=str(template_settings.id),
+            ).exists()
+        )
+
+    def test_invalid_logo_type_is_rejected(self):
+        self.client.force_login(self.finance_user)
+        invalid_logo = SimpleUploadedFile("invoice-logo.txt", b"not-an-image", content_type="text/plain")
+
+        response = self.client.post(
+            reverse("invoice-template-settings"),
+            data={
+                "company_display_name": "Student Demo Company Pte Ltd",
+                "company_address": "1 Example Street\nSingapore 111111",
+                "logo": invalid_logo,
+                "logo_size": InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+                "logo_position": InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+                "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Upload a PNG or JPEG image.")
+
+    @override_settings(INVOICE_TEMPLATE_LOGO_MAX_UPLOAD_BYTES=1024)
+    def test_oversized_logo_is_rejected(self):
+        self.client.force_login(self.finance_user)
+        oversized_logo = SimpleUploadedFile(
+            "oversized.png",
+            b"x" * 2048,
+            content_type="image/png",
+        )
+
+        response = self.client.post(
+            reverse("invoice-template-settings"),
+            data={
+                "company_display_name": "Student Demo Company Pte Ltd",
+                "company_address": "1 Example Street\nSingapore 111111",
+                "logo": oversized_logo,
+                "logo_size": InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+                "logo_position": InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+                "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Logo exceeds the maximum file size")
+
+    def test_pdf_generation_still_works_with_no_template_settings(self):
+        InvoiceTemplateSettings.objects.all().delete()
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        context = build_export_context(self.invoice)
+        self.assertEqual(context["company_name"], settings.COMPANY_NAME)
+        self.assertEqual(context["company_address"], settings.COMPANY_ADDRESS)
+        self.assertEqual(context["invoice_logo_path"], "")
+
+    def test_pdf_generation_uses_saved_company_name_and_address(self):
+        template_settings = InvoiceTemplateSettings.load()
+        template_settings.company_display_name = "Custom Invoice Company Pte Ltd"
+        template_settings.company_address = "77 Custom Avenue\nSingapore 654321"
+        template_settings.save()
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        context = build_export_context(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(context["company_name"], "Custom Invoice Company Pte Ltd")
+        self.assertEqual(context["company_address"], "77 Custom Avenue\nSingapore 654321")
+
+    def test_pdf_generation_works_with_logo_settings(self):
+        template_settings = self._save_template_settings(
+            logo=self._build_logo_upload(),
+            logo_size=InvoiceTemplateSettings.LOGO_SIZE_SMALL,
+            logo_position=InvoiceTemplateSettings.LOGO_POSITION_CENTRE,
+            address_position=InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT,
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        context = build_export_context(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertTrue(context["invoice_logo_path"].endswith(".png"))
+        self.assertEqual(
+            context["invoice_template_settings"].logo_position,
+            InvoiceTemplateSettings.LOGO_POSITION_CENTRE,
+        )
+        self.assertEqual(
+            context["invoice_template_settings"].address_position,
+            InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT,
+        )
+
+    def test_pdf_generation_with_logo_position_left_places_logo_left(self):
+        template_settings = self._save_template_settings(
+            logo=self._build_logo_upload(),
+            logo_position=InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        branding = _resolve_invoice_branding(template_settings)
+        logo = _build_invoice_logo(template_settings, branding)
+        logo_row = _build_logo_row(logo, branding, column_width=78 * mm)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(logo_row._invoice_logo_position, InvoiceTemplateSettings.LOGO_POSITION_LEFT)
+        self.assertEqual(logo_row._invoice_logo_alignment, "LEFT")
+        context = build_export_context(self.invoice)
+        self.assertEqual(context["invoice_branding"]["logo_position"], InvoiceTemplateSettings.LOGO_POSITION_LEFT)
+        self.assertEqual(context["invoice_branding"]["logo_size"], InvoiceTemplateSettings.LOGO_SIZE_MEDIUM)
+        self.assertEqual(context["invoice_branding"]["address_position"], InvoiceTemplateSettings.ADDRESS_POSITION_LEFT)
+
+    def test_pdf_generation_with_logo_position_centre_places_logo_centre(self):
+        template_settings = self._save_template_settings(
+            logo=self._build_logo_upload(),
+            logo_position=InvoiceTemplateSettings.LOGO_POSITION_CENTRE,
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        branding = _resolve_invoice_branding(template_settings)
+        logo = _build_invoice_logo(template_settings, branding)
+        logo_row = _build_logo_row(logo, branding, column_width=78 * mm)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(logo_row._invoice_logo_position, InvoiceTemplateSettings.LOGO_POSITION_CENTRE)
+        self.assertEqual(logo_row._invoice_logo_alignment, "CENTER")
+        context = build_export_context(self.invoice)
+        self.assertEqual(context["invoice_branding"]["logo_position"], InvoiceTemplateSettings.LOGO_POSITION_CENTRE)
+        self.assertEqual(context["invoice_branding"]["logo_size"], InvoiceTemplateSettings.LOGO_SIZE_MEDIUM)
+        self.assertEqual(context["invoice_branding"]["address_position"], InvoiceTemplateSettings.ADDRESS_POSITION_LEFT)
+
+    def test_pdf_generation_with_logo_position_right_places_logo_right(self):
+        template_settings = self._save_template_settings(
+            logo=self._build_logo_upload(),
+            logo_position=InvoiceTemplateSettings.LOGO_POSITION_RIGHT,
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        branding = _resolve_invoice_branding(template_settings)
+        logo = _build_invoice_logo(template_settings, branding)
+        logo_row = _build_logo_row(logo, branding, column_width=78 * mm)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(logo_row._invoice_logo_position, InvoiceTemplateSettings.LOGO_POSITION_RIGHT)
+        self.assertEqual(logo_row._invoice_logo_alignment, "RIGHT")
+        context = build_export_context(self.invoice)
+        self.assertEqual(context["invoice_branding"]["logo_position"], InvoiceTemplateSettings.LOGO_POSITION_RIGHT)
+        self.assertEqual(context["invoice_branding"]["logo_size"], InvoiceTemplateSettings.LOGO_SIZE_MEDIUM)
+        self.assertEqual(context["invoice_branding"]["address_position"], InvoiceTemplateSettings.ADDRESS_POSITION_LEFT)
+
+    def test_pdf_generation_with_logo_sizes_changes_rendered_logo_width(self):
+        width_by_size = {}
+        for logo_size in [
+            InvoiceTemplateSettings.LOGO_SIZE_SMALL,
+            InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+            InvoiceTemplateSettings.LOGO_SIZE_LARGE,
+        ]:
+            with self.subTest(logo_size=logo_size):
+                template_settings = self._save_template_settings(
+                    logo=self._build_logo_upload(filename=f"{logo_size}.png"),
+                    logo_size=logo_size,
+                )
+                pdf_bytes = generate_invoice_pdf(self.invoice)
+                branding = _resolve_invoice_branding(template_settings)
+                logo = _build_invoice_logo(template_settings, branding)
+                width_by_size[logo_size] = logo._invoice_logo_width
+                self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+                self.assertEqual(branding["logo_size"], logo_size)
+
+        self.assertLess(width_by_size[InvoiceTemplateSettings.LOGO_SIZE_SMALL], width_by_size[InvoiceTemplateSettings.LOGO_SIZE_MEDIUM])
+        self.assertLess(width_by_size[InvoiceTemplateSettings.LOGO_SIZE_MEDIUM], width_by_size[InvoiceTemplateSettings.LOGO_SIZE_LARGE])
+
+    def test_pdf_generation_with_address_position_left_places_address_left(self):
+        template_settings = self._save_template_settings(
+            company_name="Address Left Demo Co",
+            logo=self._build_logo_upload(),
+            address_position=InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        branding = _resolve_invoice_branding(template_settings)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(branding["address_position"], InvoiceTemplateSettings.ADDRESS_POSITION_LEFT)
+        self.assertEqual(branding["address_alignment"], "LEFT")
+        context = build_export_context(self.invoice)
+        self.assertEqual(context["invoice_branding"]["address_position"], InvoiceTemplateSettings.ADDRESS_POSITION_LEFT)
+        self.assertEqual(context["invoice_branding"]["logo_position"], InvoiceTemplateSettings.LOGO_POSITION_LEFT)
+
+    def test_pdf_generation_with_address_position_right_places_address_right(self):
+        template_settings = self._save_template_settings(
+            company_name="Address Right Demo Co",
+            logo=self._build_logo_upload(),
+            address_position=InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT,
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        branding = _resolve_invoice_branding(template_settings)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(branding["address_position"], InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT)
+        self.assertEqual(branding["address_alignment"], "RIGHT")
+        context = build_export_context(self.invoice)
+        self.assertEqual(context["invoice_branding"]["address_position"], InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT)
+        self.assertEqual(context["invoice_branding"]["logo_position"], InvoiceTemplateSettings.LOGO_POSITION_LEFT)
+
+    @override_settings(INVOICE_PAYMENT_NOTES="Line one\\nLine two")
+    def test_generated_pdf_renders_escaped_newlines_as_real_line_breaks(self):
+        context = build_export_context(self.invoice)
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(context["invoice_payment_notes"], "Line one\nLine two")
+        self.assertNotIn("\\n", context["invoice_payment_notes"])
 
 
 class InvoiceCollectionReportingTests(TestCase):

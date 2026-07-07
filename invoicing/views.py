@@ -26,9 +26,16 @@ from payments.services import (
 )
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
-from .forms import CustomerCreateForm, InvoiceCsvUploadForm, InvoiceForm, InvoiceItemFormSet
+from .forms import (
+    CustomerCreateForm,
+    InvoiceCsvUploadForm,
+    InvoiceForm,
+    InvoiceItemFormSet,
+    InvoiceTemplateSettingsForm,
+)
 from .models import Customer as InvoiceCustomer
 from .models import Invoice
+from .models import InvoiceTemplateSettings
 from .services import (
     apply_overdue_status,
     generate_invoice_number,
@@ -637,6 +644,50 @@ def invoice_dashboard(request):
             "collected_month": collected_month,
             "collected_year": collected_year,
             "recent_action_invoices": recent_action_invoices,
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_template_settings(request):
+    template_settings = InvoiceTemplateSettings.load()
+    if request.method != "POST":
+        return render(
+            request,
+            "invoicing/invoice_template_settings.html",
+            {
+                "form": InvoiceTemplateSettingsForm(instance=template_settings),
+                "template_settings": template_settings,
+            },
+        )
+
+    form = InvoiceTemplateSettingsForm(request.POST, request.FILES, instance=template_settings)
+    if form.is_valid():
+        changed_fields = list(form.changed_data)
+        if changed_fields:
+            settings_obj = form.save(commit=False)
+            settings_obj.updated_by = request.user
+            settings_obj.save()
+            log_event(
+                action="invoice.template_settings.updated",
+                user=request.user,
+                target_type="invoice_template_settings",
+                target_id=str(settings_obj.id),
+                metadata={"changed_fields": changed_fields},
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Invoice template settings updated.")
+        else:
+            messages.info(request, "No invoice template setting changes to save.")
+        return redirect("invoice-template-settings")
+
+    return render(
+        request,
+        "invoicing/invoice_template_settings.html",
+        {
+            "form": form,
+            "template_settings": template_settings,
         },
     )
 

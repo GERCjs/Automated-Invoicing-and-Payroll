@@ -9,6 +9,7 @@ urlpatterns = [
     path("upload/csv/", views.invoice_csv_upload, name="invoice-csv-upload"),
     path("", views.invoice_list, name="invoice-list"),
     path("dashboard/", views.invoice_dashboard, name="invoice-dashboard"),
+    path("template-settings/", views.invoice_template_settings, name="invoice-template-settings"),
     path("create/", views.invoice_create, name="invoice-create"),
     path("customers/create/", views.invoice_customer_create, name="invoice-customer-create"),
     path("<int:pk>/", views.invoice_detail, name="invoice-detail"),

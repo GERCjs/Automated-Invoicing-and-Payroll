@@ -33,6 +33,13 @@ def _to_float(value):
         return 0.0
 
 
+def _to_int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _build_chart_summary(labels, values):
     numeric_values = [float(value or 0) for value in values]
     total_value = sum(numeric_values)
@@ -1216,6 +1223,7 @@ def payroll_report(request):
     selected_employee = (request.GET.get("employee") or "").strip()
     selected_month, month_start, month_end = _month_bounds(selected_month, today)
     year_start = today.replace(month=1, day=1)
+    report_generated_at = timezone.now()
 
     month_records = PayrollRecord.objects.filter(payment_date__gte=month_start, payment_date__lte=month_end)
     year_records = PayrollRecord.objects.filter(payment_date__gte=year_start, payment_date__lte=today)
@@ -1247,22 +1255,18 @@ def payroll_report(request):
         .annotate(
             total_basic=Sum("basic_salary"),
             total_allowances=Sum("allowances"),
-            employees_paid=Count("employee_id", distinct=True),
         )
         .order_by("month")
     )
     payroll_amount_map = {}
-    payroll_employees_map = {}
     for row in payroll_monthly_rows:
         month_value = row.get("month")
         if not month_value:
             continue
         month_key = month_value.strftime("%Y-%m")
         payroll_amount_map[month_key] = _to_float(row.get("total_basic")) + _to_float(row.get("total_allowances"))
-        payroll_employees_map[month_key] = int(row.get("employees_paid") or 0)
 
     payroll_monthly_cost_values = [payroll_amount_map.get(month_key, 0.0) for month_key in month_keys]
-    payroll_monthly_employee_values = [payroll_employees_map.get(month_key, 0) for month_key in month_keys]
 
     month_rows = list(
         month_records.order_by("-payment_date", "employee_id").values(
@@ -1345,18 +1349,112 @@ def payroll_report(request):
             }
         )
 
-    recent_payslips = PayrollRecord.objects.order_by("-created_at")
-    if selected_employee:
-        recent_payslips = recent_payslips.filter(
-            Q(employee_name__icontains=selected_employee) | Q(employee_id__icontains=selected_employee)
-        )
-    recent_payslips = recent_payslips[:10]
     pending_email_or_download_count = sum(1 for row in records_with_status if row["status"] == "Pending")
     failed_payslip_email_count = sum(1 for row in records_with_status if row["status"] == "Email Failed")
-    staff_employee_codes = list(
-        Employee.objects.filter(user__role_profile__role=STAFF).values_list("employee_code", flat=True)
+    total_cpf_month = employee_cpf_total_month + employer_cpf_total_month
+    reporting_period_label = month_start.strftime("%B %Y")
+    active_employee_badges = []
+    if selected_employee:
+        active_employee_badges.append(f"Employee: {selected_employee}")
+
+    latest_upload_preview = (
+        AuditLog.objects.filter(action="payroll.upload.previewed")
+        .only("metadata", "created_at")
+        .first()
     )
-    staff_payslip_records_count = PayrollRecord.objects.filter(employee_id__in=staff_employee_codes).count()
+    invalid_upload_rows_count = 0
+    if latest_upload_preview:
+        invalid_upload_rows_count = _to_int((latest_upload_preview.metadata or {}).get("invalid_row_count"))
+
+    recent_saved_upload_logs = list(
+        AuditLog.objects.filter(action="payroll.upload.saved")
+        .only("metadata", "created_at")[:20]
+    )
+    saved_upload_for_selected_month = next(
+        (
+            log
+            for log in recent_saved_upload_logs
+            if str((log.metadata or {}).get("payment_date") or "").startswith(selected_month)
+        ),
+        None,
+    )
+    duplicate_rows_skipped_count = 0
+    if saved_upload_for_selected_month:
+        duplicate_rows_skipped_count = _to_int(
+            (saved_upload_for_selected_month.metadata or {}).get("skipped_duplicate_count")
+        )
+
+    active_employees = Employee.objects.filter(status=Employee.STATUS_ACTIVE)
+    if selected_employee:
+        active_employees = active_employees.filter(
+            Q(first_name__icontains=selected_employee)
+            | Q(last_name__icontains=selected_employee)
+            | Q(employee_code__icontains=selected_employee)
+        )
+    paid_employee_codes = month_records.values_list("employee_id", flat=True).distinct()
+    missing_payroll_records = active_employees.exclude(employee_code__in=paid_employee_codes).order_by("employee_code")
+    missing_payroll_records_count = missing_payroll_records.count()
+    missing_payroll_sample_codes = list(missing_payroll_records.values_list("employee_code", flat=True)[:3])
+
+    processing_issues = []
+    if invalid_upload_rows_count:
+        processing_issues.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-warning",
+                "issue": "Invalid upload rows",
+                "count": invalid_upload_rows_count,
+                "scope": "Latest upload preview",
+                "detail": "Rows failed validation before payroll records could be saved.",
+                "action_label": "Upload payroll file",
+                "action_url": reverse("payroll-upload-preview"),
+            }
+        )
+    if duplicate_rows_skipped_count:
+        processing_issues.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-neutral",
+                "issue": "Duplicate rows skipped",
+                "count": duplicate_rows_skipped_count,
+                "scope": reporting_period_label,
+                "detail": "Rows matched an existing employee and payroll month record.",
+                "action_label": "View records",
+                "action_url": reverse("payroll-list") + _query_string({"month": selected_month, "q": selected_employee}),
+            }
+        )
+    if failed_payslip_email_count:
+        processing_issues.append(
+            {
+                "priority_label": "High",
+                "priority_class": "status-danger",
+                "issue": "Failed payslip emails",
+                "count": failed_payslip_email_count,
+                "scope": reporting_period_label,
+                "detail": "Payslip emails failed and may need corrected addresses or a resend.",
+                "action_label": "View records",
+                "action_url": reverse("payroll-list") + _query_string({"month": selected_month, "q": selected_employee}),
+            }
+        )
+    if missing_payroll_records_count:
+        processing_issues.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-warning",
+                "issue": "Missing payroll records",
+                "count": missing_payroll_records_count,
+                "scope": reporting_period_label,
+                "detail": (
+                    "Active employees without a payroll record this month: "
+                    + ", ".join(missing_payroll_sample_codes)
+                    + ("..." if missing_payroll_records_count > len(missing_payroll_sample_codes) else "")
+                ),
+                "action_label": "Upload payroll file",
+                "action_url": reverse("payroll-upload-preview"),
+            }
+        )
+
+    payroll_chart_summary = _build_chart_summary(payroll_monthly_labels, payroll_monthly_cost_values)
     has_active_filters = bool(selected_employee or (request.GET.get("month") or "").strip())
     selected_month_label = month_start.strftime("%B %Y")
     selected_filter_text = (
@@ -1374,23 +1472,28 @@ def payroll_report(request):
             "month_start": month_start,
             "month_end": month_end,
             "year_start": year_start,
+            "report_generated_at": report_generated_at,
+            "reporting_period_label": reporting_period_label,
+            "active_employee_badges": active_employee_badges,
             "total_payroll_amount_month": total_payroll_amount_month,
             "total_payroll_amount_year": total_payroll_amount_year,
             "employees_paid_month": employees_paid_month,
             "payroll_monthly_labels": payroll_monthly_labels,
             "payroll_monthly_cost_values": payroll_monthly_cost_values,
-            "payroll_monthly_employee_values": payroll_monthly_employee_values,
             "total_net_pay_month": total_net_pay_month,
             "total_allowances_month": total_allowances_month,
             "total_deductions_month": total_deductions_month,
             "employee_cpf_total_month": employee_cpf_total_month,
             "employer_cpf_total_month": employer_cpf_total_month,
-            "total_cpf_month": employee_cpf_total_month + employer_cpf_total_month,
+            "total_cpf_month": total_cpf_month,
             "records_with_status": records_with_status,
-            "recent_payslips": recent_payslips,
             "pending_email_or_download_count": pending_email_or_download_count,
             "failed_payslip_email_count": failed_payslip_email_count,
-            "staff_payslip_records_count": staff_payslip_records_count,
+            "invalid_upload_rows_count": invalid_upload_rows_count,
+            "duplicate_rows_skipped_count": duplicate_rows_skipped_count,
+            "missing_payroll_records_count": missing_payroll_records_count,
+            "processing_issues": processing_issues,
+            "payroll_chart_summary": payroll_chart_summary,
             "has_active_filters": has_active_filters,
             "selected_filter_text": selected_filter_text,
             "payroll_list_query": _query_string({"month": selected_month, "q": selected_employee}),

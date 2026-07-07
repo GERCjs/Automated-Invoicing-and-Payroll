@@ -10,26 +10,166 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from payments.services import get_bank_transfer_details
 
-from .models import Invoice
+from .models import Invoice, InvoiceTemplateSettings
+
+
+LOGO_SIZE_DIMENSIONS_MM = {
+    InvoiceTemplateSettings.LOGO_SIZE_SMALL: (28 * mm, 14 * mm),
+    InvoiceTemplateSettings.LOGO_SIZE_MEDIUM: (36 * mm, 20 * mm),
+    InvoiceTemplateSettings.LOGO_SIZE_LARGE: (48 * mm, 28 * mm),
+}
+
+LOGO_ALIGNMENT_MAP = {
+    InvoiceTemplateSettings.LOGO_POSITION_LEFT: "LEFT",
+    InvoiceTemplateSettings.LOGO_POSITION_CENTRE: "CENTER",
+    InvoiceTemplateSettings.LOGO_POSITION_RIGHT: "RIGHT",
+}
+
+ADDRESS_ALIGNMENT_MAP = {
+    InvoiceTemplateSettings.ADDRESS_POSITION_LEFT: "LEFT",
+    InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT: "RIGHT",
+}
+
+
+def _normalize_pdf_multiline_text(value: str) -> str:
+    normalized = str(value or "")
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = normalized.replace("\\r\\n", "\n").replace("\\n", "\n")
+    return normalized
+
+
+def _normalize_logo_position(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized == "center":
+        normalized = InvoiceTemplateSettings.LOGO_POSITION_CENTRE
+    if normalized in LOGO_ALIGNMENT_MAP:
+        return normalized
+    return InvoiceTemplateSettings.LOGO_POSITION_LEFT
+
+
+def _normalize_logo_size(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in LOGO_SIZE_DIMENSIONS_MM:
+        return normalized
+    return InvoiceTemplateSettings.LOGO_SIZE_MEDIUM
+
+
+def _normalize_address_position(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in ADDRESS_ALIGNMENT_MAP:
+        return normalized
+    return InvoiceTemplateSettings.ADDRESS_POSITION_LEFT
+
+
+def _resolve_invoice_branding(template_settings: InvoiceTemplateSettings | None) -> dict:
+    company_name = ""
+    company_address = ""
+    logo_position = InvoiceTemplateSettings.LOGO_POSITION_LEFT
+    logo_size = InvoiceTemplateSettings.LOGO_SIZE_MEDIUM
+    address_position = InvoiceTemplateSettings.ADDRESS_POSITION_LEFT
+
+    if template_settings is not None:
+        company_name = (template_settings.company_display_name or "").strip()
+        company_address = _normalize_pdf_multiline_text(template_settings.company_address).strip()
+        logo_position = _normalize_logo_position(template_settings.logo_position)
+        logo_size = _normalize_logo_size(template_settings.logo_size)
+        address_position = _normalize_address_position(template_settings.address_position)
+
+    return {
+        "company_name": company_name,
+        "company_address": company_address,
+        "logo_position": logo_position,
+        "logo_alignment": LOGO_ALIGNMENT_MAP[logo_position],
+        "logo_size": logo_size,
+        "logo_dimensions": LOGO_SIZE_DIMENSIONS_MM[logo_size],
+        "address_position": address_position,
+        "address_alignment": ADDRESS_ALIGNMENT_MAP[address_position],
+    }
+
+
+def _get_invoice_logo_path(template_settings: InvoiceTemplateSettings | None) -> str:
+    if template_settings is None or not template_settings.logo:
+        return ""
+    try:
+        return template_settings.logo.path
+    except (NotImplementedError, ValueError, OSError):
+        return ""
+
+
+def _build_invoice_logo(template_settings: InvoiceTemplateSettings | None, branding: dict):
+    logo_path = _get_invoice_logo_path(template_settings)
+    if not logo_path:
+        return None
+
+    try:
+        width_px, height_px = ImageReader(logo_path).getSize()
+    except Exception:
+        return None
+
+    max_width, max_height = branding["logo_dimensions"]
+    scale = min(max_width / width_px, max_height / height_px)
+    logo = Image(logo_path, width=width_px * scale, height=height_px * scale)
+    logo.hAlign = branding["logo_alignment"]
+    logo._invoice_logo_position = branding["logo_position"]
+    logo._invoice_logo_size = branding["logo_size"]
+    logo._invoice_logo_width = width_px * scale
+    logo._invoice_logo_height = height_px * scale
+    return logo
+
+
+def _build_logo_row(logo_flowable: Image, branding: dict, *, column_width: float) -> Table:
+    logo_table = Table([[logo_flowable]], colWidths=[column_width])
+    logo_table.setStyle(
+        TableStyle(
+            [
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("ALIGN", (0, 0), (-1, -1), branding["logo_alignment"]),
+            ]
+        )
+    )
+    logo_table._invoice_logo_position = branding["logo_position"]
+    logo_table._invoice_logo_alignment = branding["logo_alignment"]
+    logo_table._invoice_logo_width = logo_flowable._invoice_logo_width
+    logo_table._invoice_logo_height = logo_flowable._invoice_logo_height
+    return logo_table
 
 
 def build_export_context(invoice: Invoice) -> dict:
     items = list(invoice.items.all())
+    template_settings = InvoiceTemplateSettings.current()
+    branding = _resolve_invoice_branding(template_settings)
+    default_company_name = getattr(settings, "COMPANY_NAME", "Vaniday Singapore Pte Ltd")
+    default_company_address = _normalize_pdf_multiline_text(settings.COMPANY_ADDRESS)
+    company_name = branding["company_name"] or default_company_name
+    company_address = branding["company_address"] or default_company_address
+    bank_transfer_details = get_bank_transfer_details()
+    if bank_transfer_details:
+        bank_transfer_details = {
+            **bank_transfer_details,
+            "instructions": _normalize_pdf_multiline_text(bank_transfer_details.get("instructions", "")),
+        }
     return {
-        "company_name": getattr(settings, "COMPANY_NAME", "Vaniday Singapore Pte Ltd"),
+        "company_name": company_name,
         "company_email": settings.COMPANY_EMAIL,
         "company_phone": settings.COMPANY_PHONE,
-        "company_address": settings.COMPANY_ADDRESS,
+        "company_address": company_address,
         "company_reg_no": settings.COMPANY_REG_NO,
-        "registered_office_text": settings.REGISTERED_OFFICE_TEXT,
+        "registered_office_text": _normalize_pdf_multiline_text(settings.REGISTERED_OFFICE_TEXT),
         "invoice_payment_term_days": settings.INVOICE_PAYMENT_TERM_DAYS,
-        "bank_transfer_details": get_bank_transfer_details(),
-        "invoice_payment_notes": settings.INVOICE_PAYMENT_NOTES,
+        "bank_transfer_details": bank_transfer_details,
+        "invoice_payment_notes": _normalize_pdf_multiline_text(settings.INVOICE_PAYMENT_NOTES),
         "invoice_attention_email": getattr(settings, "COMPANY_EMAIL", "finance@vaniday.com"),
+        "invoice_template_settings": template_settings,
+        "invoice_branding": branding,
+        "invoice_logo_path": _get_invoice_logo_path(template_settings),
         "invoice": invoice,
         "items": items,
     }
@@ -73,6 +213,11 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         fontSize=10,
         leading=12,
     )
+    heading_right = ParagraphStyle(
+        "InvoiceHeadingRight",
+        parent=heading,
+        alignment=2,
+    )
     invoice_title = ParagraphStyle(
         "InvoiceTitle",
         parent=body,
@@ -96,22 +241,39 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         fontSize=22,
         leading=24,
     )
+    body_right = ParagraphStyle(
+        "InvoiceBodyRight",
+        parent=body,
+        alignment=2,
+    )
 
     customer_display = invoice.customer.name
     if invoice.customer.tax_number:
         customer_display = f"{customer_display} ({invoice.customer.tax_number})"
 
+    template_settings = context["invoice_template_settings"]
+    branding = context["invoice_branding"]
+    address_is_right = branding["address_position"] == InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT
+    company_heading_style = heading_right if address_is_right else heading
+    company_body_style = body_right if address_is_right else body
+    logo_flowable = _build_invoice_logo(template_settings, branding)
+
     registered_office = context["registered_office_text"]
     attention_email = context["invoice_attention_email"]
     office_line = f"Registered Office: {registered_office}"
     attention_line = f"Attention: {attention_email}"
-    header_left = [
-        [Paragraph(f"<b>{context['company_name']}</b>", heading)],
-        [Paragraph(f"Reg No. {context['company_reg_no']}", body)],
-        [Paragraph(context["company_address"].replace("\n", "<br/>"), body)],
-        [Paragraph(f"Email: {context['company_email']}", body)],
-        [Paragraph(f"Phone: {context['company_phone']}", body)],
-    ]
+    header_left = []
+    if logo_flowable is not None:
+        header_left.append([_build_logo_row(logo_flowable, branding, column_width=78 * mm)])
+    header_left.extend(
+        [
+            [Paragraph(f"<b>{context['company_name']}</b>", company_heading_style)],
+            [Paragraph(f"Reg No. {context['company_reg_no']}", company_body_style)],
+            [Paragraph(context["company_address"].replace("\n", "<br/>"), company_body_style)],
+            [Paragraph(f"Email: {context['company_email']}", company_body_style)],
+            [Paragraph(f"Phone: {context['company_phone']}", company_body_style)],
+        ]
+    )
     left_header_table = Table(header_left, colWidths=[78 * mm])
     left_header_table.setStyle(
         TableStyle(
@@ -120,6 +282,7 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
                 ("TOPPADDING", (0, 0), (-1, -1), 1),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ]
         )
     )

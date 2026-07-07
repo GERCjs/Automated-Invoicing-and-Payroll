@@ -75,7 +75,7 @@
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
                 <div class="dropdown">
-                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'invoice-dashboard' or current_url_name == 'invoice-list' or current_url_name == 'invoice-create' or current_url_name == 'invoice-csv-upload' or current_url_name == 'invoice-customer-create' or current_url_name == 'invoice-detail' or current_url_name == 'invoice-edit' or current_url_name == 'invoice-delete-draft' or current_url_name == 'invoice-status-update' or current_url_name == 'invoice-send-email' or current_url_name == 'invoice-send-email-batch' or current_url_name == 'invoice-download-pdf' or current_url_name == 'invoice-download-excel' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'invoice-dashboard' or current_url_name == 'invoice-list' or current_url_name == 'invoice-create' or current_url_name == 'invoice-csv-upload' or current_url_name == 'invoice-customer-create' or current_url_name == 'invoice-detail' or current_url_name == 'invoice-edit' or current_url_name == 'invoice-delete-draft' or current_url_name == 'invoice-status-update' or current_url_name == 'invoice-send-email' or current_url_name == 'invoice-send-email-batch' or current_url_name == 'invoice-download-pdf' or current_url_name == 'invoice-download-excel' or current_url_name == 'invoice-template-settings' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                         Invoicing
                     </button>
                     <ul class="dropdown-menu">
@@ -84,6 +84,7 @@
                         <li><a href="{% url 'invoice-create' %}" class="dropdown-item">Create Invoice</a></li>
                         <li><a href="{% url 'invoice-csv-upload' %}" class="dropdown-item">Upload Invoices</a></li>
                         <li><a href="{% url 'invoice-customer-create' %}" class="dropdown-item">Customers</a></li>
+                        <li><a href="{% url 'invoice-template-settings' %}" class="dropdown-item">Template Settings</a></li>
                     </ul>
                 </div>
                 <a class="portal-nav-link{% if current_url_name == 'payment-stripe-report' %} is-active{% endif %}" href="{% url 'payment-stripe-report' %}">Payments</a>

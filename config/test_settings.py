@@ -16,3 +16,4 @@ STORAGES = {
 }
 
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+MEDIA_ROOT = BASE_DIR / "test_media"  # noqa: F405

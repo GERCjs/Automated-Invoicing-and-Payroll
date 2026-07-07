@@ -3,299 +3,295 @@
 {% load humanize %}
 
 {% block title %}Payroll Report{% endblock %}
+{% block page_container_class %}container-xl management-dashboard-container{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Payroll Report</h1>
-        <p class="page-subtitle">Use this report to review payroll costs, CPF amounts, processing issues and individual employee payroll records.</p>
-    </div>
-</div>
+<div class="report-page management-dashboard-page payroll-report-page">
+    <section class="report-header report-section">
+        <div>
+            <h1 class="page-title">Payroll Report</h1>
+            <p class="page-subtitle">Use this report to review payroll costs, CPF amounts, processing issues and individual employee payroll records.</p>
+            <div class="report-header-meta">
+                <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
+                <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
+                {% for badge in active_employee_badges %}
+                <span class="report-period">{{ badge }}</span>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
 
-<div class="card mb-3">
-    <div class="card-body">
-        <h2 class="section-heading mb-3">Filters</h2>
-        <form method="get" class="row g-3 align-items-end">
-            <div class="col-md-4">
-                <label class="form-label">Payroll Month</label>
-                <input type="month" class="form-control" name="month" value="{{ selected_month }}">
+    <section class="report-section">
+        <div class="card">
+            <div class="card-body payroll-report-filters">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <div>
+                        <div class="report-summary-label">Monthly Filters</div>
+                        <div class="text-muted small">Use the payroll month first, then narrow to one employee only when detailed review is needed.</div>
+                    </div>
+                    {% if has_active_filters %}
+                    <a href="{% url 'payroll-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+                    {% endif %}
+                </div>
+                <form method="get" class="row g-3 align-items-end">
+                    <div class="col-md-4 col-xl-3">
+                        <label for="payrollReportMonth" class="form-label">Payroll Month</label>
+                        <input id="payrollReportMonth" type="month" class="form-control" name="month" value="{{ selected_month }}">
+                    </div>
+                    <div class="col-md-5 col-xl-5">
+                        <label for="payrollReportEmployee" class="form-label">Employee Search</label>
+                        <input
+                            id="payrollReportEmployee"
+                            type="text"
+                            class="form-control"
+                            name="employee"
+                            value="{{ selected_employee }}"
+                            placeholder="Search by employee name or employee ID"
+                        >
+                    </div>
+                    <div class="col-md-3 col-xl-4">
+                        <div class="d-flex flex-wrap gap-2 payroll-report-filter-actions">
+                            <button type="submit" class="btn btn-primary">Apply Filters</button>
+                            <a href="{% url 'payroll-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+                        </div>
+                    </div>
+                </form>
+                <div class="text-muted small mt-3">{{ selected_filter_text }}</div>
             </div>
-            <div class="col-md-5">
-                <label class="form-label">Employee Name or Employee ID</label>
-                <input type="text" class="form-control" name="employee" value="{{ selected_employee }}" placeholder="Search one employee when detailed review is needed">
-            </div>
-            <div class="col-md-3">
-                <div class="d-flex flex-wrap gap-2">
-                    <button type="submit" class="btn btn-primary">Apply Filters</button>
-                    <a href="{% url 'payroll-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="row g-3 report-kpi-grid">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Total Payroll Cost</div>
+                        <div class="report-kpi-value">S${{ total_payroll_amount_month|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Basic salary and allowances for the selected payroll month.</div>
+                    </div>
                 </div>
             </div>
-        </form>
-        <p class="text-muted mb-0 mt-3">{{ selected_filter_text }}</p>
-    </div>
-</div>
-
-<div class="row g-3 mb-3">
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Total Payroll Cost</div>
-                <div class="h4 mb-0">S${{ total_payroll_amount_month|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Total Net Pay</div>
-                <div class="h4 mb-0">S${{ total_net_pay_month|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Employee CPF</div>
-                <div class="h4 mb-0">S${{ employee_cpf_total_month|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Employer CPF</div>
-                <div class="h4 mb-0">S${{ employer_cpf_total_month|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Total Deductions</div>
-                <div class="h4 mb-0">S${{ total_deductions_month|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl-2">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Employees Paid</div>
-                <div class="display-6 mb-0">{{ employees_paid_month }}</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Payroll Processing Issues</span>
-        <span class="text-muted small">Use these items to decide whether to send payslips, review records or upload a corrected file.</span>
-    </div>
-    <div class="card-body">
-        {% if pending_email_or_download_count or failed_payslip_email_count %}
-        <div class="row g-3">
-            <div class="col-md-4">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Pending Payslip Follow-up</div>
-                    <div class="h4 mb-1">{{ pending_email_or_download_count }}</div>
-                    <div class="text-muted small">Payslip records have not been emailed or downloaded yet for the selected month.</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Total Net Pay</div>
+                        <div class="report-kpi-value">S${{ total_net_pay_month|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Net salary after employee CPF and deductions for the selected month.</div>
+                    </div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Failed Payslip Emails</div>
-                    <div class="h4 mb-1 {% if failed_payslip_email_count %}text-danger{% endif %}">{{ failed_payslip_email_count }}</div>
-                    <div class="text-muted small">These records may need a corrected email address or a resend from the payroll record page.</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Total CPF</div>
+                        <div class="report-kpi-value">S${{ total_cpf_month|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Combined employee and employer CPF contributions for the selected month.</div>
+                    </div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Next Action</div>
-                    <div class="d-flex flex-wrap gap-2 mt-2">
-                        <a href="{% url 'payroll-list' %}{{ payroll_list_query }}" class="btn btn-sm btn-outline-dark">View Payroll Records</a>
-                        <a href="{% url 'payroll-upload-preview' %}" class="btn btn-sm btn-outline-primary">Upload Payroll File</a>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Employees Paid</div>
+                        <div class="report-kpi-value">{{ employees_paid_month }}</div>
+                        <div class="small text-muted">Distinct employees with a payroll record in the selected payroll month.</div>
                     </div>
                 </div>
             </div>
         </div>
-        {% else %}
-        <div class="empty-state">No urgent payroll processing issues were found for the selected period.</div>
-        {% endif %}
-    </div>
-</div>
+    </section>
 
-<h2 class="section-heading mb-3">Useful Charts</h2>
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Monthly Payroll Cost Trend</div>
-            <div class="report-chart-body">
-                <canvas id="payrollCostTrendChart" class="report-chart-canvas" aria-label="Monthly payroll cost trend chart" role="img"></canvas>
-                <div id="payrollCostTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+    <section class="report-section">
+        <div class="report-summary-strip">
+            <div class="report-summary-card">
+                <div class="report-summary-label">Employee CPF</div>
+                <div class="report-summary-value">S${{ employee_cpf_total_month|floatformat:2|intcomma }}</div>
+                <div class="report-summary-note">Deducted from employee pay for the selected payroll month.</div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Shows payroll cost over the last 6 months to help HR compare spending over time.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">CPF Contribution Split (Selected Month)</div>
-            <div class="report-chart-body">
-                <canvas id="cpfSplitChart" class="report-chart-canvas" aria-label="CPF contribution split chart" role="img"></canvas>
-                <div id="cpfSplitChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            <div class="report-summary-card">
+                <div class="report-summary-label">Employer CPF</div>
+                <div class="report-summary-value">S${{ employer_cpf_total_month|floatformat:2|intcomma }}</div>
+                <div class="report-summary-note">Employer CPF cost calculated from the selected payroll records.</div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Visible totals: Employee CPF S${{ employee_cpf_total_month|floatformat:2|intcomma }}, Employer CPF S${{ employer_cpf_total_month|floatformat:2|intcomma }}.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Net Pay vs Deductions (Selected Month)</div>
-            <div class="report-chart-body">
-                <canvas id="netPayVsDeductionsChart" class="report-chart-canvas" aria-label="Net pay versus deductions chart" role="img"></canvas>
-                <div id="netPayVsDeductionsChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            <div class="report-summary-card">
+                <div class="report-summary-label">Total Deductions</div>
+                <div class="report-summary-value">S${{ total_deductions_month|floatformat:2|intcomma }}</div>
+                <div class="report-summary-note">Loan and other deductions applied to payroll records in the selected month.</div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Compares the month’s total net pay against deductions so HR can explain payroll cost composition.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Employees Paid by Month</div>
-            <div class="report-chart-body">
-                <canvas id="employeesPaidByMonthChart" class="report-chart-canvas" aria-label="Employees paid by month chart" role="img"></canvas>
-                <div id="employeesPaidByMonthChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            <div class="report-summary-card">
+                <div class="report-summary-label">Failed Payslip Emails</div>
+                <div class="report-summary-value">{{ failed_payslip_email_count }}</div>
+                <div class="report-summary-note">Email failures linked to payroll records in the selected month.</div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Shows how many employees were paid in each of the last 6 months.</div>
         </div>
-    </div>
-</div>
+    </section>
 
-<div class="row g-3 mb-3">
-    <div class="col-md-4">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Selected Month</div>
-                <div class="h5 mb-0">{{ month_start|date:"M Y" }}</div>
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Payroll Processing Issues</span>
+                <span class="text-muted small">Use these items to identify upload problems, email failures, and employees who still need payroll records.</span>
+            </div>
+            <div class="card-body p-0">
+                {% if processing_issues %}
+                <div class="table-responsive report-attention-table">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Priority</th>
+                                <th>Issue</th>
+                                <th class="text-end">Count</th>
+                                <th>Scope</th>
+                                <th>Detail</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for issue in processing_issues %}
+                            <tr>
+                                <td><span class="status-badge {{ issue.priority_class }}">{{ issue.priority_label }}</span></td>
+                                <td>{{ issue.issue }}</td>
+                                <td class="text-end">{{ issue.count }}</td>
+                                <td>{{ issue.scope }}</td>
+                                <td>{{ issue.detail }}</td>
+                                <td class="text-end"><a href="{{ issue.action_url }}" class="report-link">{{ issue.action_label }}</a></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state m-3">No payroll processing issues were found for the current report data.</div>
+                {% endif %}
             </div>
         </div>
-    </div>
-    <div class="col-md-4">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Total Allowances</div>
-                <div class="h4 mb-0">S${{ total_allowances_month|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Year-to-Date Payroll Cost</div>
-                <div class="h4 mb-0">S${{ total_payroll_amount_year|floatformat:2|intcomma }}</div>
-            </div>
-        </div>
-    </div>
-</div>
+    </section>
 
-<h2 class="section-heading mb-3">Detailed Records</h2>
-<div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Payroll Records by Month</span>
-        <span class="small text-muted">{{ month_start|date:"d M Y" }} to {{ month_end|date:"d M Y" }}</span>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-clean table-hover mb-0">
-            <thead>
-                <tr>
-                    <th>Month</th>
-                    <th>Employee Name</th>
-                    <th>Employee ID</th>
-                    <th class="text-end">Gross Pay</th>
-                    <th class="text-end">Deductions</th>
-                    <th class="text-end">Net Pay</th>
-                    <th>Status</th>
-                    <th class="text-end">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in records_with_status %}
-                <tr>
-                    <td>{{ row.payment_date|date:"M Y" }}</td>
-                    <td>{{ row.employee_name }}</td>
-                    <td>{{ row.employee_id }}</td>
-                    <td class="text-end">S${{ row.gross_pay|floatformat:2|intcomma }}</td>
-                    <td class="text-end">S${{ row.deductions|floatformat:2|intcomma }}</td>
-                    <td class="text-end">S${{ row.net_salary|floatformat:2|intcomma }}</td>
-                    <td>{{ row.status }}</td>
-                    <td class="text-end">
-                        <div class="d-flex justify-content-end gap-1 flex-wrap">
-                            <a href="{% url 'payroll-detail' row.id %}" class="btn btn-sm btn-outline-primary">View Payroll Record</a>
-                            <a href="{% url 'payslip-pdf-download' row.id %}" class="btn btn-sm btn-outline-success">Download Payslip</a>
+    <section class="report-section">
+        <h2 class="section-heading mb-3">Useful Charts</h2>
+        <div class="row g-3">
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Monthly Payroll Cost Trend</div>
+                    <div class="report-chart-body">
+                        <canvas id="payrollCostTrendChart" class="report-chart-canvas" aria-label="Monthly payroll cost trend chart" role="img"></canvas>
+                        <div id="payrollCostTrendChartEmpty" class="report-chart-empty d-none">No payroll trend data is available yet.</div>
+                    </div>
+                    <div class="px-3 text-muted small">Shows payroll cost across the last 6 months using salary and allowance totals.</div>
+                    {% if payroll_chart_summary.has_data %}
+                    <div class="report-chart-summary">
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">Current month</span>
+                            <span class="report-chart-stat-value">S${{ total_payroll_amount_month|floatformat:2|intcomma }}</span>
                         </div>
-                    </td>
-                </tr>
-                {% empty %}
-                <tr><td colspan="8" class="text-center py-3"><div class="empty-state">No payroll records were found for the selected month.</div></td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">6-month total</span>
+                            <span class="report-chart-stat-value">S${{ payroll_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">Highest month</span>
+                            <span class="report-chart-stat-value">{{ payroll_chart_summary.peak_label }}: S${{ payroll_chart_summary.peak_value|floatformat:2|intcomma }}</span>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="report-chart-summary">
+                        <div class="report-chart-stat w-100">
+                            <span class="report-chart-stat-value">No payroll trend data is available for the selected filters.</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">CPF Contribution Split</div>
+                    <div class="report-chart-body">
+                        <canvas id="cpfSplitChart" class="report-chart-canvas" aria-label="CPF contribution split chart" role="img"></canvas>
+                        <div id="cpfSplitChartEmpty" class="report-chart-empty d-none">No CPF contribution data is available yet.</div>
+                    </div>
+                    <div class="px-3 text-muted small">Shows how the selected month’s CPF total is split between employee and employer contributions.</div>
+                    {% if total_cpf_month %}
+                    <div class="report-chart-summary payroll-report-chart-summary">
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">Employee CPF</span>
+                            <span class="report-chart-stat-value">S${{ employee_cpf_total_month|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">Employer CPF</span>
+                            <span class="report-chart-stat-value">S${{ employer_cpf_total_month|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="report-chart-stat">
+                            <span class="report-chart-stat-label">Total CPF</span>
+                            <span class="report-chart-stat-value">S${{ total_cpf_month|floatformat:2|intcomma }}</span>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="report-chart-summary">
+                        <div class="report-chart-stat w-100">
+                            <span class="report-chart-stat-value">No CPF contribution totals are available for the selected month.</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </section>
 
-<div class="row g-3">
-    <div class="col-lg-8">
-        <div class="card h-100">
-            <div class="card-header">Recent Payslips Generated</div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Employee</th>
-                            <th>Employee ID</th>
-                            <th class="text-end">Net Pay</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in recent_payslips %}
-                        <tr>
-                            <td>{{ item.created_at|date:"d M Y, H:i" }}</td>
-                            <td>{{ item.employee_name }}</td>
-                            <td>{{ item.employee_id }}</td>
-                            <td class="text-end">S${{ item.net_salary|floatformat:2|intcomma }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No payslip records yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+    <section id="detailed-records" class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Detailed Payroll Records</span>
+                <span class="text-muted small">{{ month_start|date:"d M Y" }} to {{ month_end|date:"d M Y" }}</span>
+            </div>
+            <div class="card-body p-0">
+                {% if records_with_status %}
+                <div class="table-responsive report-attention-table">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Payroll Month</th>
+                                <th>Employee</th>
+                                <th class="text-end">Gross Pay</th>
+                                <th class="text-end">Deductions</th>
+                                <th class="text-end">Net Pay</th>
+                                <th>Status</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in records_with_status %}
+                            <tr>
+                                <td>{{ row.payment_date|date:"M Y" }}</td>
+                                <td>
+                                    <div>{{ row.employee_name }}</div>
+                                    <div class="text-muted small payroll-report-employee-meta">{{ row.employee_id }}</div>
+                                </td>
+                                <td class="text-end">S${{ row.gross_pay|floatformat:2|intcomma }}</td>
+                                <td class="text-end">S${{ row.deductions|floatformat:2|intcomma }}</td>
+                                <td class="text-end">S${{ row.net_salary|floatformat:2|intcomma }}</td>
+                                <td>{{ row.status }}</td>
+                                <td class="text-end">
+                                    <div class="payroll-report-actions">
+                                        <a href="{% url 'payroll-detail' row.id %}" class="report-link">View Record</a>
+                                        <a href="{% url 'payslip-pdf-download' row.id %}" class="report-link">View Payslip</a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state m-3">No payroll records were found for the selected month.</div>
+                {% endif %}
             </div>
         </div>
-    </div>
-    <div class="col-lg-4">
-        <div class="card h-100">
-            <div class="card-header">Payslip Summary</div>
-            <div class="card-body">
-                <div class="mb-2">
-                    <div class="text-muted small">Pending Email / Download (selected month)</div>
-                    <div class="display-6">{{ pending_email_or_download_count }}</div>
-                </div>
-                <div>
-                    <div class="text-muted small">Staff Payslip Records (all time)</div>
-                    <div class="display-6">{{ staff_payslip_records_count }}</div>
-                </div>
-                <div class="mt-3 d-flex flex-wrap gap-2">
-                    <a href="{% url 'payroll-list' %}{{ payroll_list_query }}" class="btn btn-sm btn-outline-dark">View Payroll Records</a>
-                    <a href="{% url 'payroll-upload-preview' %}" class="btn btn-sm btn-outline-primary">Upload Payroll File</a>
-                </div>
-            </div>
-        </div>
-    </div>
+    </section>
 </div>
 
 {{ payroll_monthly_labels|json_script:"payroll-monthly-labels-data" }}
 {{ payroll_monthly_cost_values|json_script:"payroll-monthly-cost-values-data" }}
-{{ payroll_monthly_employee_values|json_script:"payroll-monthly-employee-values-data" }}
-{{ total_net_pay_month|json_script:"payroll-net-pay-data" }}
-{{ total_deductions_month|json_script:"payroll-deductions-data" }}
 {{ employee_cpf_total_month|json_script:"payroll-employee-cpf-data" }}
 {{ employer_cpf_total_month|json_script:"payroll-employer-cpf-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
@@ -313,8 +309,8 @@
                 {
                     label: "Payroll Cost (SGD)",
                     data: payrollMonthlyCosts,
-                    borderColor: "#ff7f73",
-                    backgroundColor: "rgba(255, 127, 115, 0.2)",
+                    borderColor: "#198754",
+                    backgroundColor: "rgba(25, 135, 84, 0.18)",
                     borderWidth: 2,
                     tension: 0.28,
                     fill: true
@@ -331,37 +327,7 @@
                     }
                 }
             },
-            emptyText: "No payroll trend data is available for the selected employee filter."
-        });
-
-        var netPay = window.ReportCharts.parseJsonScript("payroll-net-pay-data", 0);
-        var deductions = window.ReportCharts.parseJsonScript("payroll-deductions-data", 0);
-        window.ReportCharts.renderChart({
-            canvasId: "netPayVsDeductionsChart",
-            emptyStateId: "netPayVsDeductionsChartEmpty",
-            type: "bar",
-            labels: ["Net Pay", "Deductions"],
-            datasets: [
-                {
-                    label: "Amount (SGD)",
-                    data: [netPay, deductions],
-                    backgroundColor: ["#198754", "#ff7f73"],
-                    borderColor: "#e5e7eb",
-                    borderWidth: 1
-                }
-            ],
-            options: {
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            },
-            emptyText: "No net pay or deduction totals are available for the selected month."
+            emptyText: "No payroll trend data is available for the selected filters."
         });
 
         var employeeCpf = window.ReportCharts.parseJsonScript("payroll-employee-cpf-data", 0);
@@ -375,7 +341,7 @@
                 {
                     label: "Amount (SGD)",
                     data: [employeeCpf, employerCpf],
-                    backgroundColor: ["#ff7f73", "#64748b"],
+                    backgroundColor: ["#f59e0b", "#475569"],
                     borderColor: "#ffffff",
                     borderWidth: 2
                 }
@@ -387,38 +353,6 @@
                 }
             },
             emptyText: "No CPF contribution totals are available for the selected month."
-        });
-
-        var payrollMonthlyEmployeeCounts = window.ReportCharts.parseJsonScript("payroll-monthly-employee-values-data", []);
-        window.ReportCharts.renderChart({
-            canvasId: "employeesPaidByMonthChart",
-            emptyStateId: "employeesPaidByMonthChartEmpty",
-            type: "bar",
-            labels: payrollMonthlyLabels,
-            datasets: [
-                {
-                    label: "Employees Paid",
-                    data: payrollMonthlyEmployeeCounts,
-                    backgroundColor: "#64748b",
-                    borderColor: "#475569",
-                    borderWidth: 1
-                }
-            ],
-            options: {
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            precision: 0
-                        }
-                    }
-                }
-            },
-            emptyText: "No employee count trend is available for the selected employee filter."
         });
     })();
 </script>
