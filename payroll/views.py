@@ -639,12 +639,43 @@ def payroll_upload_confirm_save(request):
     upload_data = request.session.get("payroll_upload_preview") or {}
     payment_date_raw = upload_data.get("payment_date")
     serialized_rows = upload_data.get("rows") or []
+    serialized_invalid_rows = upload_data.get("invalid_rows") or []
+    duplicate_error_message = "A payroll record already exists for this employee and payment date."
 
-    if not payment_date_raw or not serialized_rows:
+    duplicate_only_preview = (
+        bool(payment_date_raw)
+        and not serialized_rows
+        and bool(serialized_invalid_rows)
+        and all(
+            (row.get("errors") or []) == [duplicate_error_message]
+            for row in serialized_invalid_rows
+        )
+    )
+
+    if not payment_date_raw or (not serialized_rows and not duplicate_only_preview):
         messages.error(request, "No valid upload preview found. Please upload and preview first.")
         return redirect("payroll-upload-preview")
 
     payment_date = date.fromisoformat(payment_date_raw)
+    if duplicate_only_preview:
+        skipped_count = len(serialized_invalid_rows)
+        request.session.pop("payroll_upload_preview", None)
+        log_event(
+            action="payroll.upload.saved",
+            user=request.user,
+            metadata={
+                "saved_count": 0,
+                "skipped_duplicate_count": skipped_count,
+                "payment_date": payment_date.isoformat(),
+            },
+            ip_address=get_client_ip(request),
+        )
+        messages.warning(
+            request,
+            f"No new payroll records were created. {skipped_count} duplicate record(s) were skipped.",
+        )
+        return redirect("payroll-list")
+
     saved_count = 0
     skipped_count = 0
     invalid_format_count = 0

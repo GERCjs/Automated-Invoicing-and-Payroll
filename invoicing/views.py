@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Count, Sum
 from django.db.models import Q
+from django.db.models.functions import TruncMonth
 from django.http import Http404, HttpResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -138,6 +139,37 @@ def _append_customer_query(url: str, customer_id: int) -> str:
     query = dict(parse_qsl(split.query, keep_blank_values=True))
     query["customer"] = str(customer_id)
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
+
+
+def _build_chart_summary(labels, values):
+    numeric_values = [float(value or 0) for value in values]
+    total_value = sum(numeric_values)
+    has_data = any(value > 0 for value in numeric_values)
+    peak_label = ""
+    peak_value = 0.0
+    if has_data and labels and numeric_values:
+        peak_index = max(range(len(numeric_values)), key=numeric_values.__getitem__)
+        peak_label = labels[peak_index]
+        peak_value = numeric_values[peak_index]
+    return {
+        "has_data": has_data,
+        "six_month_total": total_value,
+        "peak_label": peak_label,
+        "peak_value": peak_value,
+    }
+
+
+def _recent_month_starts(today, total_months=6):
+    month_start = today.replace(day=1)
+    month_starts = []
+    for offset in range(total_months - 1, -1, -1):
+        year = month_start.year
+        month = month_start.month - offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_starts.append(month_start.replace(year=year, month=month, day=1))
+    return month_starts
 
 
 def _get_batch_invoice_email_block_reason(invoice: Invoice) -> str:
@@ -557,10 +589,18 @@ def invoice_list(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_dashboard(request):
-    updated_count = refresh_overdue_invoices()
+    refresh_overdue_invoices()
     today = timezone.localdate()
     month_start = today.replace(day=1)
     year_start = today.replace(month=1, day=1)
+    report_generated_at = timezone.now()
+    reporting_period_label = month_start.strftime("%B %Y")
+    open_statuses = [
+        Invoice.STATUS_DRAFT,
+        Invoice.STATUS_SENT,
+        Invoice.STATUS_VIEWED,
+        Invoice.STATUS_OVERDUE,
+    ]
 
     status_counts = Invoice.objects.values("status").annotate(total_count=Count("id"))
     counts_by_status = {
@@ -573,18 +613,17 @@ def invoice_dashboard(request):
     pending_payment_count = sent_count
     viewed_count = counts_by_status.get(Invoice.STATUS_VIEWED, 0)
     paid_count = counts_by_status.get(Invoice.STATUS_PAID, 0)
+    refunded_count = counts_by_status.get(Invoice.STATUS_REFUNDED, 0)
     overdue_count = counts_by_status.get(Invoice.STATUS_OVERDUE, 0)
-    unsent_count = draft_count
 
     outstanding_amount = (
         Invoice.objects.filter(
-            status__in=[
-                Invoice.STATUS_DRAFT,
-                Invoice.STATUS_SENT,
-                Invoice.STATUS_VIEWED,
-                Invoice.STATUS_OVERDUE,
-            ]
+            status__in=open_statuses
         ).aggregate(total=Sum("total_amount"))["total"]
+        or 0
+    )
+    overdue_amount = (
+        Invoice.objects.filter(status=Invoice.STATUS_OVERDUE).aggregate(total=Sum("total_amount"))["total"]
         or 0
     )
 
@@ -613,15 +652,158 @@ def invoice_dashboard(request):
         issue_date__lte=today,
     ).count()
 
+    month_starts = _recent_month_starts(today, total_months=6)
+    collection_trend_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+    collection_rows = list(
+        successful_payments.filter(
+            paid_at__date__gte=month_starts[0],
+            paid_at__date__lte=today,
+        )
+        .annotate(month=TruncMonth("paid_at"))
+        .values("month")
+        .annotate(total_amount=Sum("amount"))
+        .order_by("month")
+    )
+    collection_map = {}
+    for row in collection_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        collection_map[month_value.strftime("%Y-%m")] = float(row.get("total_amount") or 0)
+    monthly_collection_values = [collection_map.get(month_key, 0.0) for month_key in month_keys]
+    collection_chart_summary = _build_chart_summary(collection_trend_labels, monthly_collection_values)
+
+    invoice_status_labels = [
+        "Draft",
+        "Pending Payment",
+        "Viewed",
+        "Paid",
+        "Overdue",
+        "Refunded",
+    ]
+    invoice_status_values = [
+        draft_count,
+        pending_payment_count,
+        viewed_count,
+        paid_count,
+        overdue_count,
+        refunded_count,
+    ]
+    status_chart_summary = [
+        {"label": "Draft", "value": str(draft_count)},
+        {"label": "Pending Payment", "value": str(pending_payment_count)},
+        {"label": "Viewed", "value": str(viewed_count)},
+        {"label": "Paid", "value": str(paid_count)},
+        {"label": "Overdue", "value": str(overdue_count)},
+        {"label": "Refunded", "value": str(refunded_count)},
+    ]
+
+    failed_invoice_email_ids = {
+        int(log["related_object_id"])
+        for log in EmailDeliveryLog.objects.filter(
+            related_object_type="invoice",
+            template_key="invoice_email_v1",
+            status=EmailDeliveryLog.STATUS_FAILED,
+        ).values("related_object_id")
+        if str(log["related_object_id"]).isdigit()
+    }
+    actionable_failed_invoice_email_ids = set(
+        Invoice.objects.filter(id__in=failed_invoice_email_ids, status__in=open_statuses).values_list("id", flat=True)
+    )
+    failed_invoice_email_count = len(actionable_failed_invoice_email_ids)
+
+    latest_import_job_with_issues = (
+        ImportJob.objects.filter(
+            module=ImportJob.MODULE_INVOICING,
+            invalid_rows__gt=0,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    import_validation_issue_count = latest_import_job_with_issues.invalid_rows if latest_import_job_with_issues else 0
+
+    attention_items = []
+    if overdue_count > 0:
+        attention_items.append(
+            {
+                "priority_label": "High",
+                "priority_class": "status-danger",
+                "issue": "Overdue invoices",
+                "count": overdue_count,
+                "scope": reporting_period_label,
+                "detail": f"S${overdue_amount:,.2f} is already overdue and needs collection follow-up.",
+                "action_label": "View invoices",
+                "action_url": f"{reverse('invoice-list')}?status=overdue",
+            }
+        )
+    if draft_count > 0:
+        attention_items.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-warning",
+                "issue": "Draft invoices not sent",
+                "count": draft_count,
+                "scope": "Current invoice pipeline",
+                "detail": "Draft invoices still need review and sending before collection can begin.",
+                "action_label": "View drafts",
+                "action_url": f"{reverse('invoice-list')}?status=draft",
+            }
+        )
+    if failed_invoice_email_count > 0:
+        attention_items.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-warning",
+                "issue": "Failed invoice email deliveries",
+                "count": failed_invoice_email_count,
+                "scope": "Open invoices",
+                "detail": "Invoice email delivery failures were logged for invoices still awaiting payment.",
+                "action_label": "View invoices",
+                "action_url": f"{reverse('invoice-list')}?status=outstanding",
+            }
+        )
+    if import_validation_issue_count > 0:
+        attention_items.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-neutral",
+                "issue": "Import validation issues",
+                "count": import_validation_issue_count,
+                "scope": latest_import_job_with_issues.source_file_name,
+                "detail": "The latest invoice upload preview stored invalid rows that still need correction.",
+                "action_label": "Upload invoices",
+                "action_url": reverse("invoice-csv-upload"),
+            }
+        )
+
+    secondary_summary_items = [
+        {
+            "label": "Draft Invoices",
+            "value": str(draft_count),
+            "note": "Invoices still being prepared before they can be sent to customers.",
+        },
+        {
+            "label": "Sent / Pending Payment",
+            "value": str(pending_payment_count),
+            "note": "Invoices sent but not yet viewed as paid or refunded.",
+        },
+        {
+            "label": "Viewed Invoices",
+            "value": str(viewed_count),
+            "note": "Customers opened these invoices, but payment is still outstanding.",
+        },
+        {
+            "label": "Refunded Invoices",
+            "value": str(refunded_count),
+            "note": "Refunded invoices remain excluded from active collection totals.",
+        },
+    ]
+
     recent_action_invoices = (
         Invoice.objects.select_related("customer")
         .filter(
-            status__in=[
-                Invoice.STATUS_DRAFT,
-                Invoice.STATUS_SENT,
-                Invoice.STATUS_VIEWED,
-                Invoice.STATUS_OVERDUE,
-            ]
+            status__in=open_statuses
         )
         .order_by("due_date", "-issue_date", "-created_at")[:10]
     )
@@ -630,6 +812,8 @@ def invoice_dashboard(request):
         request,
         "invoicing/invoice_dashboard.html",
         {
+            "report_generated_at": report_generated_at,
+            "reporting_period_label": reporting_period_label,
             "total_invoices": total_invoices,
             "month_to_date_invoice_count": month_to_date_invoice_count,
             "year_to_date_invoice_count": year_to_date_invoice_count,
@@ -638,11 +822,22 @@ def invoice_dashboard(request):
             "pending_payment_count": pending_payment_count,
             "viewed_count": viewed_count,
             "paid_count": paid_count,
+            "refunded_count": refunded_count,
             "overdue_count": overdue_count,
-            "unsent_count": unsent_count,
             "outstanding_amount": outstanding_amount,
+            "overdue_amount": overdue_amount,
             "collected_month": collected_month,
             "collected_year": collected_year,
+            "collection_trend_labels": collection_trend_labels,
+            "monthly_collection_values": monthly_collection_values,
+            "collection_chart_summary": collection_chart_summary,
+            "invoice_status_labels": invoice_status_labels,
+            "invoice_status_values": invoice_status_values,
+            "status_chart_summary": status_chart_summary,
+            "secondary_summary_items": secondary_summary_items,
+            "attention_items": attention_items,
+            "failed_invoice_email_count": failed_invoice_email_count,
+            "import_validation_issue_count": import_validation_issue_count,
             "recent_action_invoices": recent_action_invoices,
         },
     )

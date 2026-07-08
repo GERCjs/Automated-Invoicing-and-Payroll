@@ -1854,6 +1854,223 @@ class InvoiceCollectionReportingTests(TestCase):
         self.assertEqual(response.context["collected_month"], Decimal("54.50"))
 
 
+class InvoiceDashboardUiTests(TestCase):
+    def setUp(self):
+        self.finance_user = User.objects.create_user(username="finance_dashboard", password="TempPass123!")
+        self.finance_user.role_profile.role = FINANCE
+        self.finance_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.admin_user = User.objects.create_user(username="admin_dashboard", password="TempPass123!")
+        self.admin_user.role_profile.role = ADMIN
+        self.admin_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.superadmin_user = User.objects.create_user(username="super_dashboard", password="TempPass123!")
+        self.superadmin_user.role_profile.role = SUPERADMIN
+        self.superadmin_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.hr_user = User.objects.create_user(username="hr_dashboard", password="TempPass123!")
+        self.hr_user.role_profile.role = HR
+        self.hr_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.staff_user = User.objects.create_user(username="staff_dashboard", password="TempPass123!")
+        self.staff_user.role_profile.role = STAFF
+        self.staff_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.customer_user = User.objects.create_user(username="customer_dashboard", password="TempPass123!")
+        self.customer_user.role_profile.role = CUSTOMER
+        self.customer_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.customer = Customer.objects.create(
+            name="Dashboard Customer",
+            email="dashboard@example.com",
+            created_by=self.finance_user,
+        )
+
+    def _aware_datetime(self, day_value, hour=10):
+        return timezone.make_aware(datetime.combine(day_value, time(hour=hour)))
+
+    def _create_invoice(self, *, invoice_number, status, total_amount, issue_date, due_date):
+        total_amount_decimal = Decimal(total_amount)
+        return Invoice.objects.create(
+            invoice_number=invoice_number,
+            customer=self.customer,
+            status=status,
+            issue_date=issue_date,
+            due_date=due_date,
+            currency="SGD",
+            subtotal=total_amount_decimal - Decimal("9.00"),
+            tax_amount=Decimal("9.00"),
+            total_amount=total_amount_decimal,
+            created_by=self.finance_user,
+        )
+
+    def test_superadmin_admin_and_finance_can_access_invoice_dashboard(self):
+        for user in [self.superadmin_user, self.admin_user, self.finance_user]:
+            self.client.force_login(user)
+            response = self.client.get(reverse("invoice-dashboard"))
+            self.assertEqual(response.status_code, 200)
+            self.client.logout()
+
+    def test_customer_hr_and_staff_cannot_access_invoice_dashboard(self):
+        for user in [self.customer_user, self.hr_user, self.staff_user]:
+            self.client.force_login(user)
+            response = self.client.get(reverse("invoice-dashboard"))
+            self.assertEqual(response.status_code, 403)
+            self.client.logout()
+
+    def test_invoice_dashboard_renders_operational_sections_and_preserves_calculations(self):
+        today = timezone.localdate()
+        previous_month_day = (today.replace(day=1) - timedelta(days=3)).replace(day=12)
+        draft_invoice = self._create_invoice(
+            invoice_number="INV-DASH-1001",
+            status=Invoice.STATUS_DRAFT,
+            total_amount="109.00",
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        sent_invoice = self._create_invoice(
+            invoice_number="INV-DASH-1002",
+            status=Invoice.STATUS_SENT,
+            total_amount="150.00",
+            issue_date=today - timedelta(days=2),
+            due_date=today + timedelta(days=5),
+        )
+        viewed_invoice = self._create_invoice(
+            invoice_number="INV-DASH-1003",
+            status=Invoice.STATUS_VIEWED,
+            total_amount="200.00",
+            issue_date=today - timedelta(days=4),
+            due_date=today + timedelta(days=3),
+        )
+        overdue_invoice = self._create_invoice(
+            invoice_number="INV-DASH-1004",
+            status=Invoice.STATUS_OVERDUE,
+            total_amount="80.00",
+            issue_date=today - timedelta(days=20),
+            due_date=today - timedelta(days=2),
+        )
+        self._create_invoice(
+            invoice_number="INV-DASH-1005",
+            status=Invoice.STATUS_REFUNDED,
+            total_amount="54.50",
+            issue_date=today - timedelta(days=8),
+            due_date=today - timedelta(days=1),
+        )
+        paid_this_month = self._create_invoice(
+            invoice_number="INV-DASH-1006",
+            status=Invoice.STATUS_PAID,
+            total_amount="218.00",
+            issue_date=today - timedelta(days=6),
+            due_date=today + timedelta(days=1),
+        )
+        paid_previous_month = self._create_invoice(
+            invoice_number="INV-DASH-1007",
+            status=Invoice.STATUS_PAID,
+            total_amount="327.00",
+            issue_date=previous_month_day - timedelta(days=5),
+            due_date=previous_month_day + timedelta(days=7),
+        )
+        PaymentRecord.objects.create(
+            invoice=paid_this_month,
+            payment_reference="PAY-DASH-1006",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=Decimal("218.00"),
+            currency="SGD",
+            paid_at=self._aware_datetime(today, hour=11),
+        )
+        PaymentRecord.objects.create(
+            invoice=paid_previous_month,
+            payment_reference="PAY-DASH-1007",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=Decimal("327.00"),
+            currency="SGD",
+            paid_at=self._aware_datetime(previous_month_day, hour=9),
+        )
+        EmailDeliveryLog.objects.create(
+            recipient_email=self.customer.email,
+            subject="Invoice email",
+            template_key="invoice_email_v1",
+            status=EmailDeliveryLog.STATUS_FAILED,
+            related_object_type="invoice",
+            related_object_id=str(sent_invoice.pk),
+            error_message="SMTP timeout",
+        )
+        ImportJob.objects.create(
+            module=ImportJob.MODULE_INVOICING,
+            source_file_name="invoice_upload_july.xlsx",
+            status=ImportJob.STATUS_COMPLETED_WITH_ERRORS,
+            total_rows=5,
+            valid_rows=3,
+            invalid_rows=2,
+            saved_rows=3,
+            initiated_by=self.finance_user,
+        )
+
+        self.client.force_login(self.finance_user)
+        response = self.client.get(reverse("invoice-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Invoice Dashboard")
+        self.assertContains(
+            response,
+            "Use this dashboard to track collections, identify invoices needing follow-up, and keep daily invoicing work organised.",
+        )
+        self.assertContains(response, "Reporting period:")
+        self.assertContains(response, "Last updated:")
+        self.assertContains(response, "Collected This Month")
+        self.assertContains(response, "Outstanding Amount")
+        self.assertContains(response, "Overdue Amount")
+        self.assertContains(response, "Total Invoices")
+        self.assertContains(response, "Draft Invoices")
+        self.assertContains(response, "Sent / Pending Payment")
+        self.assertContains(response, "Viewed Invoices")
+        self.assertContains(response, "Refunded Invoices")
+        self.assertContains(response, reverse("invoice-create"))
+        self.assertContains(response, reverse("invoice-csv-upload"))
+        self.assertContains(response, reverse("invoice-list"))
+        self.assertContains(response, reverse("invoice-customer-create"))
+        self.assertContains(response, reverse("invoice-template-settings"))
+        self.assertContains(response, "Invoice Attention")
+        self.assertContains(response, "Overdue invoices")
+        self.assertContains(response, "Draft invoices not sent")
+        self.assertContains(response, "Failed invoice email deliveries")
+        self.assertContains(response, "Import validation issues")
+        self.assertContains(response, "Monthly Collection Trend")
+        self.assertContains(response, "Invoice Status Breakdown")
+        self.assertContains(response, "Recent Invoices Requiring Action")
+        self.assertContains(response, draft_invoice.invoice_number)
+        self.assertContains(response, viewed_invoice.invoice_number)
+        self.assertContains(response, overdue_invoice.invoice_number)
+        self.assertContains(response, "View Invoice")
+        self.assertContains(response, "Send Invoice")
+        self.assertContains(response, static("js/report_charts.js"))
+        self.assertEqual(response.context["collected_month"], Decimal("218.00"))
+        self.assertEqual(response.context["collected_year"], Decimal("545.00"))
+        self.assertEqual(response.context["outstanding_amount"], Decimal("539.00"))
+        self.assertEqual(response.context["overdue_amount"], Decimal("80.00"))
+        self.assertEqual(response.context["total_invoices"], 7)
+        self.assertEqual(response.context["draft_count"], 1)
+        self.assertEqual(response.context["pending_payment_count"], 1)
+        self.assertEqual(response.context["viewed_count"], 1)
+        self.assertEqual(response.context["refunded_count"], 1)
+        self.assertEqual(response.context["failed_invoice_email_count"], 1)
+        self.assertEqual(response.context["import_validation_issue_count"], 2)
+        self.assertIn("2", [item["value"] for item in response.context["status_chart_summary"] if item["label"] == "Paid"])
+
+    def test_invoice_dashboard_shows_empty_states_when_no_invoice_data_exists(self):
+        self.client.force_login(self.finance_user)
+
+        response = self.client.get(reverse("invoice-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No invoice issues need attention right now.")
+        self.assertContains(response, "No collection trend data is available yet.")
+        self.assertContains(response, "No invoice status data is available yet.")
+        self.assertContains(response, "No invoice records require action for the current dashboard view.")
+
+
 class InvoiceFileUploadTests(TestCase):
     def setUp(self):
         self.finance_user = User.objects.create_user(username="finance_upload", password="TempPass123!")

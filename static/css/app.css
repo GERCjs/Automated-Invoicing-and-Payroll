@@ -1153,6 +1153,63 @@ textarea.form-control:focus {
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.invoice-dashboard-page .card,
+.invoice-dashboard-page .dashboard-card {
+    border-radius: 16px;
+}
+
+.invoice-dashboard-page .report-kpi-card .card-body {
+    min-height: 220px;
+}
+
+.invoice-dashboard-page .report-summary-strip {
+    gap: 1rem;
+}
+
+.invoice-dashboard-page .report-summary-card {
+    border-top: 4px solid #d8e0ea;
+    min-height: 170px;
+    padding: 1.1rem 1.15rem;
+}
+
+.invoice-dashboard-page .report-summary-note {
+    font-size: 0.93rem;
+    line-height: 1.5;
+}
+
+.invoice-dashboard-page .invoice-dashboard-actions .btn {
+    min-height: 44px;
+}
+
+.invoice-dashboard-page .report-attention-table .table th,
+.invoice-dashboard-page .report-attention-table .table td {
+    padding: 0.95rem 1rem;
+}
+
+.invoice-dashboard-page .invoice-dashboard-table-actions {
+    align-items: flex-end;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.invoice-dashboard-page .invoice-dashboard-action-button {
+    color: #9a6b01;
+    font-weight: 700;
+    padding: 0;
+    text-decoration: none;
+}
+
+.invoice-dashboard-page .invoice-dashboard-action-button:hover,
+.invoice-dashboard-page .invoice-dashboard-action-button:focus {
+    color: #7c5200;
+    text-decoration: underline;
+}
+
+.invoice-dashboard-page .invoice-dashboard-status-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .payroll-report-page .card,
 .payroll-report-page .dashboard-card {
     border-radius: 16px;
