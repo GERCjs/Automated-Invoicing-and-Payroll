@@ -60,6 +60,12 @@ BANK_TRANSFER_PAYABLE_STATUSES = {
     Invoice.STATUS_VIEWED,
     Invoice.STATUS_OVERDUE,
 }
+OUTSTANDING_INVOICE_STATUSES = {
+    Invoice.STATUS_SENT,
+    Invoice.STATUS_VIEWED,
+    Invoice.STATUS_OVERDUE,
+}
+INVOICE_DASHBOARD_RECENT_ACTION_LIMIT = 8
 
 
 def _bank_transfer_context(invoice: Invoice, initiated_by=None) -> dict:
@@ -230,6 +236,12 @@ def _format_invoice_batch_feedback(entries: list[str], *, max_items: int = 5) ->
     if len(entries) > max_items:
         suffix = f" and {len(entries) - max_items} more"
     return "; ".join(visible_entries) + suffix
+
+
+def _invoice_dashboard_recent_scope_note(limit: int) -> str:
+    return (
+        f"Showing the next {limit} draft, pending, viewed, and overdue invoices ordered by due date."
+    )
 
 
 @login_required
@@ -615,10 +627,11 @@ def invoice_dashboard(request):
     paid_count = counts_by_status.get(Invoice.STATUS_PAID, 0)
     refunded_count = counts_by_status.get(Invoice.STATUS_REFUNDED, 0)
     overdue_count = counts_by_status.get(Invoice.STATUS_OVERDUE, 0)
+    invoices_requiring_follow_up_count = draft_count + pending_payment_count + viewed_count + overdue_count
 
     outstanding_amount = (
         Invoice.objects.filter(
-            status__in=open_statuses
+            status__in=OUTSTANDING_INVOICE_STATUSES
         ).aggregate(total=Sum("total_amount"))["total"]
         or 0
     )
@@ -784,9 +797,9 @@ def invoice_dashboard(request):
             "note": "Invoices still being prepared before they can be sent to customers.",
         },
         {
-            "label": "Sent / Pending Payment",
+            "label": "Pending Payment",
             "value": str(pending_payment_count),
-            "note": "Invoices sent but not yet viewed as paid or refunded.",
+            "note": "Invoices sent and still waiting for payment.",
         },
         {
             "label": "Viewed Invoices",
@@ -794,9 +807,9 @@ def invoice_dashboard(request):
             "note": "Customers opened these invoices, but payment is still outstanding.",
         },
         {
-            "label": "Refunded Invoices",
-            "value": str(refunded_count),
-            "note": "Refunded invoices remain excluded from active collection totals.",
+            "label": "Total Invoices",
+            "value": str(total_invoices),
+            "note": "All invoice records currently tracked across every status.",
         },
     ]
 
@@ -805,7 +818,7 @@ def invoice_dashboard(request):
         .filter(
             status__in=open_statuses
         )
-        .order_by("due_date", "-issue_date", "-created_at")[:10]
+        .order_by("due_date", "-issue_date", "-created_at")[:INVOICE_DASHBOARD_RECENT_ACTION_LIMIT]
     )
 
     return render(
@@ -817,6 +830,7 @@ def invoice_dashboard(request):
             "total_invoices": total_invoices,
             "month_to_date_invoice_count": month_to_date_invoice_count,
             "year_to_date_invoice_count": year_to_date_invoice_count,
+            "invoices_requiring_follow_up_count": invoices_requiring_follow_up_count,
             "draft_count": draft_count,
             "sent_count": sent_count,
             "pending_payment_count": pending_payment_count,
@@ -839,6 +853,10 @@ def invoice_dashboard(request):
             "failed_invoice_email_count": failed_invoice_email_count,
             "import_validation_issue_count": import_validation_issue_count,
             "recent_action_invoices": recent_action_invoices,
+            "recent_action_invoice_limit": INVOICE_DASHBOARD_RECENT_ACTION_LIMIT,
+            "recent_action_scope_note": _invoice_dashboard_recent_scope_note(
+                INVOICE_DASHBOARD_RECENT_ACTION_LIMIT
+            ),
         },
     )
 

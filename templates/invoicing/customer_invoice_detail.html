@@ -15,6 +15,7 @@
             <button type="submit" class="btn btn-success">Pay Now</button>
         </form>
         {% endif %}
+        <a href="{% url 'customer-invoice-support-ticket-create' invoice.pk %}" class="btn btn-outline-warning">Ask About This Invoice</a>
         <a href="{% url 'customer-invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
         <a href="{% url 'customer-invoice-dashboard' %}" class="btn btn-outline-secondary">Back to My Invoices</a>
     </div>

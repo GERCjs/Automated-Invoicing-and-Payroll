@@ -118,12 +118,17 @@
                 <a class="portal-nav-link" href="{% url 'admin-dashboard' %}">Admin Console</a>
                 {% endif %}
 
-                {% if current_user_role == "finance" or current_user_role == "hr" %}
-                <a class="portal-nav-link" href="{% url 'support-ticket-list' %}">Support Tickets</a>
+                {% if current_user_role == "finance" %}
+                <a class="portal-nav-link{% if current_url_name == 'finance-support-ticket-list' or current_url_name == 'support-ticket-detail' %} is-active{% endif %}" href="{% url 'finance-support-ticket-list' %}">Support Tickets</a>
+                {% endif %}
+
+                {% if current_user_role == "hr" %}
+                <a class="portal-nav-link{% if current_url_name == 'support-ticket-list' or current_url_name == 'support-ticket-detail' %} is-active{% endif %}" href="{% url 'support-ticket-list' %}">Support Tickets</a>
                 {% endif %}
 
                 {% if current_user_role == "customer" %}
-                <a class="portal-nav-link" href="{% url 'customer-invoice-dashboard' %}">My Invoices</a>
+                <a class="portal-nav-link{% if current_url_name == 'customer-invoice-dashboard' or current_url_name == 'customer-invoice-detail' %} is-active{% endif %}" href="{% url 'customer-invoice-dashboard' %}">My Invoices</a>
+                <a class="portal-nav-link{% if current_url_name == 'customer-support-ticket-list' or current_url_name == 'customer-support-ticket-detail' or current_url_name == 'customer-invoice-support-ticket-create' %} is-active{% endif %}" href="{% url 'customer-support-ticket-list' %}">My Support Requests</a>
                 {% endif %}
 
                 {% if current_user_role == "staff" %}

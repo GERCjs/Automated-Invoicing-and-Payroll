@@ -21,6 +21,12 @@ from payments.services import successful_payments_queryset
 from payroll.models import Employee, PayrollRecord
 from payroll.services import cpf_for_2026
 
+OUTSTANDING_INVOICE_STATUSES = {
+    Invoice.STATUS_SENT,
+    Invoice.STATUS_VIEWED,
+    Invoice.STATUS_OVERDUE,
+}
+
 
 def _safe_sum(queryset, field_name):
     return queryset.aggregate(total=Sum(field_name))["total"] or 0
@@ -174,6 +180,9 @@ def _query_string(params: dict) -> str:
     if not cleaned:
         return ""
     return f"?{urlencode(cleaned)}"
+
+
+INVOICE_REPORT_DETAILED_INVOICE_LIMIT = 25
 
 
 @login_required
@@ -381,7 +390,7 @@ def invoice_customer_report(request):
         )
 
     outstanding_invoices = invoice_queryset.filter(
-        status__in=[Invoice.STATUS_DRAFT, Invoice.STATUS_SENT, Invoice.STATUS_VIEWED, Invoice.STATUS_OVERDUE]
+        status__in=OUTSTANDING_INVOICE_STATUSES
     )
     filtered_invoice_ids = list(invoice_queryset.values_list("id", flat=True))
 
@@ -523,7 +532,7 @@ def invoice_customer_report(request):
     follow_up_invoices = detailed_invoice_queryset.filter(
         status__in=[Invoice.STATUS_DRAFT, Invoice.STATUS_SENT, Invoice.STATUS_VIEWED, Invoice.STATUS_OVERDUE]
     )[:10]
-    detailed_invoices = detailed_invoice_queryset[:25]
+    detailed_invoices = detailed_invoice_queryset[:INVOICE_REPORT_DETAILED_INVOICE_LIMIT]
     recent_invoices_created = invoice_queryset.order_by("-created_at")[:10]
     recent_payments_received = collection_payments
     if use_legacy_month_filter and filter_month_start and filter_month_end:
@@ -607,6 +616,7 @@ def invoice_customer_report(request):
         or selected_month
     )
     filtered_invoice_count = invoice_queryset.count()
+    has_more_detailed_invoices = filtered_invoice_count > INVOICE_REPORT_DETAILED_INVOICE_LIMIT
     has_report_data = bool(
         filtered_invoice_count
         or total_amount_collected_month
@@ -775,6 +785,8 @@ def invoice_customer_report(request):
             "has_active_filters": has_active_filters,
             "active_filter_badges": active_filter_badges,
             "filtered_invoice_count": filtered_invoice_count,
+            "detailed_invoice_limit": INVOICE_REPORT_DETAILED_INVOICE_LIMIT,
+            "has_more_detailed_invoices": has_more_detailed_invoices,
             "has_report_data": has_report_data,
             "detailed_invoices": detailed_invoices,
             "follow_up_invoices": follow_up_invoices,

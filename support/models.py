@@ -114,6 +114,28 @@ class SupportTicket(models.Model):
             return self.assigned_to.username
         return "Unassigned"
 
+    @property
+    def requester_name(self):
+        if self.created_by is None:
+            return "Unknown user"
+        full_name = self.created_by.get_full_name().strip()
+        return full_name or self.created_by.username
+
+    @property
+    def requester_email(self):
+        if self.created_by is None:
+            return ""
+        return (self.created_by.email or "").strip()
+
+    @property
+    def requester_role_display(self):
+        if self.created_by is None:
+            return "Unknown role"
+        role_profile = getattr(self.created_by, "role_profile", None)
+        if role_profile is None:
+            return "Unknown role"
+        return role_profile.get_role_display()
+
     def mark_resolution_timestamp(self):
         if self.status == self.STATUS_RESOLVED and self.resolved_at is None:
             self.resolved_at = timezone.now()

@@ -644,11 +644,11 @@ class InvoiceCustomerReportTests(TestCase):
         self.assertContains(response, "Invoice / Customer Report")
         self.assertContains(
             response,
-            "Use this report to monitor collections, identify unpaid invoices and decide which customers require follow-up.",
+            "Use this report to analyse collection trends, overdue exposure, customer balances, and the invoice records returned by your filters.",
         )
-        self.assertContains(response, "Finance Snapshot")
+        self.assertContains(response, "Analytical Charts")
         self.assertContains(response, "Customer Summary")
-        self.assertContains(response, "Failed Invoice Email Deliveries")
+        self.assertContains(response, "Status Summary")
         self.assertContains(response, "Filters")
         self.assertContains(response, 'name="q"', html=False)
         self.assertContains(response, 'name="status"', html=False)
@@ -660,16 +660,29 @@ class InvoiceCustomerReportTests(TestCase):
         self.assertContains(response, 'name="ageing"', html=False)
         self.assertContains(response, "Apply Filters")
         self.assertContains(response, "Clear Filters")
-        self.assertContains(response, "Finance Follow-up Required")
-        self.assertContains(response, "Detailed Records")
-        self.assertContains(response, "Pending Payment")
-        self.assertContains(response, "Draft Invoices")
-        self.assertContains(response, "Refunded Invoices")
-        self.assertContains(response, "Failed Invoice Emails")
+        self.assertContains(response, "Monthly Collection Trend")
+        self.assertContains(response, "Overdue Ageing")
+        self.assertContains(response, "Top Customers by Outstanding Amount")
+        self.assertContains(response, "Customer-Level Analysis")
+        self.assertContains(response, "Filtered Invoice Records")
         self.assertContains(response, "View Invoice Details")
         self.assertContains(response, "S$163.50")
         self.assertContains(response, "table-responsive")
+        self.assertContains(response, "Showing ")
         self.assertNotContains(response, ">Open<")
+
+    def test_invoice_customer_report_omits_dashboard_only_sections(self):
+        user = self._make_user("invoice_report_analysis_finance", FINANCE)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("invoice-customer-report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Finance Follow-up Required")
+        self.assertNotContains(response, "Invoice Attention")
+        self.assertNotContains(response, "Recent Invoices Requiring Action")
+        self.assertNotContains(response, "Failed Invoice Email Deliveries")
+        self.assertNotContains(response, "Invoice Status Distribution")
 
     def test_invoice_customer_report_filters_by_status_customer_and_month(self):
         user = self._make_user("invoice_report_filter_finance", FINANCE)
@@ -823,8 +836,31 @@ class InvoiceCustomerReportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, self.invoice_paid.invoice_number)
         self.assertNotContains(response, extra_invoice.invoice_number)
-        self.assertContains(response, "Review overdue invoices ->")
+        self.assertContains(response, "View outstanding invoices ->")
         self.assertContains(response, "Payment Date: 15 Jun 2026 to 15 Jun 2026")
+
+    def test_invoice_customer_report_limits_filtered_invoice_records_table(self):
+        user = self._make_user("invoice_report_limit_finance", FINANCE)
+        for index in range(30):
+            Invoice.objects.create(
+                invoice_number=f"INV-CUS-LIMIT-{index:02d}",
+                customer=self.customer_1,
+                status=Invoice.STATUS_SENT,
+                issue_date=timezone.localdate() - timedelta(days=index),
+                due_date=timezone.localdate() + timedelta(days=10),
+                currency="SGD",
+                subtotal=Decimal("50.00"),
+                tax_amount=Decimal("4.50"),
+                total_amount=Decimal("54.50"),
+            )
+
+        response = self._report_response(user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["detailed_invoices"]), 25)
+        self.assertTrue(response.context["has_more_detailed_invoices"])
+        self.assertContains(response, "Showing 25 of ")
+        self.assertContains(response, "Refine the filters to narrow the result set further.")
 
     def test_invoice_customer_report_hides_active_filter_badges_when_no_filters(self):
         user = self._make_user("invoice_report_no_badges_finance", FINANCE)
@@ -863,6 +899,51 @@ class InvoiceCustomerReportTests(TestCase):
         }
         self.assertEqual(status_counts["Draft"], 1)
         self.assertEqual(status_counts["Overdue"], 1)
+
+    def test_invoice_customer_report_outstanding_amount_uses_issued_unpaid_statuses_only(self):
+        user = self._make_user("invoice_report_outstanding_finance", FINANCE)
+        Invoice.objects.create(
+            invoice_number="INV-CUS-DRAFT-OUT",
+            customer=self.customer_2,
+            status=Invoice.STATUS_DRAFT,
+            issue_date=timezone.localdate() - timedelta(days=4),
+            due_date=timezone.localdate() + timedelta(days=4),
+            currency="SGD",
+            subtotal=Decimal("60.00"),
+            tax_amount=Decimal("5.40"),
+            total_amount=Decimal("65.40"),
+        )
+        Invoice.objects.create(
+            invoice_number="INV-CUS-VIEWED-OUT",
+            customer=self.customer_2,
+            status=Invoice.STATUS_VIEWED,
+            issue_date=timezone.localdate() - timedelta(days=3),
+            due_date=timezone.localdate() + timedelta(days=5),
+            currency="SGD",
+            subtotal=Decimal("40.00"),
+            tax_amount=Decimal("3.60"),
+            total_amount=Decimal("43.60"),
+        )
+        Invoice.objects.create(
+            invoice_number="INV-CUS-REFUNDED-OUT",
+            customer=self.customer_2,
+            status=Invoice.STATUS_REFUNDED,
+            issue_date=timezone.localdate() - timedelta(days=6),
+            due_date=timezone.localdate() - timedelta(days=1),
+            currency="SGD",
+            subtotal=Decimal("50.00"),
+            tax_amount=Decimal("4.50"),
+            total_amount=Decimal("54.50"),
+        )
+
+        response = self._report_response(user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["outstanding_amount"], Decimal("294.30"))
+        self.assertContains(
+            response,
+            "Issued unpaid invoice balance across sent, viewed, and overdue records in the filtered set.",
+        )
 
     def test_invoice_customer_report_searches_by_invoice_number_customer_name_and_email(self):
         user = self._make_user("invoice_report_search_finance", FINANCE)
@@ -1002,7 +1083,7 @@ class InvoiceCustomerReportTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["total_amount_collected_month"], Decimal("0.00"))
-        self.assertContains(response, "No payments were found for the selected filters.")
+        self.assertContains(response, "No invoices match the selected filters.")
 
     def test_invoice_customer_report_today_quick_range(self):
         user = self._make_user("invoice_report_today_quick_finance", FINANCE)

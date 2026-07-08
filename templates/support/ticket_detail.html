@@ -6,9 +6,9 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">{{ ticket.subject }}</h1>
-        <p class="page-subtitle">{{ ticket.get_category_display }} support request from {{ ticket.created_by.username|default:"Unknown user" }}</p>
+        <p class="page-subtitle">{{ ticket.get_category_display }} support request</p>
     </div>
-    <a href="{% url 'support-ticket-list' %}" class="btn btn-outline-secondary">Back</a>
+    <a href="{{ back_url }}" class="btn btn-outline-secondary">{{ back_label }}</a>
 </div>
 
 {% if ticket.is_sla_breached %}
@@ -18,26 +18,39 @@
 {% endif %}
 
 <div class="row g-3">
-    <div class="col-lg-7">
+    <div class="{% if can_manage %}col-lg-7{% else %}col-lg-8{% endif %}">
         <div class="card">
             <div class="card-header">Request Details</div>
             <div class="card-body">
                 <dl class="row mb-0">
+                    {% if show_requester_details %}
+                    <dt class="col-sm-4">Requester</dt>
+                    <dd class="col-sm-8">
+                        <div class="fw-semibold">{{ ticket.requester_name }}</div>
+                        <div class="text-muted small">Username: {{ ticket.created_by.username|default:"-" }}</div>
+                    </dd>
+                    <dt class="col-sm-4">Requester Email</dt>
+                    <dd class="col-sm-8">{{ ticket.requester_email|default:"-" }}</dd>
+                    <dt class="col-sm-4">Requester Role</dt>
+                    <dd class="col-sm-8">{{ ticket.requester_role_display }}</dd>
+                    {% endif %}
                     <dt class="col-sm-4">Status</dt>
                     <dd class="col-sm-8">{{ ticket.get_status_display }}</dd>
                     <dt class="col-sm-4">Priority</dt>
                     <dd class="col-sm-8">{{ ticket.get_priority_display }}</dd>
-                    <dt class="col-sm-4">Reference</dt>
+                    <dt class="col-sm-4">Related Invoice / Reference</dt>
                     <dd class="col-sm-8">{{ ticket.related_reference|default:"-" }}</dd>
+                    {% if can_manage %}
                     <dt class="col-sm-4">Assigned To</dt>
                     <dd class="col-sm-8">{{ ticket.assigned_display }}</dd>
+                    {% endif %}
                     <dt class="col-sm-4">Created</dt>
                     <dd class="col-sm-8">{{ ticket.created_at|date:"Y-m-d H:i" }}</dd>
                     <dt class="col-sm-4">Resolved</dt>
                     <dd class="col-sm-8">{{ ticket.resolved_at|date:"Y-m-d H:i"|default:"-" }}</dd>
                 </dl>
                 <hr>
-                <h2 class="section-heading mb-2">Message</h2>
+                <h2 class="section-heading mb-2">Message Submitted</h2>
                 <p class="mb-0" style="white-space: pre-wrap;">{{ ticket.message }}</p>
                 {% if ticket.resolution_note %}
                 <hr>

@@ -27,6 +27,7 @@ def _customer_support_chat_options(user):
         )
         references = [
             {
+                "id": invoice.id,
                 "label": f"{invoice.invoice_number} - {invoice.currency} {invoice.total_amount}",
                 "value": invoice.invoice_number,
                 "meta": invoice.get_status_display(),

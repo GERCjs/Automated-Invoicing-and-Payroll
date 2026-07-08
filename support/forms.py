@@ -55,3 +55,18 @@ class SupportTicketUpdateForm(forms.ModelForm):
         self.fields["assigned_role"].choices = [("", "Unassigned"), *SupportTicket.ASSIGNED_ROLE_CHOICES]
         if actor_role not in {SUPERADMIN, ADMIN}:
             self.fields["assigned_role"].disabled = True
+
+
+class CustomerInvoiceSupportTicketForm(forms.ModelForm):
+    class Meta:
+        model = SupportTicket
+        fields = ("subject", "message")
+        widgets = {
+            "subject": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "What do you need help with on this invoice?",
+                }
+            ),
+            "message": forms.Textarea(attrs={"class": "form-control", "rows": 5}),
+        }

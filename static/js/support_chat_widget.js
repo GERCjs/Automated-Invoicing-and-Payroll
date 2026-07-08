@@ -12,6 +12,7 @@
     const submitButton = widget.querySelector("[data-support-chat-submit]");
     const categoryInput = widget.querySelector("[data-support-chat-category]");
     const issueInput = widget.querySelector("[data-support-chat-issue]");
+    const invoiceIdInput = widget.querySelector("[data-support-chat-invoice-id]");
     const referenceInput = widget.querySelector("[data-support-chat-reference]");
     const optionsScript = widget.querySelector("#support-chat-options");
     const chatOptions = optionsScript ? JSON.parse(optionsScript.textContent) : { options: [], references: [] };
@@ -62,6 +63,7 @@
         activeOption = null;
         categoryInput.value = "";
         issueInput.value = "";
+        invoiceIdInput.value = "";
         referenceInput.value = "";
         messageInput.placeholder = "Write a message...";
     }
@@ -77,6 +79,7 @@
             const references = option.referenceKind ? chatOptions.references || [] : [];
             if (references.length) {
                 appendQuickReplies(option.prompt || "Which record is this about?", references, (reference) => {
+                    invoiceIdInput.value = reference.id || "";
                     referenceInput.value = reference.value || "";
                     appendMessage(reference.label, "user");
                     appendMessage(option.detailPrompt || "Tell us more about the issue.", "bot");
@@ -86,9 +89,11 @@
                 return;
             }
 
-            const noReferencePrompt = option.referenceKind
-                ? "I could not find linked records to show here. Type the reference in your message if you have it."
-                : option.prompt || "Tell us more about the issue.";
+            const noReferencePrompt = option.referenceKind === "invoice"
+                ? "I could not find a linked invoice to attach here. Open the invoice from My Invoices and use Ask About This Invoice."
+                : option.referenceKind
+                    ? "I could not find linked records to show here."
+                    : option.prompt || "Tell us more about the issue.";
             appendMessage(noReferencePrompt, "bot");
             messageInput.placeholder = option.detailPrompt || "Write a message...";
             messageInput.focus();

@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% load static %}
 {% load humanize %}
 
 {% block title %}Invoice Dashboard{% endblock %}
@@ -10,7 +9,7 @@
     <section class="report-header report-section">
         <div>
             <h1 class="page-title">Invoice Dashboard</h1>
-            <p class="page-subtitle">Use this dashboard to track collections, identify invoices needing follow-up, and keep daily invoicing work organised.</p>
+            <p class="page-subtitle">Use this dashboard to manage daily invoice work, review follow-up priorities, and act on delivery or import issues.</p>
             <div class="report-header-meta">
                 <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
                 <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
@@ -42,7 +41,7 @@
                     <div class="card-body">
                         <div class="report-kpi-label">Outstanding Amount</div>
                         <div class="report-kpi-value">S${{ outstanding_amount|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">Draft, sent, viewed, and overdue invoices still waiting for payment.</div>
+                        <div class="small text-muted">Sent, viewed, and overdue invoices still waiting for payment.</div>
                         <a href="{% url 'invoice-list' %}?status=outstanding" class="report-kpi-link">View outstanding invoices</a>
                     </div>
                 </div>
@@ -52,7 +51,7 @@
                     <div class="card-body">
                         <div class="report-kpi-label">Overdue Amount</div>
                         <div class="report-kpi-value">S${{ overdue_amount|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">Invoices past due under the current overdue rules and needing collection follow-up.</div>
+                        <div class="small text-muted">Invoices already past due and needing immediate collection follow-up.</div>
                         <a href="{% url 'invoice-list' %}?status=overdue" class="report-kpi-link">View overdue invoices</a>
                     </div>
                 </div>
@@ -60,10 +59,10 @@
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
                     <div class="card-body">
-                        <div class="report-kpi-label">Total Invoices</div>
-                        <div class="report-kpi-value">{{ total_invoices }}</div>
-                        <div class="small text-muted">All invoices currently tracked across draft, active, paid, overdue, and refunded states.</div>
-                        <a href="{% url 'invoice-list' %}" class="report-kpi-link">View all invoices</a>
+                        <div class="report-kpi-label">Invoices Requiring Follow-up</div>
+                        <div class="report-kpi-value">{{ invoices_requiring_follow_up_count }}</div>
+                        <div class="small text-muted">Draft, pending, viewed, and overdue invoices that still need Finance action.</div>
+                        <a href="{% url 'invoice-list' %}?status=outstanding" class="report-kpi-link">Open follow-up invoices</a>
                     </div>
                 </div>
             </div>
@@ -85,12 +84,12 @@
     <section class="report-section report-detail-links">
         <div>
             <h2 class="section-heading mb-2">Related Reports</h2>
-            <div class="text-muted small">Open deeper invoice or payment reporting without crowding the main dashboard actions.</div>
+            <div class="text-muted small">Use the analytical reports when you need deeper customer or payment trend analysis.</div>
         </div>
         <div class="report-detail-links-list">
             <a href="{% url 'invoice-customer-report' %}" class="report-link-chip">
                 <span class="report-summary-label">Invoice / Customer Report</span>
-                <span class="report-summary-note">Collections, overdue customers, and customer-level invoice follow-up.</span>
+                <span class="report-summary-note">Collection trends, overdue ageing, customer balances, and filtered invoice analysis.</span>
             </a>
             <a href="{% url 'payment-stripe-report' %}" class="report-link-chip">
                 <span class="report-summary-label">Payment Report</span>
@@ -103,7 +102,7 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span>Invoice Attention</span>
-                <span class="text-muted small">Focus here first when collections, drafts, email delivery, or upload quality need action.</span>
+                <span class="text-muted small">Review this queue first when collection, delivery, or import work needs action.</span>
             </div>
             <div class="card-body p-0">
                 {% if attention_items %}
@@ -141,66 +140,10 @@
     </section>
 
     <section class="report-section">
-        <h2 class="section-heading mb-3">Useful Charts</h2>
-        <div class="row g-3">
-            <div class="col-12 col-xl-6">
-                <div class="report-chart-card">
-                    <div class="report-chart-header">Monthly Collection Trend</div>
-                    <div class="report-chart-body">
-                        <canvas id="invoiceCollectionTrendChart" class="report-chart-canvas" aria-label="Monthly collection trend chart" role="img"></canvas>
-                        <div id="invoiceCollectionTrendChartEmpty" class="report-chart-empty d-none">No collection trend data is available yet.</div>
-                    </div>
-                    <div class="px-3 text-muted small">Shows collected invoice amounts by payment month using successful payment records with a real paid date.</div>
-                    {% if collection_chart_summary.has_data %}
-                    <div class="report-chart-summary">
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">Current month</span>
-                            <span class="report-chart-stat-value">S${{ collected_month|floatformat:2|intcomma }}</span>
-                        </div>
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">6-month total</span>
-                            <span class="report-chart-stat-value">S${{ collection_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
-                        </div>
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">Highest month</span>
-                            <span class="report-chart-stat-value">{{ collection_chart_summary.peak_label }}: S${{ collection_chart_summary.peak_value|floatformat:2|intcomma }}</span>
-                        </div>
-                    </div>
-                    {% else %}
-                    <div class="report-chart-summary">
-                        <div class="report-chart-stat w-100">
-                            <span class="report-chart-stat-value">No collection trend data is available yet.</span>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="col-12 col-xl-6">
-                <div class="report-chart-card">
-                    <div class="report-chart-header">Invoice Status Breakdown</div>
-                    <div class="report-chart-body">
-                        <canvas id="invoiceStatusBreakdownChart" class="report-chart-canvas" aria-label="Invoice status breakdown chart" role="img"></canvas>
-                        <div id="invoiceStatusBreakdownChartEmpty" class="report-chart-empty d-none">No invoice status data is available yet.</div>
-                    </div>
-                    <div class="px-3 text-muted small">Shows how invoices are currently distributed across active, paid, overdue, and refunded states.</div>
-                    <div class="report-chart-summary invoice-dashboard-status-summary">
-                        {% for item in status_chart_summary %}
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">{{ item.label }}</span>
-                            <span class="report-chart-stat-value">{{ item.value }}</span>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="report-section">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span>Recent Invoices Requiring Action</span>
-                <span class="text-muted small">Draft, pending, viewed, and overdue invoices ordered by due date.</span>
+                <span class="text-muted small">{{ recent_action_scope_note }}</span>
             </div>
             <div class="card-body p-0">
                 {% if recent_action_invoices %}
@@ -214,7 +157,7 @@
                                 <th>Issue Date</th>
                                 <th>Due Date</th>
                                 <th class="text-end">Total</th>
-                                <th class="text-end">Action</th>
+                                <th class="text-end">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -238,15 +181,20 @@
                                 <td class="text-end">S${{ invoice.total_amount|floatformat:2|intcomma }}</td>
                                 <td class="text-end">
                                     <div class="invoice-dashboard-table-actions">
-                                        <a href="{% url 'invoice-detail' invoice.pk %}" class="report-link">View Invoice</a>
                                         {% if invoice.status == "draft" %}
                                         <a href="{% url 'invoice-edit' invoice.pk %}" class="report-link">Edit Draft</a>
-                                        {% endif %}
-                                        {% if invoice.status == "draft" or invoice.status == "sent" or invoice.status == "viewed" or invoice.status == "overdue" %}
                                         <form method="post" action="{% url 'invoice-send-email' invoice.pk %}" class="d-inline">
                                             {% csrf_token %}
                                             <button type="submit" class="btn btn-link btn-sm invoice-dashboard-action-button">Send Invoice</button>
                                         </form>
+                                        {% elif invoice.status == "sent" or invoice.status == "viewed" or invoice.status == "overdue" %}
+                                        <a href="{% url 'invoice-detail' invoice.pk %}" class="report-link">View Invoice</a>
+                                        <form method="post" action="{% url 'invoice-send-email' invoice.pk %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-link btn-sm invoice-dashboard-action-button">Send Reminder</button>
+                                        </form>
+                                        {% else %}
+                                        <a href="{% url 'invoice-detail' invoice.pk %}" class="report-link">View Invoice</a>
                                         {% endif %}
                                     </div>
                                 </td>
@@ -262,71 +210,4 @@
         </div>
     </section>
 </div>
-
-{{ collection_trend_labels|json_script:"invoice-collection-trend-labels-data" }}
-{{ monthly_collection_values|json_script:"invoice-collection-trend-values-data" }}
-{{ invoice_status_labels|json_script:"invoice-status-labels-data" }}
-{{ invoice_status_values|json_script:"invoice-status-values-data" }}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
-<script src="{% static 'js/report_charts.js' %}"></script>
-<script>
-    (function () {
-        var collectionTrendLabels = window.ReportCharts.parseJsonScript("invoice-collection-trend-labels-data", []);
-        var collectionTrendValues = window.ReportCharts.parseJsonScript("invoice-collection-trend-values-data", []);
-        window.ReportCharts.renderChart({
-            canvasId: "invoiceCollectionTrendChart",
-            emptyStateId: "invoiceCollectionTrendChartEmpty",
-            type: "line",
-            labels: collectionTrendLabels,
-            datasets: [
-                {
-                    label: "Collected Amount (SGD)",
-                    data: collectionTrendValues,
-                    borderColor: "#198754",
-                    backgroundColor: "rgba(25, 135, 84, 0.18)",
-                    borderWidth: 2,
-                    tension: 0.28,
-                    fill: true
-                }
-            ],
-            options: {
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            },
-            emptyText: "No collection trend data is available yet."
-        });
-
-        var invoiceStatusLabels = window.ReportCharts.parseJsonScript("invoice-status-labels-data", []);
-        var invoiceStatusValues = window.ReportCharts.parseJsonScript("invoice-status-values-data", []);
-        window.ReportCharts.renderChart({
-            canvasId: "invoiceStatusBreakdownChart",
-            emptyStateId: "invoiceStatusBreakdownChartEmpty",
-            type: "doughnut",
-            labels: invoiceStatusLabels,
-            datasets: [
-                {
-                    label: "Invoice Count",
-                    data: invoiceStatusValues,
-                    backgroundColor: ["#475569", "#f59e0b", "#ff7f73", "#198754", "#dc3545", "#8b5cf6"],
-                    borderColor: "#ffffff",
-                    borderWidth: 2
-                }
-            ],
-            options: {
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: "bottom" }
-                }
-            },
-            emptyText: "No invoice status data is available yet."
-        });
-    })();
-</script>
 {% endblock %}

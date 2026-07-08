@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}Support Tickets | Automated Invoicing & Payroll{% endblock %}
+{% block title %}{{ page_title }} | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <div>
-        <h1 class="page-title">{% if can_handle_tickets %}Support Tickets{% else %}My Support Requests{% endif %}</h1>
-        <p class="page-subtitle">Track invoice, payment, payroll, and account support requests. Tickets open for {{ support_ticket_sla_days }} days are highlighted.</p>
+        <h1 class="page-title">{{ page_title }}</h1>
+        <p class="page-subtitle">{{ page_subtitle }}</p>
     </div>
 </div>
 
@@ -48,7 +48,7 @@
             </div>
             <div class="col-md-4">
                 <label class="form-label small">Search</label>
-                <input type="search" name="q" value="{{ search_query }}" class="form-control form-control-sm" placeholder="Subject, reference, requester">
+                <input type="search" name="q" value="{{ search_query }}" class="form-control form-control-sm" placeholder="{% if show_requester_details %}Subject, reference, requester{% else %}Subject, message, reference{% endif %}">
             </div>
             <div class="col-md-2">
                 <button type="submit" class="btn btn-sm btn-primary w-100">Filter</button>
@@ -60,26 +60,43 @@
             <thead class="table-light">
                 <tr>
                     <th>Created</th>
+                    {% if show_requester_details %}
+                    <th>Requester</th>
                     <th>Category</th>
+                    {% endif %}
                     <th>Subject</th>
+                    <th>Related Invoice / Reference</th>
                     <th>Status</th>
+                    {% if show_assignment %}
                     <th>Response Target</th>
+                    {% endif %}
                     <th>Priority</th>
+                    {% if show_assignment %}
                     <th>Assigned To</th>
+                    {% endif %}
                 </tr>
             </thead>
             <tbody>
                 {% for ticket in tickets %}
-                <tr class="support-ticket-row {% if ticket.is_sla_breached %}support-ticket-overdue{% endif %}" data-ticket-url="{% url 'support-ticket-detail' ticket.id %}" role="link" tabindex="0">
+                <tr class="support-ticket-row {% if ticket.is_sla_breached %}support-ticket-overdue{% endif %}" data-ticket-url="{% url detail_url_name ticket.id %}" role="link" tabindex="0">
                     <td class="text-nowrap">{{ ticket.created_at|date:"Y-m-d H:i" }}</td>
+                    {% if show_requester_details %}
+                    <td>
+                        <div class="fw-semibold">{{ ticket.requester_name }}</div>
+                        <div class="text-muted small">{{ ticket.created_by.username|default:"-" }}</div>
+                        {% if ticket.requester_email %}
+                        <div class="text-muted small">{{ ticket.requester_email }}</div>
+                        {% endif %}
+                        <div class="text-muted small">{{ ticket.requester_role_display }}</div>
+                    </td>
                     <td>{{ ticket.get_category_display }}</td>
+                    {% endif %}
                     <td>
                         <span class="fw-semibold">{{ ticket.subject }}</span>
-                        {% if ticket.related_reference %}
-                        <div class="text-muted small">{{ ticket.related_reference }}</div>
-                        {% endif %}
                     </td>
+                    <td>{{ ticket.related_reference|default:"-" }}</td>
                     <td>{{ ticket.get_status_display }}</td>
+                    {% if show_assignment %}
                     <td>
                         {% if ticket.is_resolved %}
                         <span class="badge bg-success">Resolved</span>
@@ -89,11 +106,18 @@
                         <span class="text-muted small">{{ ticket.unresolved_age_days }}d open</span>
                         {% endif %}
                     </td>
+                    {% endif %}
                     <td>{{ ticket.get_priority_display }}</td>
+                    {% if show_assignment %}
                     <td>{{ ticket.assigned_display }}</td>
+                    {% endif %}
                 </tr>
                 {% empty %}
-                <tr><td colspan="7" class="text-center py-4"><div class="empty-state">No support tickets match the filters.</div></td></tr>
+                <tr>
+                    <td colspan="{% if show_requester_details and show_assignment %}9{% elif show_requester_details %}7{% elif show_assignment %}7{% else %}5{% endif %}" class="text-center py-4">
+                        <div class="empty-state">No support tickets match the filters.</div>
+                    </td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>
