@@ -19,6 +19,8 @@ from django.urls import reverse
 from django.utils import timezone
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
+from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 
 from accounts.permissions import get_user_role, role_required
@@ -1752,26 +1754,68 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     total_deductions = deductions + cpf_contribution
     employer_cpf_contribution = _calculate_employer_cpf_for_record(payslip_record)
     month_year = payslip_record.payment_date.strftime("%B %Y")
+    border_color = colors.HexColor("#243041")
+    divider_color = colors.HexColor("#CBD5E1")
+    muted_text = colors.HexColor("#5B6677")
+    heading_text = colors.HexColor("#132238")
+    accent_fill = colors.HexColor("#F7F9FC")
+    net_fill = colors.HexColor("#EEF6F1")
+    currency_prefix = "S$"
 
     # Header
     header_h = 34 * mm
-    pdf.rect(margin, top - header_h, width, header_h)
+    pdf.setStrokeColor(colors.white)
+    pdf.setLineWidth(0)
+    pdf.roundRect(margin, top - header_h, width, header_h, 4 * mm, stroke=0, fill=0)
+    logo_dir = settings.BASE_DIR / "media" / "invoice_branding" / "logos"
+    logo_files = sorted(path for path in logo_dir.iterdir() if path.is_file()) if logo_dir.exists() else []
+    logo_path = logo_files[0] if logo_files else None
+    text_x = margin + 4 * mm
+    if logo_path is not None:
+        try:
+            logo_reader = ImageReader(str(logo_path))
+            image_width, image_height = logo_reader.getSize()
+            logo_height = 14 * mm
+            scale_ratio = logo_height / float(image_height)
+            logo_width = image_width * scale_ratio
+            logo_x = margin + 4 * mm
+            logo_y = top - 16 * mm
+            pdf.drawImage(
+                logo_reader,
+                logo_x,
+                logo_y,
+                width=logo_width,
+                height=logo_height,
+                preserveAspectRatio=True,
+                mask="auto",
+            )
+            text_x = logo_x + logo_width + (5 * mm)
+        except Exception:
+            text_x = margin + 4 * mm
+    pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(margin + 4 * mm, top - 10 * mm, "Vaniday Pte Ltd - Payslip")
-    pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(margin + 4 * mm, top - 21 * mm, f"{payslip_record.employee_name} for {month_year}")
+    pdf.drawString(text_x, top - 10 * mm, "Vaniday Pte Ltd - Payslip")
+    pdf.setFillColor(muted_text)
+    pdf.setFont("Helvetica", 8.5)
+    pdf.drawString(text_x, top - 15.8 * mm, "Automated Invoicing & Payroll")
+    pdf.setFillColor(heading_text)
+    pdf.setFont("Helvetica-Bold", 13.5)
+    pdf.drawString(text_x, top - 22.5 * mm, f"{payslip_record.employee_name} for {month_year}")
 
     # Employee block
     info_top = top - header_h
     info_h = 24 * mm
-    pdf.rect(margin, info_top - info_h, width, info_h)
+    pdf.setFillColor(accent_fill)
+    pdf.roundRect(margin, info_top - info_h, width, info_h, 3 * mm, stroke=0, fill=1)
     label_x = margin + 4 * mm
     value_x = margin + 32 * mm
     employee_y = info_top - 8.5 * mm
     payment_y = info_top - 17 * mm
+    pdf.setFillColor(muted_text)
     pdf.setFont("Helvetica-Bold", 11)
     pdf.drawString(label_x, employee_y, "Employee:")
     pdf.drawString(label_x, payment_y, "Payment Date:")
+    pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica", 11)
     pdf.drawString(value_x, employee_y, payslip_record.employee_name)
     pdf.drawString(value_x, payment_y, payslip_record.payment_date.strftime("%d-%m-%Y"))
@@ -1780,11 +1824,17 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     table_top = info_top - info_h - 4 * mm
     table_h = 86 * mm
     half = width / 2
-    pdf.rect(margin, table_top - table_h, width, table_h)
+    pdf.setFillColor(colors.white)
+    pdf.roundRect(margin, table_top - table_h, width, table_h, 3 * mm, stroke=0, fill=1)
+    pdf.setStrokeColor(divider_color)
+    pdf.setLineWidth(0.9)
     pdf.line(margin + half, table_top, margin + half, table_top - table_h)
     head_h = 14 * mm
+    pdf.setFillColor(accent_fill)
+    pdf.roundRect(margin, table_top - head_h, width, head_h, 0, stroke=0, fill=1)
     pdf.line(margin, table_top - head_h, margin + width, table_top - head_h)
 
+    pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica-Bold", 11)
     pdf.drawString(margin + 3 * mm, table_top - 9 * mm, "Earnings")
     pdf.drawString(margin + half - 28 * mm, table_top - 9 * mm, "Amount")
@@ -1793,56 +1843,70 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
 
     left_amount_x = margin + half - 4 * mm
     right_amount_x = margin + width - 4 * mm
-    y = table_top - head_h - 7 * mm
+    y = table_top - head_h - 7.5 * mm
+    pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica", 10.5)
 
     pdf.drawString(margin + 3 * mm, y, "Basic salary")
-    pdf.drawRightString(left_amount_x, y, f"$ {basic_salary:.2f}")
+    pdf.drawRightString(left_amount_x, y, f"{currency_prefix} {basic_salary:.2f}")
     y -= 8 * mm
     pdf.drawString(margin + 3 * mm, y, "Physical products commission")
-    pdf.drawRightString(left_amount_x, y, f"$ {physical_products_commission:.2f}")
+    pdf.drawRightString(left_amount_x, y, f"{currency_prefix} {physical_products_commission:.2f}")
     y -= 8 * mm
     pdf.drawString(margin + 3 * mm, y, "Credit commission")
-    pdf.drawRightString(left_amount_x, y, f"$ {credit_commission:.2f}")
+    pdf.drawRightString(left_amount_x, y, f"{currency_prefix} {credit_commission:.2f}")
     y -= 8 * mm
     pdf.drawString(margin + 3 * mm, y, "Services commission")
-    pdf.drawRightString(left_amount_x, y, f"$ {services_commission:.2f}")
+    pdf.drawRightString(left_amount_x, y, f"{currency_prefix} {services_commission:.2f}")
 
-    y2 = table_top - head_h - 7 * mm
+    y2 = table_top - head_h - 7.5 * mm
     pdf.drawString(margin + half + 3 * mm, y2, "Loan deduction")
-    pdf.drawRightString(right_amount_x, y2, f"$ {loan_deduction:.2f}")
+    pdf.drawRightString(right_amount_x, y2, f"{currency_prefix} {loan_deduction:.2f}")
     y2 -= 8 * mm
     pdf.drawString(margin + half + 3 * mm, y2, "Other deductions")
-    pdf.drawRightString(right_amount_x, y2, f"$ {other_deductions:.2f}")
+    pdf.drawRightString(right_amount_x, y2, f"{currency_prefix} {other_deductions:.2f}")
     y2 -= 8 * mm
     pdf.drawString(margin + half + 3 * mm, y2, "Employee CPF")
-    pdf.drawRightString(right_amount_x, y2, f"$ {cpf_contribution:.2f}")
+    pdf.drawRightString(right_amount_x, y2, f"{currency_prefix} {cpf_contribution:.2f}")
 
     totals_line = table_top - table_h + 14 * mm
     pdf.line(margin, totals_line, margin + width, totals_line)
+    pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(margin + 3 * mm, totals_line - 9 * mm, "Total earnings:")
-    pdf.drawRightString(left_amount_x, totals_line - 9 * mm, f"$ {total_earnings:.2f}")
+    pdf.drawRightString(left_amount_x, totals_line - 9 * mm, f"{currency_prefix} {total_earnings:.2f}")
     pdf.drawString(margin + half + 3 * mm, totals_line - 9 * mm, "Total deductions:")
-    pdf.drawRightString(right_amount_x, totals_line - 9 * mm, f"$ {total_deductions:.2f}")
+    pdf.drawRightString(right_amount_x, totals_line - 9 * mm, f"{currency_prefix} {total_deductions:.2f}")
 
     # Net pay block
     net_top = table_top - table_h
     net_h = 20 * mm
-    pdf.rect(margin, net_top - net_h, width, net_h)
+    pdf.setFillColor(net_fill)
+    pdf.roundRect(margin, net_top - net_h, width, net_h, 3 * mm, stroke=0, fill=1)
+    pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica-Bold", 12)
-    pdf.drawString(margin + half + 3 * mm, net_top - 8 * mm, "Net pay")
-    pdf.setFont("Helvetica", 12)
-    pdf.drawRightString(right_amount_x, net_top - 8 * mm, f"$ {net_salary:.2f}")
+    pdf.drawString(margin + 5 * mm, net_top - 8 * mm, "Net pay")
+    pdf.setFont("Helvetica-Bold", 15)
+    pdf.drawRightString(right_amount_x, net_top - 8 * mm, f"{currency_prefix} {net_salary:.2f}")
+    pdf.setFillColor(muted_text)
     pdf.setFont("Helvetica", 9)
-    pdf.drawRightString(right_amount_x, net_top - 15 * mm, f"Employer CPF: $ {employer_cpf_contribution:.2f}")
+    pdf.drawRightString(right_amount_x, net_top - 15 * mm, f"Employer CPF: {currency_prefix} {employer_cpf_contribution:.2f}")
 
     # Note
     note_top = net_top - net_h
-    note_h = 11 * mm
-    pdf.rect(margin, note_top - note_h, width, note_h)
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(margin + 3 * mm, note_top - 7 * mm, "Note:")
+    note_h = 13 * mm
+    pdf.setFillColor(colors.white)
+    pdf.roundRect(margin, note_top - note_h, width, note_h, 3 * mm, stroke=0, fill=1)
+    pdf.setFillColor(heading_text)
+    pdf.setFont("Helvetica-Bold", 9.5)
+    pdf.drawString(margin + 3 * mm, note_top - 6.5 * mm, "Note:")
+    pdf.setFillColor(muted_text)
+    pdf.setFont("Helvetica", 8.5)
+    pdf.drawString(
+        margin + 18 * mm,
+        note_top - 6.5 * mm,
+        "This is a computer-generated payslip. For payroll enquiries, please contact HR.",
+    )
 
     pdf.showPage()
     pdf.save()
