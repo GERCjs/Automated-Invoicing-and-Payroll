@@ -13,7 +13,7 @@ from imports.models import ImportJob
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
 from payments.models import PaymentRecord
-from payroll.models import Employee
+from payroll.models import Employee, PayrollRecord
 from .models import AuditLog
 
 User = get_user_model()
@@ -219,6 +219,159 @@ class CoreCollectionReportingTests(TestCase):
         self.assertEqual(response.context["collected_this_month"], Decimal("0.00"))
         self.assertEqual(response.context["outstanding_vs_collected_values"][2], 87.2)
 
+    def test_management_dashboard_separates_drafts_from_issued_outstanding(self):
+        draft_invoice = Invoice.objects.create(
+            invoice_number="INV-CORE-DRAFT",
+            customer=self.customer,
+            status=Invoice.STATUS_DRAFT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("50.00"),
+            tax_amount=Decimal("4.50"),
+            total_amount=Decimal("54.50"),
+        )
+        issued_invoice = Invoice.objects.create(
+            invoice_number="INV-CORE-ISSUED",
+            customer=self.customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("9.00"),
+            total_amount=Decimal("109.00"),
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["invoice_outstanding"], issued_invoice.total_amount)
+        self.assertEqual(response.context["draft_invoice_amount"], draft_invoice.total_amount)
+        self.assertContains(response, "Issued Outstanding")
+        self.assertContains(response, "Draft Invoice Value")
+        self.assertContains(response, "Drafts are tracked separately.")
+        self.assertContains(response, "S$109.00")
+        self.assertContains(response, "S$54.50")
+
+    def test_management_dashboard_keeps_payroll_burden_off_ceo_snapshot(self):
+        today = timezone.localdate()
+        invoice = Invoice.objects.create(
+            invoice_number="INV-CORE-NO-PAYROLL-KPI",
+            customer=self.customer,
+            status=Invoice.STATUS_PAID,
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("200.00"),
+            tax_amount=Decimal("0.00"),
+            total_amount=Decimal("200.00"),
+        )
+        PaymentRecord.objects.create(
+            invoice=invoice,
+            payment_reference="PAY-CORE-NO-PAYROLL-KPI",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=Decimal("200.00"),
+            currency="SGD",
+            paid_at=self._aware_datetime(today),
+        )
+        PayrollRecord.objects.create(
+            employee_name="Cash Proxy Employee",
+            employee_id="CORE-CASH-EMP",
+            basic_salary=Decimal("120.00"),
+            allowances=Decimal("30.00"),
+            deductions=Decimal("10.00"),
+            cpf_contribution=Decimal("20.00"),
+            net_salary=Decimal("100.00"),
+            payment_date=today,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["collected_this_month"], Decimal("200.00"))
+        self.assertContains(response, "CEO Health Snapshot")
+        self.assertContains(response, "Payroll details stay in the Payroll Report.")
+        self.assertNotContains(response, "Payroll Burden This Month")
+        self.assertNotContains(response, "Cash After Payroll")
+        self.assertNotContains(response, "Collections minus payroll burden")
+
+    def test_management_dashboard_shows_previous_month_collection_comparison(self):
+        today = timezone.localdate()
+        previous_month_start = self._month_start(1)
+        previous_payment_day = previous_month_start + timedelta(days=5)
+        current_invoice = Invoice.objects.create(
+            invoice_number="INV-CORE-CURRENT-MONTH",
+            customer=self.customer,
+            status=Invoice.STATUS_PAID,
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("0.00"),
+            total_amount=Decimal("100.00"),
+        )
+        previous_invoice = Invoice.objects.create(
+            invoice_number="INV-CORE-PREV-MONTH",
+            customer=self.customer,
+            status=Invoice.STATUS_PAID,
+            issue_date=previous_payment_day,
+            due_date=previous_payment_day + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("70.00"),
+            tax_amount=Decimal("0.00"),
+            total_amount=Decimal("70.00"),
+        )
+        PaymentRecord.objects.create(
+            invoice=current_invoice,
+            payment_reference="PAY-CORE-CURRENT-MONTH",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=Decimal("100.00"),
+            currency="SGD",
+            paid_at=self._aware_datetime(today),
+        )
+        PaymentRecord.objects.create(
+            invoice=previous_invoice,
+            payment_reference="PAY-CORE-PREV-MONTH",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=Decimal("70.00"),
+            currency="SGD",
+            paid_at=self._aware_datetime(previous_payment_day),
+        )
+        PayrollRecord.objects.create(
+            employee_name="Current Payroll Employee",
+            employee_id="CORE-CUR-PAY",
+            basic_salary=Decimal("20.00"),
+            allowances=Decimal("10.00"),
+            deductions=Decimal("0.00"),
+            cpf_contribution=Decimal("0.00"),
+            net_salary=Decimal("30.00"),
+            payment_date=today,
+        )
+        PayrollRecord.objects.create(
+            employee_name="Previous Payroll Employee",
+            employee_id="CORE-PREV-PAY",
+            basic_salary=Decimal("40.00"),
+            allowances=Decimal("10.00"),
+            deductions=Decimal("0.00"),
+            cpf_contribution=Decimal("0.00"),
+            net_salary=Decimal("50.00"),
+            payment_date=previous_payment_day,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["collected_previous_month"], Decimal("70.00"))
+        self.assertContains(response, response.context["previous_month_label"])
+        self.assertContains(response, "S$30.00 higher than")
+
     def test_management_dashboard_shows_purpose_text_clear_links_and_empty_attention_state(self):
         self.client.force_login(self.admin_user)
 
@@ -227,29 +380,36 @@ class CoreCollectionReportingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(
             response,
-            "Review company collections, outstanding invoices, payroll costs, refunds and important security concerns.",
+            "CEO view of cash collection, issued receivables, operational risk, and drill-down reports.",
         )
         self.assertContains(response, "Reporting period:")
         self.assertContains(response, "Last updated:")
+        self.assertContains(response, "CEO Health Snapshot")
         self.assertContains(response, "Collected This Month")
-        self.assertContains(response, "Outstanding Amount")
-        self.assertContains(response, "Payroll Cost This Month")
-        self.assertContains(response, "Important Security Alerts")
+        self.assertContains(response, "Issued Outstanding")
+        self.assertContains(response, "Operational Risk Items")
         self.assertContains(response, "Overdue Amount")
-        self.assertContains(response, "Refunded Amount")
+        self.assertContains(response, "Draft Invoice Value")
+        self.assertContains(response, "Payment Issues")
         self.assertContains(response, "Failed Email Deliveries")
         self.assertContains(response, "Import Issues")
+        self.assertContains(response, "Top Collection Risks")
+        self.assertContains(response, "No issued unpaid customer balances were found.")
         self.assertContains(response, "Management Attention")
         self.assertContains(response, "View Finance Report")
         self.assertContains(response, "View Payment Report")
-        self.assertContains(response, "View Payroll Report")
-        self.assertContains(response, "View Security Report")
+        self.assertContains(response, "Payroll Report")
+        self.assertContains(response, "Security Report")
         self.assertContains(response, "No urgent management issues were found for the current reporting period.")
+        self.assertContains(response, "Collection Trend")
+        self.assertContains(response, "Payroll details stay in the Payroll Report.")
         self.assertContains(response, "management-dashboard-container")
         self.assertContains(response, "report-kpi-grid")
         self.assertContains(response, "report-chart-summary")
         self.assertContains(response, "No collection trend data is available yet.")
-        self.assertContains(response, "No payroll trend data is available yet.")
+        self.assertNotContains(response, "Payroll Burden This Month")
+        self.assertNotContains(response, "Cash After Payroll")
+        self.assertNotContains(response, "Monthly Collections vs Payroll")
         self.assertNotContains(response, "Report Centre")
         self.assertNotContains(response, "Detailed Reports")
         self.assertContains(response, "S$0.00")
@@ -304,6 +464,9 @@ class CoreCollectionReportingTests(TestCase):
         self.assertContains(response, "Security")
         self.assertContains(response, "Email")
         self.assertContains(response, "Imports")
+        self.assertContains(response, "Top Collection Risks")
+        self.assertContains(response, self.customer.name)
+        self.assertContains(response, "Review customer")
         self.assertContains(response, f'{reverse("invoice-list")}?status=overdue')
         self.assertContains(response, f'{reverse("email-delivery-log-list")}?status=failed')
         self.assertContains(response, reverse("admin-security-report"))
@@ -472,21 +635,21 @@ class CoreCollectionReportingTests(TestCase):
             (
                 superadmin_user,
                 reverse("dashboard"),
-                ["Management Dashboard", "Invoicing", "Payments", "Admin Console"],
+                ["Management Dashboard", "Invoicing", "Reports", "Admin Console"],
                 ["My Payslips", "My Invoices", "Finance Dashboard"],
                 [],
             ),
             (
                 admin_user,
                 reverse("dashboard"),
-                ["Management Dashboard", "Invoicing", "Payments", "Admin Console"],
+                ["Management Dashboard", "Invoicing", "Reports", "Admin Console"],
                 ["My Payslips", "My Invoices", "Finance Dashboard"],
                 [],
             ),
             (
                 finance_user,
                 reverse("invoice-dashboard"),
-                ["Invoicing", "Payments", "Support Tickets"],
+                ["Invoicing", "Reports", "Support Tickets"],
                 ["Management Dashboard", "Admin Console", "My Payslips", "Finance Dashboard"],
                 [],
             ),

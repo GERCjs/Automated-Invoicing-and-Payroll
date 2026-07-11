@@ -11,7 +11,7 @@
     <section class="report-header report-section">
         <div>
             <h1 class="page-title">Management Dashboard</h1>
-            <p class="page-subtitle">Review company collections, outstanding invoices, payroll costs, refunds and important security concerns.</p>
+            <p class="page-subtitle">CEO view of cash collection, issued receivables, operational risk, and drill-down reports.</p>
             <div class="report-header-meta">
                 <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
                 <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
@@ -25,44 +25,38 @@
     </section>
 
     <section class="report-section">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="section-heading mb-0">CEO Health Snapshot</h2>
+            <span class="text-muted small">Payroll details stay in the Payroll Report.</span>
+        </div>
         <div class="row g-3 report-kpi-grid">
-            <div class="col-12 col-md-6 col-xl-3">
+            <div class="col-12 col-md-6 col-xl">
                 <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
                     <div class="card-body">
                         <div class="report-kpi-label">Collected This Month</div>
                         <div class="report-kpi-value">S${{ collected_this_month|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">{{ successful_payment_count_this_month }} successful payment(s) recorded this month.</div>
+                        <div class="small text-muted">{{ collection_comparison_note }} {{ successful_payment_count_this_month }} successful payment(s).</div>
                         <a href="{% url 'payment-stripe-report' %}" class="report-link mt-auto">View Payment Report &rarr;</a>
                     </div>
                 </div>
             </div>
-            <div class="col-12 col-md-6 col-xl-3">
+            <div class="col-12 col-md-6 col-xl">
                 <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
                     <div class="card-body">
-                        <div class="report-kpi-label">Outstanding Amount</div>
+                        <div class="report-kpi-label">Issued Outstanding</div>
                         <div class="report-kpi-value">S${{ invoice_outstanding|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">Includes draft, pending, viewed and overdue invoices still open.</div>
+                        <div class="small text-muted">Sent, viewed, and overdue invoices only. Drafts are tracked separately.</div>
                         <a href="{% url 'invoice-customer-report' %}" class="report-link mt-auto">View Finance Report &rarr;</a>
                     </div>
                 </div>
             </div>
-            <div class="col-12 col-md-6 col-xl-3">
-                <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
-                    <div class="card-body">
-                        <div class="report-kpi-label">Payroll Cost This Month</div>
-                        <div class="report-kpi-value">S${{ payroll_cost_this_month|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">{{ payroll_paid_employee_count }} employee payroll record(s) fall within the current reporting month.</div>
-                        <a href="{% url 'payroll-report' %}" class="report-link mt-auto">View Payroll Report &rarr;</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl-3">
+            <div class="col-12 col-md-6 col-xl">
                 <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
                     <div class="card-body">
-                        <div class="report-kpi-label">Important Security Alerts</div>
-                        <div class="report-kpi-value">{{ security_alert_total }}</div>
-                        <div class="small text-muted">{{ suspicious_activity_count }} suspicious event(s) and {{ email_failed_count }} failed email delivery log(s).</div>
-                        <a href="{% url 'admin-security-report' %}" class="report-link mt-auto">View Security Report &rarr;</a>
+                        <div class="report-kpi-label">Operational Risk Items</div>
+                        <div class="report-kpi-value">{{ operational_risk_count }}</div>
+                        <div class="small text-muted">{{ payment_issue_count }} payment, {{ suspicious_activity_count }} security, {{ email_failed_count }} email, {{ import_issue_total }} import.</div>
+                        <a href="#management-attention" class="report-link mt-auto">Review Attention List &rarr;</a>
                     </div>
                 </div>
             </div>
@@ -83,6 +77,50 @@
     </section>
 
     <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Top Collection Risks</span>
+                <span class="text-muted small">Customers with the largest overdue and issued unpaid balances.</span>
+            </div>
+            <div class="card-body p-0">
+                {% if top_collection_risks %}
+                <div class="table-responsive report-attention-table">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th class="text-end">Open Invoices</th>
+                                <th class="text-end">Overdue Invoices</th>
+                                <th class="text-end">Overdue Amount</th>
+                                <th class="text-end">Issued Outstanding</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in top_collection_risks %}
+                            <tr>
+                                <td>
+                                    <div>{{ row.customer__name }}</div>
+                                    <div class="text-muted small">{{ row.customer__email }}</div>
+                                </td>
+                                <td class="text-end">{{ row.open_invoice_count }}</td>
+                                <td class="text-end">{{ row.overdue_invoice_count }}</td>
+                                <td class="text-end">S${{ row.overdue_amount|floatformat:2|intcomma }}</td>
+                                <td class="text-end">S${{ row.outstanding_amount|floatformat:2|intcomma }}</td>
+                                <td class="text-end"><a href="{% url 'invoice-customer-report' %}{{ row.report_query }}" class="report-link">Review customer &rarr;</a></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state m-3">No issued unpaid customer balances were found.</div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section id="management-attention" class="report-section">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span>Management Attention</span>
@@ -121,71 +159,27 @@
         </div>
     </section>
 
-    <section class="report-section">
-        <h2 class="section-heading mb-3">Trend Overview</h2>
-        <div class="row g-3">
-            <div class="col-12 col-xl-6">
-                <div class="report-chart-card">
-                    <div class="report-chart-header">Monthly Collections Trend</div>
-                    <div class="report-chart-body">
-                        <canvas id="collectionTrendChart" class="report-chart-canvas" aria-label="Monthly collections trend chart" role="img"></canvas>
-                        <div id="collectionTrendChartEmpty" class="report-chart-empty d-none">No collection trend data is available yet.</div>
-                    </div>
-                    <div class="px-3 text-muted small">Shows how much cash was collected in each of the last 6 months using successful payment records.</div>
-                    {% if collection_chart_summary.has_data %}
-                    <div class="report-chart-summary">
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">Current month</span>
-                            <span class="report-chart-stat-value">S${{ collected_this_month|floatformat:2|intcomma }}</span>
-                        </div>
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">6-month total</span>
-                            <span class="report-chart-stat-value">S${{ collection_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
-                        </div>
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">Highest month</span>
-                            <span class="report-chart-stat-value">{{ collection_chart_summary.peak_label }}: S${{ collection_chart_summary.peak_value|floatformat:2|intcomma }}</span>
-                        </div>
-                    </div>
-                    {% else %}
-                    <div class="report-chart-summary">
-                        <div class="report-chart-stat w-100">
-                            <span class="report-chart-stat-value">No collection trend data is available yet.</span>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
+    <section id="collection-trend" class="report-section">
+        <h2 class="section-heading mb-3">Collection Trend</h2>
+        <div class="report-chart-card">
+            <div class="report-chart-header">Monthly Collections</div>
+            <div class="report-chart-body">
+                <canvas id="collectionTrendChart" class="report-chart-canvas" aria-label="Monthly collections chart" role="img"></canvas>
+                <div id="collectionTrendChartEmpty" class="report-chart-empty d-none">No collection trend data is available yet.</div>
             </div>
-            <div class="col-12 col-xl-6">
-                <div class="report-chart-card">
-                    <div class="report-chart-header">Monthly Payroll Cost Trend</div>
-                    <div class="report-chart-body">
-                        <canvas id="payrollTrendChart" class="report-chart-canvas" aria-label="Monthly payroll cost trend chart" role="img"></canvas>
-                        <div id="payrollTrendChartEmpty" class="report-chart-empty d-none">No payroll trend data is available yet.</div>
-                    </div>
-                    <div class="px-3 text-muted small">Shows payroll cost recorded in each of the last 6 months so Management can compare collections with payroll spending.</div>
-                    {% if payroll_chart_summary.has_data %}
-                    <div class="report-chart-summary">
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">Current month</span>
-                            <span class="report-chart-stat-value">S${{ payroll_cost_this_month|floatformat:2|intcomma }}</span>
-                        </div>
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">6-month total</span>
-                            <span class="report-chart-stat-value">S${{ payroll_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
-                        </div>
-                        <div class="report-chart-stat">
-                            <span class="report-chart-stat-label">Highest month</span>
-                            <span class="report-chart-stat-value">{{ payroll_chart_summary.peak_label }}: S${{ payroll_chart_summary.peak_value|floatformat:2|intcomma }}</span>
-                        </div>
-                    </div>
-                    {% else %}
-                    <div class="report-chart-summary">
-                        <div class="report-chart-stat w-100">
-                            <span class="report-chart-stat-value">No payroll trend data is available yet.</span>
-                        </div>
-                    </div>
-                    {% endif %}
+            <div class="px-3 text-muted small">Shows successful collections over the last 6 months using payment records with paid dates.</div>
+            <div class="report-chart-summary">
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">Current collection</span>
+                    <span class="report-chart-stat-value">S${{ collected_this_month|floatformat:2|intcomma }}</span>
+                </div>
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">6-month collection</span>
+                    <span class="report-chart-stat-value">S${{ collection_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
+                </div>
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">Highest month</span>
+                    <span class="report-chart-stat-value">{{ collection_chart_summary.peak_label|default:"No data" }}{% if collection_chart_summary.has_data %}: S${{ collection_chart_summary.peak_value|floatformat:2|intcomma }}{% endif %}</span>
                 </div>
             </div>
         </div>
@@ -205,8 +199,6 @@
 {% if can_view_admin_stats %}
 {{ collection_trend_labels|json_script:"collection-trend-labels" }}
 {{ collection_trend_values|json_script:"collection-trend-values" }}
-{{ payroll_trend_labels|json_script:"payroll-trend-labels" }}
-{{ payroll_trend_values|json_script:"payroll-trend-values" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 <script src="{% static 'js/report_charts.js' %}"></script>
 <script>
@@ -223,7 +215,7 @@
                     label: "Collected (SGD)",
                     data: collectionValues,
                     borderColor: "#198754",
-                    backgroundColor: "rgba(25, 135, 84, 0.18)",
+                    backgroundColor: "rgba(25, 135, 84, 0.12)",
                     borderWidth: 2,
                     tension: 0.3,
                     fill: true
@@ -241,38 +233,6 @@
                 }
             },
             emptyText: "No collection trend data is available yet."
-        });
-
-        var payrollLabels = window.ReportCharts.parseJsonScript("payroll-trend-labels", []);
-        var payrollValues = window.ReportCharts.parseJsonScript("payroll-trend-values", []);
-        window.ReportCharts.renderChart({
-            canvasId: "payrollTrendChart",
-            emptyStateId: "payrollTrendChartEmpty",
-            type: "line",
-            labels: payrollLabels,
-            datasets: [
-                {
-                    label: "Payroll Cost (SGD)",
-                    data: payrollValues,
-                    borderColor: "#64748b",
-                    backgroundColor: "rgba(100, 116, 139, 0.16)",
-                    borderWidth: 2,
-                    tension: 0.28,
-                    fill: true
-                }
-            ],
-            options: {
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true
-                    }
-                }
-            },
-            emptyText: "No payroll trend data is available yet."
         });
     })();
 </script>

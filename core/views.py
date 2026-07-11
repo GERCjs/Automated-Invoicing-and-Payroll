@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import DatabaseError
@@ -190,6 +192,26 @@ def _currency_string(value):
     return f"S${float(value or 0):,.2f}"
 
 
+def _currency_delta_note(current, previous, comparison_label):
+    delta = (current or 0) - (previous or 0)
+    if delta > 0:
+        return f"{_currency_string(delta)} higher than {comparison_label}."
+    if delta < 0:
+        return f"{_currency_string(abs(delta))} lower than {comparison_label}."
+    return f"No change from {comparison_label}."
+
+
+def _query_string(params: dict) -> str:
+    cleaned = {}
+    for key, value in params.items():
+        if value in {"", None}:
+            continue
+        cleaned[key] = value
+    if not cleaned:
+        return ""
+    return f"?{urlencode(cleaned)}"
+
+
 def _build_chart_summary(month_labels, values):
     numeric_values = [float(value or 0) for value in values]
     total_value = sum(numeric_values)
@@ -234,6 +256,9 @@ def dashboard(request):
     recent_since = timezone.now() - timezone.timedelta(days=7)
     today = timezone.localdate()
     current_month_start = today.replace(day=1)
+    previous_month_end = current_month_start - timezone.timedelta(days=1)
+    previous_month_start = previous_month_end.replace(day=1)
+    previous_month_label = previous_month_start.strftime("%B %Y")
     report_generated_at = timezone.localtime()
     reporting_period_label = current_month_start.strftime("%B %Y")
 
@@ -253,17 +278,18 @@ def dashboard(request):
     ]
 
     invoice_status_counts = _safe_group_counts(Invoice.objects.all(), "status")
+    issued_outstanding_invoices = Invoice.objects.filter(
+        status__in=[
+            Invoice.STATUS_SENT,
+            Invoice.STATUS_VIEWED,
+            Invoice.STATUS_OVERDUE,
+        ]
+    )
     invoice_outstanding = _safe_sum(
-        Invoice.objects.filter(
-            status__in=[
-                Invoice.STATUS_DRAFT,
-                Invoice.STATUS_SENT,
-                Invoice.STATUS_VIEWED,
-                Invoice.STATUS_OVERDUE,
-            ]
-        ),
+        issued_outstanding_invoices,
         "total_amount",
     )
+    draft_invoice_amount = _safe_sum(Invoice.objects.filter(status=Invoice.STATUS_DRAFT), "total_amount")
 
     payroll_status_counts = _safe_group_counts(PayrollBatch.objects.all(), "status")
     payroll_pending_entries = _safe_count(PayrollEntry.objects.filter(status=PayrollEntry.STATUS_PENDING))
@@ -284,6 +310,10 @@ def dashboard(request):
     )
     collected_this_month = _safe_sum(
         succeeded_payments.filter(paid_at__date__gte=current_month_start, paid_at__date__lte=today),
+        "amount",
+    )
+    collected_previous_month = _safe_sum(
+        succeeded_payments.filter(paid_at__date__gte=previous_month_start, paid_at__date__lte=previous_month_end),
         "amount",
     )
     successful_payment_count_this_month = _safe_count(
@@ -327,10 +357,6 @@ def dashboard(request):
         )
     monthly_payroll_values = [payroll_by_month.get(month_key, 0.0) for month_key in month_keys]
 
-    payroll_cost_this_month = _safe_sum(
-        PayrollRecord.objects.filter(payment_date__gte=current_month_start, payment_date__lte=today),
-        "net_salary",
-    )
     payroll_records_this_month = PayrollRecord.objects.filter(
         payment_date__gte=current_month_start,
         payment_date__lte=today,
@@ -352,6 +378,37 @@ def dashboard(request):
     failed_email_count = email_status_counts.get(EmailDeliveryLog.STATUS_FAILED, 0)
     security_alert_total = suspicious_activity_count + failed_email_count
     import_issue_total = import_failed_count + import_with_errors_count
+    payment_issue_count = _safe_count(
+        PaymentRecord.objects.filter(
+            status__in=[
+                PaymentRecord.STATUS_PENDING,
+                PaymentRecord.STATUS_FAILED,
+                PaymentRecord.STATUS_CANCELLED,
+                PaymentRecord.STATUS_REFUNDED,
+            ]
+        )
+    )
+    operational_risk_count = payment_issue_count + suspicious_activity_count + failed_email_count + import_issue_total
+
+    top_collection_risks = _safe_list(
+        issued_outstanding_invoices.values("customer_id", "customer__name", "customer__email")
+        .annotate(
+            open_invoice_count=Count("id"),
+            outstanding_amount=Sum("total_amount"),
+            overdue_invoice_count=Count("id", filter=Q(status=Invoice.STATUS_OVERDUE)),
+            overdue_amount=Sum("total_amount", filter=Q(status=Invoice.STATUS_OVERDUE)),
+        )
+        .order_by("-overdue_amount", "-outstanding_amount", "customer__name")[:5]
+    )
+    for row in top_collection_risks:
+        row["outstanding_amount"] = row["outstanding_amount"] or 0
+        row["overdue_amount"] = row["overdue_amount"] or 0
+        row["report_query"] = _query_string(
+            {
+                "customer": row["customer_id"],
+                "ageing": "all_overdue" if row["overdue_invoice_count"] else "",
+            }
+        )
 
     detail_report_links = [
         {
@@ -384,10 +441,17 @@ def dashboard(request):
             "link_url": f"{reverse('invoice-list')}?status=overdue",
         },
         {
-            "label": "Refunded Amount",
-            "value": _currency_string(refunded_total),
-            "note": "Refunded payments remain excluded from net collection.",
-            "link_label": "Review refund activity",
+            "label": "Draft Invoice Value",
+            "value": _currency_string(draft_invoice_amount),
+            "note": f"{invoice_status_counts.get(Invoice.STATUS_DRAFT, 0)} draft invoice(s) not counted as receivables.",
+            "link_label": "Review draft invoices",
+            "link_url": f"{reverse('invoice-list')}?status=draft",
+        },
+        {
+            "label": "Payment Issues",
+            "value": str(payment_issue_count),
+            "note": "Pending, failed, cancelled, or refunded payment records needing finance review.",
+            "link_label": "Review payment report",
             "link_url": reverse("payment-stripe-report"),
         },
         {
@@ -416,6 +480,18 @@ def dashboard(request):
                 "impact": f"{_currency_string(overdue_invoice_amount)} remains unpaid.",
                 "link_label": "Review overdue invoices",
                 "link_url": f"{reverse('invoice-list')}?status=overdue",
+            }
+        )
+    if payment_issue_count:
+        management_attention_items.append(
+            {
+                "priority": "Medium",
+                "priority_class": "status-warning",
+                "area": "Payments",
+                "finding": f"{payment_issue_count} payment issue(s)",
+                "impact": "Pending, failed, cancelled, or refunded payments may need finance review.",
+                "link_label": "Review payment report",
+                "link_url": reverse("payment-stripe-report"),
             }
         )
     if suspicious_activity_count:
@@ -476,6 +552,7 @@ def dashboard(request):
             "invoice_paid_count": invoice_status_counts.get(Invoice.STATUS_PAID, 0),
             "invoice_overdue_count": invoice_status_counts.get(Invoice.STATUS_OVERDUE, 0),
             "invoice_outstanding": invoice_outstanding,
+            "draft_invoice_amount": draft_invoice_amount,
             "employee_total": _safe_count(Employee.objects.all()),
             "active_employee_total": _safe_count(Employee.objects.filter(status=Employee.STATUS_ACTIVE)),
             "payroll_batch_total": _safe_count(PayrollBatch.objects.all()),
@@ -492,7 +569,7 @@ def dashboard(request):
             "email_failed_count": failed_email_count,
             "collection_trend_labels": month_labels,
             "collection_trend_values": monthly_collection_values,
-            "outstanding_vs_collected_labels": ["Collected", "Outstanding", "Refunded"],
+            "outstanding_vs_collected_labels": ["Collected", "Issued Outstanding", "Refunded"],
             "outstanding_vs_collected_values": [
                 _to_float(collected_total),
                 _to_float(invoice_outstanding),
@@ -501,12 +578,20 @@ def dashboard(request):
             "payroll_trend_labels": month_labels,
             "payroll_trend_values": monthly_payroll_values,
             "collected_this_month": collected_this_month,
+            "collected_previous_month": collected_previous_month,
             "successful_payment_count_this_month": successful_payment_count_this_month,
-            "payroll_cost_this_month": payroll_cost_this_month,
             "payroll_paid_employee_count": payroll_paid_employee_count,
+            "collection_comparison_note": _currency_delta_note(
+                collected_this_month,
+                collected_previous_month,
+                previous_month_label,
+            ),
+            "previous_month_label": previous_month_label,
             "overdue_invoice_amount": overdue_invoice_amount,
+            "payment_issue_count": payment_issue_count,
             "suspicious_activity_count": suspicious_activity_count,
             "security_alert_total": security_alert_total,
+            "operational_risk_count": operational_risk_count,
             "refunded_total": refunded_total,
             "import_issue_total": import_issue_total,
             "reporting_period_label": reporting_period_label,
@@ -514,6 +599,7 @@ def dashboard(request):
             "detail_report_links": detail_report_links,
             "secondary_summary_items": secondary_summary_items,
             "management_attention_items": management_attention_items,
+            "top_collection_risks": top_collection_risks,
             "collection_chart_summary": collection_chart_summary,
             "payroll_chart_summary": payroll_chart_summary,
         },
