@@ -96,8 +96,8 @@
                         Payroll
                     </button>
                     <ul class="dropdown-menu">
-                        <li><a href="{% url 'payroll-list' %}" class="dropdown-item">View Payroll List</a></li>
                         <li><a href="{% url 'payroll-dashboard' %}" class="dropdown-item">Payroll Dashboard</a></li>
+                        <li><a href="{% url 'payroll-list' %}" class="dropdown-item">View Payroll List</a></li>
                         <li><a href="{% url 'payroll-create' %}" class="dropdown-item">Create Payroll Record</a></li>
                         <li><a href="{% url 'payroll-upload-preview' %}" class="dropdown-item">Bulk Add Payroll Record</a></li>
                     </ul>
@@ -107,6 +107,7 @@
                         Employees
                     </button>
                     <ul class="dropdown-menu">
+                        <li><a href="{% url 'employee-dashboard' %}" class="dropdown-item">Employee Dashboard</a></li>
                         <li><a href="{% url 'employee-list' %}" class="dropdown-item">View Employee List</a></li>
                         <li><a href="{% url 'employee-create' %}" class="dropdown-item">Add New Employee</a></li>
                         <li><a href="{% url 'employee-upload-preview' %}" class="dropdown-item">Bulk Add Employees</a></li>

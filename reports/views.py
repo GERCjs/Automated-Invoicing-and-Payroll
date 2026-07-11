@@ -1403,7 +1403,8 @@ def payroll_report(request):
             | Q(last_name__icontains=selected_employee)
             | Q(employee_code__icontains=selected_employee)
         )
-    paid_employee_codes = month_records.values_list("employee_id", flat=True).distinct()
+    # Avoid a cross-table string comparison in MySQL when legacy tables use different collations.
+    paid_employee_codes = list(month_records.values_list("employee_id", flat=True).distinct())
     missing_payroll_records = active_employees.exclude(employee_code__in=paid_employee_codes).order_by("employee_code")
     missing_payroll_records_count = missing_payroll_records.count()
     missing_payroll_sample_codes = list(missing_payroll_records.values_list("employee_code", flat=True)[:3])
@@ -1430,8 +1431,8 @@ def payroll_report(request):
                 "issue": "Duplicate rows skipped",
                 "count": duplicate_rows_skipped_count,
                 "scope": reporting_period_label,
-                "detail": "Rows matched an existing employee and payroll month record.",
-                "action_label": "View records",
+                "detail": "Rows matched payroll records already saved for the employee and selected payroll month.",
+                "action_label": "View existing records",
                 "action_url": reverse("payroll-list") + _query_string({"month": selected_month, "q": selected_employee}),
             }
         )

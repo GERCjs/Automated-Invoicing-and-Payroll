@@ -794,6 +794,10 @@ textarea.form-control:focus {
     padding: 1.1rem 1.15rem;
 }
 
+.payroll-dashboard-page .payroll-dashboard-summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .invoice-report-filters .form-control,
 .invoice-report-filters .form-select {
     min-height: 46px;

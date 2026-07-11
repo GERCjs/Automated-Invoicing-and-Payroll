@@ -54,6 +54,83 @@ class PayrollTestEnvironmentTests(TestCase):
         self.assertEqual(PayrollRecord.objects.get(pk=payroll_record.pk).employee_id, "STF-999999")
 
 
+class EmployeeDashboardTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.hr_user = user_model.objects.create_user(username="employee_dash_hr", password="pass12345")
+        UserRole.objects.filter(user=self.hr_user).update(role=HR)
+        self.report_month = "2026-07"
+        Employee.objects.create(
+            employee_code="STF-100001",
+            first_name="Alicia",
+            last_name="Tan",
+            email="alicia@example.com",
+            hire_date=date(2026, 7, 1),
+            base_salary=3000,
+            payment_method=Employee.PAYMENT_METHOD_GIRO,
+            bank_name="DBS",
+            bank_account_number="123",
+            status=Employee.STATUS_ACTIVE,
+            user=self.hr_user,
+        )
+        Employee.objects.create(
+            employee_code="STF-100002",
+            first_name="Ben",
+            last_name="Lim",
+            email="ben@example.com",
+            hire_date=date(2026, 7, 10),
+            base_salary=2800,
+            payment_method=Employee.PAYMENT_METHOD_CASH,
+            status=Employee.STATUS_ACTIVE,
+        )
+        Employee.objects.create(
+            employee_code="STF-100003",
+            first_name="Cara",
+            last_name="Ong",
+            email="cara@example.com",
+            hire_date=date(2026, 6, 1),
+            base_salary=2600,
+            payment_method=Employee.PAYMENT_METHOD_CHEQUE,
+            bank_name="OCBC",
+            bank_account_number="456",
+            status=Employee.STATUS_INACTIVE,
+        )
+        PayrollRecord.objects.create(
+            employee_name="Alicia Tan",
+            employee_id="STF-100001",
+            basic_salary=3000,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=600,
+            net_salary=2450,
+            payment_date=date(2026, 7, 31),
+        )
+
+    def test_hr_can_access_employee_dashboard_with_kpis_and_charts(self):
+        self.client.force_login(self.hr_user)
+        response = self.client.get(reverse("employee-dashboard"), data={"month": self.report_month})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Employee Dashboard")
+        self.assertContains(response, "Active Employees")
+        self.assertContains(response, "New Employees This Month")
+        self.assertContains(response, "Missing Payment Setup")
+        self.assertContains(response, "Employees Without Payroll This Month")
+        self.assertContains(response, "GIRO Employees")
+        self.assertContains(response, "Cash Employees")
+        self.assertContains(response, "Cheque Employees")
+        self.assertContains(response, "Payment Method Distribution")
+        self.assertContains(response, "Employee Status Split")
+        self.assertContains(response, "Hiring Trend")
+        self.assertContains(response, 'name="month"', html=False)
+        self.assertContains(response, 'value="2026-07"', html=False)
+        self.assertContains(response, "js/report_charts.js")
+        self.assertEqual(response.context["active_employee_count"], 2)
+        self.assertEqual(response.context["new_employee_count"], 2)
+        self.assertEqual(response.context["missing_payment_setup_count"], 1)
+        self.assertEqual(response.context["employees_without_payroll_count"], 1)
+
+
 class PayrollUploadPreviewTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
@@ -329,7 +406,7 @@ class PayrollUploadPreviewTests(TestCase):
         self.assertContains(response, "data-date-to")
         self.assertContains(response, "data-date-error")
         self.assertContains(response, "js/date-range-filters.js")
-        self.assertNotContains(response, 'type="month"', html=False)
+        self.assertContains(response, 'type="month"', html=False)
 
     def test_payroll_list_rejects_invalid_date_range_and_preserves_values(self):
         response = self.client.get(
@@ -374,6 +451,40 @@ class PayrollUploadPreviewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "EMP001")
         self.assertNotContains(response, "EMP002")
+
+    def test_payroll_list_filters_by_selected_month(self):
+        PayrollRecord.objects.create(
+            employee_name="Alex Tan",
+            employee_id="EMP001",
+            basic_salary=3000,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=600,
+            net_salary=2450,
+            payment_date=date(2026, 8, 2),
+        )
+        PayrollRecord.objects.create(
+            employee_name="Jamie Lim",
+            employee_id="EMP002",
+            basic_salary=3200,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=640,
+            net_salary=2610,
+            payment_date=date(2026, 7, 12),
+        )
+
+        response = self.client.get(
+            reverse("payroll-list"),
+            {"month": "2026-08"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "EMP001")
+        self.assertNotContains(response, "EMP002")
+        self.assertContains(response, 'name="month"', html=False)
+        self.assertContains(response, 'value="2026-08"', html=False)
+        self.assertContains(response, "Month: 2026-08")
 
 
 class PayrollInvalidRowDownloadTests(TestCase):
@@ -1244,6 +1355,48 @@ class PayrollReportPlacementAndAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, reverse("payroll-report"))
 
+    def test_payroll_dashboard_shows_month_visualizations_and_filters(self):
+        july_record = PayrollRecord.objects.create(
+            employee_name="July Record",
+            employee_id="STF-200009",
+            basic_salary=2500,
+            allowances=80,
+            deductions=20,
+            cpf_contribution=500,
+            net_salary=2060,
+            payment_date=date(2026, 7, 31),
+        )
+        EmailDeliveryLog.objects.create(
+            recipient_email="report.one@example.com",
+            subject="Payslip",
+            template_key="payroll_payslip",
+            status=EmailDeliveryLog.STATUS_SENT,
+            related_object_type="payroll_record",
+            related_object_id=str(self.record_one.pk),
+        )
+        AuditLog.objects.create(
+            action="payroll.pdf.downloaded",
+            target_type="payroll_record",
+            target_id=str(self.record_two.pk),
+        )
+
+        user = self._make_user("hr_dashboard_charts", HR)
+        self.client.force_login(user)
+        response = self.client.get(reverse("payroll-dashboard"), data={"month": self.report_month})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reporting period: June 2026")
+        self.assertContains(response, 'name="month"', html=False)
+        self.assertContains(response, 'value="2026-06"', html=False)
+        self.assertContains(response, "Payroll Cost Trend")
+        self.assertContains(response, "Payslip Delivery Status")
+        self.assertContains(response, "Payroll Mix Snapshot")
+        self.assertContains(response, "js/report_charts.js")
+        self.assertContains(response, "S$6,050.00")
+        self.assertContains(response, "S$4,815.00")
+        self.assertContains(response, f'{reverse("payroll-list")}?month={self.report_month}')
+        self.assertNotContains(response, july_record.employee_id)
+
     def test_staff_and_customer_cannot_access_overall_payroll_report(self):
         staff_user = self._make_user("staff_no_payroll_report", STAFF)
         self.client.force_login(staff_user)
@@ -1327,6 +1480,8 @@ class PayrollReportPlacementAndAccessTests(TestCase):
             response.context["total_cpf_month"],
             response.context["employee_cpf_total_month"] + response.context["employer_cpf_total_month"],
         )
+        self.assertContains(response, "View existing records")
+        self.assertContains(response, f'{reverse("payroll-list")}?month={self.report_month}')
 
     def test_payroll_report_preserves_selected_month_and_employee_filters(self):
         hr_user = self._make_user("hr_payroll_report_filter", HR)

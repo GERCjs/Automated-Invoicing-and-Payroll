@@ -30,6 +30,16 @@
                     placeholder="Search employee name or employee ID"
                 >
             </div>
+            <div class="col-md-4 col-lg-2">
+                <label class="form-label mb-1" for="payrollMonth">Payroll Month</label>
+                <input
+                    id="payrollMonth"
+                    type="month"
+                    class="form-control"
+                    name="month"
+                    value="{{ selected_month }}"
+                >
+            </div>
             <div class="col-md-3 col-lg-2">
                 <label class="form-label mb-1" for="payrollDateFrom">Start Date</label>
                 <input
@@ -69,6 +79,7 @@
         </form>
         <p class="text-muted mb-0 mt-2">
             {% if search_query %}Search: "{{ search_query }}" | {% endif %}
+            {% if selected_month %}Month: {{ selected_month }} | {% endif %}
             {% if date_from %}From: {{ date_from }} | {% endif %}
             {% if date_to %}To: {{ date_to }} | {% endif %}
             Results: {{ result_count }}

@@ -11,9 +11,11 @@ from django.core.exceptions import PermissionDenied
 from django.core.mail import EmailMultiAlternatives
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncMonth
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -22,6 +24,7 @@ from reportlab.pdfgen import canvas
 from accounts.permissions import get_user_role, role_required
 from accounts.roles import ADMIN, HR, STAFF, SUPERADMIN
 from core.audit import get_client_ip, log_event
+from core.models import AuditLog
 from notifications.models import EmailDeliveryLog
 
 from .forms import EmployeeForm, EmployeeUploadForm, PayrollRecordForm, PayrollUploadForm
@@ -34,6 +37,48 @@ from .services import (
 )
 
 EMPLOYEE_CODE_PATTERN = re.compile(r"^STF-[0-9]{6}$")
+
+
+def _safe_sum(queryset, field_name):
+    return queryset.aggregate(total=Sum(field_name))["total"] or Decimal("0")
+
+
+def _to_float(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_chart_summary(labels, values):
+    numeric_values = [float(value or 0) for value in values]
+    total_value = sum(numeric_values)
+    has_data = any(value > 0 for value in numeric_values)
+    peak_label = ""
+    peak_value = 0.0
+    if has_data and labels and numeric_values:
+        peak_index = max(range(len(numeric_values)), key=numeric_values.__getitem__)
+        peak_label = labels[peak_index]
+        peak_value = numeric_values[peak_index]
+    return {
+        "has_data": has_data,
+        "six_month_total": total_value,
+        "peak_label": peak_label,
+        "peak_value": peak_value,
+    }
+
+
+def _recent_month_starts(today, total_months=6):
+    month_start = today.replace(day=1)
+    month_starts = []
+    for offset in range(total_months - 1, -1, -1):
+        year = month_start.year
+        month = month_start.month - offset
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_starts.append(month_start.replace(year=year, month=month, day=1))
+    return month_starts
 
 
 def _parse_iso_date(raw_value: str):
@@ -67,6 +112,22 @@ def _parse_date_range(raw_date_from: str, raw_date_to: str):
     filter_date_from = None if date_filter_error else date_from
     filter_date_to = None if date_filter_error else date_to
     return date_from, date_to, filter_date_from, filter_date_to, date_filter_error
+
+
+def _parse_month_filter(raw_value: str):
+    value = (raw_value or "").strip()
+    if not value:
+        return "", None, None
+    try:
+        month_start = date.fromisoformat(f"{value}-01")
+    except ValueError:
+        return "", None, None
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1, day=1)
+    month_end = next_month - timezone.timedelta(days=1)
+    return value, month_start, month_end
 
 
 def _generate_next_employee_code():
@@ -191,22 +252,259 @@ def payroll_cpf_preview(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_dashboard(request):
-    total_records = PayrollRecord.objects.count()
-    total_net_salary = sum(record.net_salary for record in PayrollRecord.objects.only("net_salary"))
-    recent_payslip_records = PayrollRecord.objects.only(
+    today = timezone.localdate()
+    selected_month, month_start, month_end = _parse_month_filter(request.GET.get("month"))
+    if not selected_month:
+        month_start = today.replace(day=1)
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1, day=1)
+        month_end = next_month - timezone.timedelta(days=1)
+        selected_month = month_start.strftime("%Y-%m")
+
+    month_records = PayrollRecord.objects.filter(payment_date__gte=month_start, payment_date__lte=month_end)
+    total_records = month_records.count()
+    total_net_salary = _safe_sum(month_records, "net_salary")
+    total_payroll_cost = _safe_sum(month_records, "basic_salary") + _safe_sum(month_records, "allowances")
+    total_cpf = _safe_sum(month_records, "cpf_contribution")
+    employees_paid = month_records.values("employee_id").distinct().count()
+    report_generated_at = timezone.now()
+
+    month_record_id_set = set(month_records.values_list("id", flat=True))
+    email_logs = EmailDeliveryLog.objects.filter(
+        related_object_type="payroll_record",
+        related_object_id__in=[str(record_id) for record_id in month_record_id_set],
+    ).values("related_object_id", "status")
+    emailed_ids = {
+        int(log["related_object_id"])
+        for log in email_logs
+        if str(log["related_object_id"]).isdigit() and log["status"] == EmailDeliveryLog.STATUS_SENT
+    }
+    failed_email_ids = {
+        int(log["related_object_id"])
+        for log in email_logs
+        if str(log["related_object_id"]).isdigit() and log["status"] == EmailDeliveryLog.STATUS_FAILED
+    }
+    downloaded_ids = {
+        int(target_id)
+        for target_id in AuditLog.objects.filter(
+            action="payroll.pdf.downloaded",
+            target_type="payroll_record",
+            target_id__in=[str(record_id) for record_id in month_record_id_set],
+        ).values_list("target_id", flat=True)
+        if str(target_id).isdigit()
+    }
+
+    delivery_status_totals = {
+        "emailed": 0,
+        "downloaded": 0,
+        "failed": 0,
+        "action_required": 0,
+    }
+    for record_id in month_record_id_set:
+        if record_id in emailed_ids:
+            delivery_status_totals["emailed"] += 1
+        elif record_id in downloaded_ids:
+            delivery_status_totals["downloaded"] += 1
+        elif record_id in failed_email_ids:
+            delivery_status_totals["failed"] += 1
+            delivery_status_totals["action_required"] += 1
+        else:
+            delivery_status_totals["action_required"] += 1
+
+    month_starts = _recent_month_starts(month_start, total_months=6)
+    payroll_trend_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+    monthly_rows = list(
+        PayrollRecord.objects.annotate(month=TruncMonth("payment_date"))
+        .values("month")
+        .annotate(total_basic=Sum("basic_salary"), total_allowances=Sum("allowances"))
+        .order_by("month")
+    )
+    payroll_amount_map = {}
+    for row in monthly_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        month_key = month_value.strftime("%Y-%m")
+        payroll_amount_map[month_key] = _to_float(row.get("total_basic")) + _to_float(row.get("total_allowances"))
+    payroll_trend_values = [payroll_amount_map.get(month_key, 0.0) for month_key in month_keys]
+
+    pay_mix_labels = ["Basic Salary", "Allowances", "CPF", "Net Salary"]
+    pay_mix_values = [
+        _to_float(_safe_sum(month_records, "basic_salary")),
+        _to_float(_safe_sum(month_records, "allowances")),
+        _to_float(total_cpf),
+        _to_float(total_net_salary),
+    ]
+
+    latest_upload_preview = (
+        AuditLog.objects.filter(action="payroll.upload.previewed")
+        .only("metadata", "created_at")
+        .first()
+    )
+    invalid_upload_rows_count = 0
+    if latest_upload_preview:
+        invalid_upload_rows_count = int((latest_upload_preview.metadata or {}).get("invalid_row_count") or 0)
+
+    recent_saved_upload_logs = list(
+        AuditLog.objects.filter(action="payroll.upload.saved")
+        .only("metadata", "created_at")[:20]
+    )
+    saved_upload_for_selected_month = next(
+        (
+            log
+            for log in recent_saved_upload_logs
+            if str((log.metadata or {}).get("payment_date") or "").startswith(selected_month)
+        ),
+        None,
+    )
+    duplicate_rows_skipped_count = 0
+    if saved_upload_for_selected_month:
+        duplicate_rows_skipped_count = int((saved_upload_for_selected_month.metadata or {}).get("skipped_duplicate_count") or 0)
+
+    active_employees = Employee.objects.filter(status=Employee.STATUS_ACTIVE)
+    paid_employee_codes = list(month_records.values_list("employee_id", flat=True).distinct())
+    missing_payroll_records = active_employees.exclude(employee_code__in=paid_employee_codes).order_by("employee_code")
+    missing_payroll_records_count = missing_payroll_records.count()
+    missing_payroll_sample_codes = list(missing_payroll_records.values_list("employee_code", flat=True)[:3])
+
+    recent_payslip_records = list(month_records.only(
         "employee_name",
         "employee_id",
         "payment_date",
         "net_salary",
+        "deductions",
         "created_at",
-    )[:8]
+    )[:8])
+
+    recent_action_records = []
+    for record in recent_payslip_records:
+        if record.pk in emailed_ids:
+            status_label = "Emailed"
+            status_class = "status-success"
+        elif record.pk in downloaded_ids:
+            status_label = "Downloaded"
+            status_class = "status-neutral"
+        elif record.pk in failed_email_ids:
+            status_label = "Email Failed"
+            status_class = "status-danger"
+        else:
+            status_label = "Needs Delivery"
+            status_class = "status-warning"
+        recent_action_records.append(
+            {
+                "record": record,
+                "status_label": status_label,
+                "status_class": status_class,
+            }
+        )
+
+    payroll_chart_summary = _build_chart_summary(payroll_trend_labels, payroll_trend_values)
+    reporting_period_label = month_start.strftime("%B %Y")
+    secondary_summary_items = [
+        {
+            "label": "Emailed Payslips",
+            "value": str(delivery_status_totals["emailed"]),
+            "note": "Payslip records with a successful email delivery log in the selected month.",
+        },
+        {
+            "label": "Downloaded Payslips",
+            "value": str(delivery_status_totals["downloaded"]),
+            "note": "Payroll records downloaded as PDF for follow-up or manual distribution.",
+        },
+        {
+            "label": "Failed Emails",
+            "value": str(delivery_status_totals["failed"]),
+            "note": "Payslip emails that failed and may need corrected addresses or a resend.",
+        },
+    ]
+    attention_items = []
+    if invalid_upload_rows_count:
+        attention_items.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-warning",
+                "issue": "Invalid upload rows",
+                "count": invalid_upload_rows_count,
+                "scope": "Latest upload preview",
+                "detail": "Rows failed validation before payroll records could be saved.",
+                "action_label": "Upload payroll file",
+                "action_url": reverse("payroll-upload-preview"),
+            }
+        )
+    if duplicate_rows_skipped_count:
+        attention_items.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-neutral",
+                "issue": "Duplicate rows skipped",
+                "count": duplicate_rows_skipped_count,
+                "scope": reporting_period_label,
+                "detail": "Rows matched payroll records already saved for the employee and selected payroll month.",
+                "action_label": "View existing records",
+                "action_url": f'{reverse("payroll-list")}?month={selected_month}',
+            }
+        )
+    if delivery_status_totals["failed"]:
+        attention_items.append(
+            {
+                "priority_label": "High",
+                "priority_class": "status-danger",
+                "issue": "Failed payslip emails",
+                "count": delivery_status_totals["failed"],
+                "scope": reporting_period_label,
+                "detail": "Employees may not have received their payslips because email delivery failed.",
+                "action_label": "Open payroll records",
+                "action_url": f'{reverse("payroll-list")}?month={selected_month}',
+            }
+        )
+    if missing_payroll_records_count:
+        attention_items.append(
+            {
+                "priority_label": "Review",
+                "priority_class": "status-warning",
+                "issue": "Missing payroll records",
+                "count": missing_payroll_records_count,
+                "scope": reporting_period_label,
+                "detail": "Active employees without a payroll record this month: "
+                + ", ".join(missing_payroll_sample_codes)
+                + ("..." if missing_payroll_records_count > len(missing_payroll_sample_codes) else ""),
+                "action_label": "Review employees",
+                "action_url": reverse("employee-list"),
+            }
+        )
+
     return render(
         request,
         "payroll/payroll_dashboard.html",
         {
+            "selected_month": selected_month,
+            "reporting_period_label": reporting_period_label,
+            "report_generated_at": report_generated_at,
             "total_records": total_records,
             "total_net_salary": total_net_salary,
-            "recent_payslip_records": recent_payslip_records,
+            "total_payroll_cost": total_payroll_cost,
+            "total_cpf": total_cpf,
+            "employees_paid": employees_paid,
+            "delivery_status_labels": ["Emailed", "Downloaded", "Email Failed"],
+            "delivery_status_values": [
+                delivery_status_totals["emailed"],
+                delivery_status_totals["downloaded"],
+                delivery_status_totals["failed"],
+            ],
+            "payroll_trend_labels": payroll_trend_labels,
+            "payroll_trend_values": payroll_trend_values,
+            "payroll_chart_summary": payroll_chart_summary,
+            "pay_mix_labels": pay_mix_labels,
+            "pay_mix_values": pay_mix_values,
+            "delivery_status_totals": delivery_status_totals,
+            "secondary_summary_items": secondary_summary_items,
+            "attention_items": attention_items,
+            "payroll_list_query": f'?month={selected_month}',
+            "payroll_report_query": f'?month={selected_month}',
+            "recent_action_records": recent_action_records,
         },
     )
 
@@ -215,6 +513,7 @@ def payroll_dashboard(request):
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_list(request):
     search_query = request.GET.get("q", "").strip()
+    selected_month, month_start, month_end = _parse_month_filter(request.GET.get("month"))
     raw_date_from = (request.GET.get("date_from") or "").strip()
     raw_date_to = (request.GET.get("date_to") or "").strip()
     date_from, date_to, filter_date_from, filter_date_to, date_filter_error = _parse_date_range(
@@ -228,6 +527,8 @@ def payroll_list(request):
             | Q(employee_id__icontains=search_query)
         )
     if not date_filter_error:
+        if month_start and month_end:
+            payslip_records = payslip_records.filter(payment_date__gte=month_start, payment_date__lte=month_end)
         if filter_date_from:
             payslip_records = payslip_records.filter(payment_date__gte=filter_date_from)
         if filter_date_to:
@@ -239,6 +540,7 @@ def payroll_list(request):
         {
             "payslip_records": payslip_records,
             "search_query": search_query,
+            "selected_month": selected_month,
             "date_from": date_from.isoformat() if date_from else raw_date_from,
             "date_to": date_to.isoformat() if date_to else raw_date_to,
             "date_filter_error": date_filter_error,
@@ -769,6 +1071,117 @@ def payroll_template_download(request):
     )
     response["Content-Disposition"] = 'attachment; filename="payroll_upload_template.xlsx"'
     return response
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def employee_dashboard(request):
+    today = timezone.localdate()
+    selected_month, month_start, month_end = _parse_month_filter(request.GET.get("month"))
+    if not selected_month:
+        month_start = today.replace(day=1)
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1, day=1)
+        month_end = next_month - timezone.timedelta(days=1)
+        selected_month = month_start.strftime("%Y-%m")
+
+    report_generated_at = timezone.now()
+    employees = Employee.objects.all()
+    active_employees = employees.filter(status=Employee.STATUS_ACTIVE)
+    new_employees_this_month = employees.filter(hire_date__gte=month_start, hire_date__lte=month_end)
+    missing_payment_setup = active_employees.filter(
+        Q(payment_method="")
+        | Q(bank_name="")
+        | Q(bank_account_number="")
+    )
+    paid_employee_codes = list(
+        PayrollRecord.objects.filter(payment_date__gte=month_start, payment_date__lte=month_end)
+        .values_list("employee_id", flat=True)
+        .distinct()
+    )
+    employees_without_payroll = active_employees.exclude(employee_code__in=paid_employee_codes)
+
+    payment_method_counts = {
+        row["payment_method"] or "unset": row["total"]
+        for row in employees.values("payment_method").annotate(total=Count("id"))
+    }
+    summary_items = [
+        {
+            "label": "GIRO Employees",
+            "value": str(payment_method_counts.get(Employee.PAYMENT_METHOD_GIRO, 0)),
+            "note": "Employees currently configured for GIRO salary payouts.",
+        },
+        {
+            "label": "Cash Employees",
+            "value": str(payment_method_counts.get(Employee.PAYMENT_METHOD_CASH, 0)),
+            "note": "Employees marked for manual cash payout processing.",
+        },
+        {
+            "label": "Cheque Employees",
+            "value": str(payment_method_counts.get(Employee.PAYMENT_METHOD_CHEQUE, 0)),
+            "note": "Employees configured to receive payroll by cheque.",
+        },
+        {
+            "label": "Linked Staff Accounts",
+            "value": str(employees.filter(user__isnull=False).count()),
+            "note": "Employee records that are already linked to a user account.",
+        },
+    ]
+
+    payment_method_labels = ["GIRO", "Cash", "Cheque", "Not Set"]
+    payment_method_values = [
+        payment_method_counts.get(Employee.PAYMENT_METHOD_GIRO, 0),
+        payment_method_counts.get(Employee.PAYMENT_METHOD_CASH, 0),
+        payment_method_counts.get(Employee.PAYMENT_METHOD_CHEQUE, 0),
+        payment_method_counts.get("unset", 0),
+    ]
+
+    employee_status_labels = ["Active", "Inactive"]
+    employee_status_values = [
+        active_employees.count(),
+        employees.filter(status=Employee.STATUS_INACTIVE).count(),
+    ]
+
+    month_starts = _recent_month_starts(month_start, total_months=6)
+    hiring_trend_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+    hiring_rows = list(
+        employees.annotate(month=TruncMonth("hire_date"))
+        .values("month")
+        .annotate(total=Count("id"))
+        .order_by("month")
+    )
+    hiring_map = {}
+    for row in hiring_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        hiring_map[month_value.strftime("%Y-%m")] = int(row.get("total") or 0)
+    hiring_trend_values = [hiring_map.get(month_key, 0) for month_key in month_keys]
+
+    return render(
+        request,
+        "payroll/employee_dashboard.html",
+        {
+            "selected_month": selected_month,
+            "report_generated_at": report_generated_at,
+            "reporting_period_label": month_start.strftime("%B %Y"),
+            "active_employee_count": active_employees.count(),
+            "new_employee_count": new_employees_this_month.count(),
+            "missing_payment_setup_count": missing_payment_setup.count(),
+            "employees_without_payroll_count": employees_without_payroll.count(),
+            "summary_items": summary_items,
+            "payment_method_labels": payment_method_labels,
+            "payment_method_values": payment_method_values,
+            "employee_status_labels": employee_status_labels,
+            "employee_status_values": employee_status_values,
+            "hiring_trend_labels": hiring_trend_labels,
+            "hiring_trend_values": hiring_trend_values,
+            "employee_list_query": "",
+        },
+    )
 
 
 @login_required
