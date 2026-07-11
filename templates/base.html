@@ -87,12 +87,11 @@
                         <li><a href="{% url 'invoice-template-settings' %}" class="dropdown-item">Template Settings</a></li>
                     </ul>
                 </div>
-                <a class="portal-nav-link{% if current_url_name == 'payment-stripe-report' %} is-active{% endif %}" href="{% url 'payment-stripe-report' %}">Payments</a>
                 {% endif %}
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
                 <div class="dropdown">
-                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'payroll-list' or current_url_name == 'payroll-dashboard' or current_url_name == 'payroll-report' or current_url_name == 'payroll-create' or current_url_name == 'payroll-detail' or current_url_name == 'payroll-edit' or current_url_name == 'payroll-delete' or current_url_name == 'payroll-upload-preview' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'payroll-list' or current_url_name == 'payroll-dashboard' or current_url_name == 'payroll-create' or current_url_name == 'payroll-detail' or current_url_name == 'payroll-edit' or current_url_name == 'payroll-delete' or current_url_name == 'payroll-upload-preview' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                         Payroll
                     </button>
                     <ul class="dropdown-menu">
@@ -111,6 +110,26 @@
                         <li><a href="{% url 'employee-list' %}" class="dropdown-item">View Employee List</a></li>
                         <li><a href="{% url 'employee-create' %}" class="dropdown-item">Add New Employee</a></li>
                         <li><a href="{% url 'employee-upload-preview' %}" class="dropdown-item">Bulk Add Employees</a></li>
+                    </ul>
+                </div>
+                {% endif %}
+
+                {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" or current_user_role == "hr" %}
+                <div class="dropdown">
+                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'invoice-customer-report' or current_url_name == 'admin-security-report' or current_url_name == 'payment-stripe-report' or current_url_name == 'payroll-report' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Reports
+                    </button>
+                    <ul class="dropdown-menu">
+                        {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "finance" %}
+                        <li><a href="{% url 'invoice-customer-report' %}" class="dropdown-item">Invoice Customer Report</a></li>
+                        <li><a href="{% url 'payment-stripe-report' %}" class="dropdown-item">Payment Stripe Report</a></li>
+                        {% endif %}
+                        {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
+                        <li><a href="{% url 'payroll-report' %}" class="dropdown-item">Payroll Report</a></li>
+                        {% endif %}
+                        {% if current_user_role == "superadmin" or current_user_role == "admin" %}
+                        <li><a href="{% url 'admin-security-report' %}" class="dropdown-item">Admin Security Report</a></li>
+                        {% endif %}
                     </ul>
                 </div>
                 {% endif %}
