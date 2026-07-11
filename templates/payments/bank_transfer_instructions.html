@@ -29,6 +29,60 @@
                 {% endif %}
             </div>
         </div>
+        {% if bank_transfer_notice_form and bank_transfer_notice_action %}
+        <hr>
+        {% if bank_transfer_payment.has_customer_bank_transfer_notice %}
+        <div class="alert alert-info py-2">
+            Your bank transfer notice was submitted on {{ bank_transfer_payment.manual_customer_submitted_at|date:"d M Y, H:i" }} and is awaiting finance verification.
+        </div>
+        {% endif %}
+        <form method="post" action="{{ bank_transfer_notice_action }}" enctype="multipart/form-data">
+            {% csrf_token %}
+            {% if bank_transfer_notice_form.non_field_errors %}
+            <div class="alert alert-danger py-2">
+                {{ bank_transfer_notice_form.non_field_errors }}
+            </div>
+            {% endif %}
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ bank_transfer_notice_form.manual_customer_amount.id_for_label }}">Transferred amount</label>
+                    {{ bank_transfer_notice_form.manual_customer_amount }}
+                    {% for error in bank_transfer_notice_form.manual_customer_amount.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ bank_transfer_notice_form.manual_customer_transfer_date.id_for_label }}">Transfer date</label>
+                    {{ bank_transfer_notice_form.manual_customer_transfer_date }}
+                    {% for error in bank_transfer_notice_form.manual_customer_transfer_date.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ bank_transfer_notice_form.manual_customer_bank_reference.id_for_label }}">Bank reference number</label>
+                    {{ bank_transfer_notice_form.manual_customer_bank_reference }}
+                    {% for error in bank_transfer_notice_form.manual_customer_bank_reference.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ bank_transfer_notice_form.manual_customer_proof.id_for_label }}">Proof of payment</label>
+                    {{ bank_transfer_notice_form.manual_customer_proof }}
+                    {% for error in bank_transfer_notice_form.manual_customer_proof.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                <div class="col-12">
+                    <label class="form-label" for="{{ bank_transfer_notice_form.manual_customer_notes.id_for_label }}">Notes</label>
+                    {{ bank_transfer_notice_form.manual_customer_notes }}
+                    {% for error in bank_transfer_notice_form.manual_customer_notes.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+            <button type="submit" class="btn btn-outline-success btn-sm mt-3">I Have Transferred Payment</button>
+        </form>
+        {% endif %}
     </div>
 </div>
 {% endif %}

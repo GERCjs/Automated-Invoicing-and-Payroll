@@ -13,11 +13,26 @@ class PaymentBankDetailsAdmin(admin.ModelAdmin):
 @admin.register(PaymentRecord)
 class PaymentRecordAdmin(admin.ModelAdmin):
     # These columns are shown in the payment list screen.
-    list_display = ("payment_reference", "invoice", "provider", "status", "amount", "paid_at")
+    list_display = (
+        "payment_reference",
+        "invoice",
+        "provider",
+        "status",
+        "amount",
+        "paid_at",
+        "manual_customer_submitted_at",
+        "manual_confirmed_by",
+    )
     # These fields can be used as sidebar filters.
-    list_filter = ("provider", "status", "paid_at")
+    list_filter = ("provider", "status", "paid_at", "manual_customer_submitted_at", "manual_confirmed_at")
     # These fields can be searched from the admin search box.
-    search_fields = ("payment_reference", "invoice__invoice_number", "external_transaction_id")
+    search_fields = (
+        "payment_reference",
+        "invoice__invoice_number",
+        "external_transaction_id",
+        "manual_customer_bank_reference",
+        "manual_bank_reference",
+    )
 
 
 # This makes Stripe webhook event records visible in the Django admin page.

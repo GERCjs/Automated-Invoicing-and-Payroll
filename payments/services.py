@@ -113,6 +113,40 @@ def _normalize_external_id(value: Any) -> str:
     return ""
 
 
+def _object_value(source: Any, key: str) -> Any:
+    if isinstance(source, dict):
+        return source.get(key)
+    return getattr(source, key, None)
+
+
+def _validate_checkout_amount_currency(
+    *,
+    session_object: Any,
+    payment_record: PaymentRecord,
+) -> str:
+    raw_currency = _object_value(session_object, "currency")
+    if isinstance(raw_currency, str) and raw_currency:
+        session_currency = _normalize_currency_code(str(raw_currency))
+        if session_currency != payment_record.currency:
+            return (
+                f"Stripe currency mismatch: session={session_currency}, "
+                f"record={payment_record.currency}."
+            )
+
+    raw_amount = _object_value(session_object, "amount_total")
+    if isinstance(raw_amount, (int, str, Decimal)):
+        try:
+            session_amount = int(raw_amount)
+        except (TypeError, ValueError):
+            return "Stripe amount_total is invalid."
+        if session_amount != _to_minor_units(payment_record.amount):
+            return (
+                f"Stripe amount mismatch: session={session_amount}, "
+                f"record={_to_minor_units(payment_record.amount)}."
+            )
+    return ""
+
+
 def _append_checkout_cancel_reference(cancel_url: str, payment_record: PaymentRecord) -> str:
     # Add the payment reference to the cancel URL so we can find the record later.
     separator = "&" if "?" in cancel_url else "?"
@@ -174,9 +208,62 @@ def get_or_create_bank_transfer_payment(
     raise IntegrityError("Unable to generate a unique bank transfer payment reference.")
 
 
+def submit_bank_transfer_notice(
+    *,
+    payment_record: PaymentRecord,
+    transferred_amount: Decimal,
+    transfer_date,
+    bank_reference: str,
+    notes: str = "",
+    proof=None,
+    submitted_by=None,
+) -> PaymentRecord:
+    with transaction.atomic():
+        locked_record = (
+            PaymentRecord.objects.select_related("invoice")
+            .select_for_update()
+            .get(pk=payment_record.pk)
+        )
+        if locked_record.provider != PaymentRecord.PROVIDER_MANUAL:
+            raise ValueError("Only manual bank transfer payments can receive transfer notices.")
+        if locked_record.status != PaymentRecord.STATUS_PENDING:
+            raise ValueError("Only pending bank transfer payments can receive transfer notices.")
+        if Decimal(transferred_amount) != locked_record.amount:
+            raise ValueError("Transferred amount must match the pending payment amount.")
+        normalized_bank_reference = (bank_reference or "").strip()
+        if not normalized_bank_reference:
+            raise ValueError("Bank reference number is required.")
+
+        locked_record.manual_customer_amount = transferred_amount
+        locked_record.manual_customer_transfer_date = transfer_date
+        locked_record.manual_customer_bank_reference = normalized_bank_reference
+        locked_record.manual_customer_notes = (notes or "").strip()
+        if proof:
+            locked_record.manual_customer_proof = proof
+        locked_record.manual_customer_submitted_by = submitted_by
+        locked_record.manual_customer_submitted_at = timezone.now()
+        update_fields = [
+            "manual_customer_amount",
+            "manual_customer_transfer_date",
+            "manual_customer_bank_reference",
+            "manual_customer_notes",
+            "manual_customer_submitted_by",
+            "manual_customer_submitted_at",
+            "updated_at",
+        ]
+        if proof:
+            update_fields.append("manual_customer_proof")
+        locked_record.save(update_fields=update_fields)
+        return locked_record
+
+
 def confirm_bank_transfer_payment(
     *,
     payment_record: PaymentRecord,
+    received_amount: Decimal,
+    received_date,
+    bank_reference: str,
+    confirmation_notes: str = "",
     confirmed_by=None,
 ) -> tuple[PaymentRecord, str, bool]:
     with transaction.atomic():
@@ -187,17 +274,43 @@ def confirm_bank_transfer_payment(
         )
         if locked_record.provider != PaymentRecord.PROVIDER_MANUAL:
             raise ValueError("Only manual bank transfer payments can be confirmed here.")
+        if locked_record.status != PaymentRecord.STATUS_PENDING:
+            raise ValueError("Only pending bank transfer payments can be confirmed.")
+        if Decimal(received_amount) != locked_record.amount:
+            raise ValueError("Amount received must match the pending payment amount.")
+        normalized_bank_reference = (bank_reference or "").strip()
+        if not normalized_bank_reference:
+            raise ValueError("Bank reference is required.")
 
         invoice = locked_record.invoice
         invoice_status_before = invoice.status
         changed = False
 
-        if locked_record.status != PaymentRecord.STATUS_SUCCEEDED:
-            locked_record.status = PaymentRecord.STATUS_SUCCEEDED
-            locked_record.paid_at = timezone.now()
-            locked_record.created_by = locked_record.created_by or confirmed_by
-            locked_record.save(update_fields=["status", "paid_at", "created_by", "updated_at"])
-            changed = True
+        confirmed_at = timezone.now()
+        locked_record.status = PaymentRecord.STATUS_SUCCEEDED
+        locked_record.paid_at = confirmed_at
+        locked_record.created_by = locked_record.created_by or confirmed_by
+        locked_record.manual_received_amount = received_amount
+        locked_record.manual_received_date = received_date
+        locked_record.manual_bank_reference = normalized_bank_reference
+        locked_record.manual_confirmation_notes = (confirmation_notes or "").strip()
+        locked_record.manual_confirmed_by = confirmed_by
+        locked_record.manual_confirmed_at = confirmed_at
+        locked_record.save(
+            update_fields=[
+                "status",
+                "paid_at",
+                "created_by",
+                "manual_received_amount",
+                "manual_received_date",
+                "manual_bank_reference",
+                "manual_confirmation_notes",
+                "manual_confirmed_by",
+                "manual_confirmed_at",
+                "updated_at",
+            ]
+        )
+        changed = True
 
         if invoice.status != Invoice.STATUS_PAID:
             invoice.status = Invoice.STATUS_PAID
@@ -383,7 +496,9 @@ def finalize_checkout_success_from_redirect(
     session_id: str,
     payment_status: str | None,
     payment_intent: str | None,
-    metadata: dict[str, Any] | None,
+    amount_total: int | str | None = None,
+    currency: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> tuple[PaymentRecord | None, bool]:
     """
     Temporary fallback for sandbox flow without webhooks.
@@ -394,17 +509,36 @@ def finalize_checkout_success_from_redirect(
         "id": session_id,
         "payment_status": payment_status,
         "payment_intent": payment_intent,
+        "amount_total": amount_total,
+        "currency": currency,
         "metadata": metadata or {},
     }
 
     with transaction.atomic():
         # Find and lock the payment record connected to this Stripe session.
-        payment_record = _lock_payment_record(session_object)
+        payment_record = _lock_payment_record(session_object, allow_metadata_fallback=False)
         if payment_record is None:
             return None, False
 
         # Only a paid Stripe session should mark the invoice as paid.
         if payment_status != "paid":
+            return payment_record, False
+        validation_error = _validate_checkout_amount_currency(
+            session_object=session_object,
+            payment_record=payment_record,
+        )
+        if validation_error:
+            log_event(
+                action="payment.stripe.redirect_rejected",
+                user=payment_record.created_by,
+                target_type="invoice",
+                target_id=str(payment_record.invoice_id),
+                metadata={
+                    "payment_reference": payment_record.payment_reference,
+                    "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+                    "reason": validation_error,
+                },
+            )
             return payment_record, False
 
         changed = False
@@ -483,7 +617,11 @@ def construct_webhook_event(payload: bytes, stripe_signature: str):
     )
 
 
-def _lock_payment_record(session_object: dict[str, Any]) -> PaymentRecord | None:
+def _lock_payment_record(
+    session_object: dict[str, Any],
+    *,
+    allow_metadata_fallback: bool = True,
+) -> PaymentRecord | None:
     # Find the local PaymentRecord that belongs to a Stripe Checkout session.
     session_id = session_object.get("id")
     metadata = session_object.get("metadata") or {}
@@ -501,7 +639,7 @@ def _lock_payment_record(session_object: dict[str, Any]) -> PaymentRecord | None
         payment_record = queryset.filter(stripe_checkout_session_id=session_id).first()
         if payment_record:
             return payment_record
-    if payment_record_id:
+    if allow_metadata_fallback and payment_record_id:
         # If the session ID did not work, try the payment record ID in metadata.
         return queryset.filter(id=payment_record_id).first()
     return None
@@ -661,6 +799,40 @@ def _mark_success_from_session(
             return
 
         invoice = payment_record.invoice
+        validation_error = _validate_checkout_amount_currency(
+            session_object=session_object,
+            payment_record=payment_record,
+        )
+        if validation_error:
+            event_record.status = StripeWebhookEvent.STATUS_IGNORED
+            event_record.error_message = validation_error
+            event_record.payment_record = payment_record
+            event_record.invoice = invoice
+            event_record.processed_at = timezone.now()
+            event_record.save(
+                update_fields=[
+                    "status",
+                    "error_message",
+                    "payment_record",
+                    "invoice",
+                    "processed_at",
+                    "updated_at",
+                ]
+            )
+            log_event(
+                action="payment.stripe.rejected",
+                user=None,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "payment_reference": payment_record.payment_reference,
+                    "stripe_checkout_session_id": payment_record.stripe_checkout_session_id,
+                    "event_type": event_type,
+                    "reason": validation_error,
+                },
+            )
+            return
         payment_intent_id = _normalize_external_id(session_object.get("payment_intent"))
         # Mark the local payment as succeeded.
         update_fields = ["status", "paid_at", "updated_at"]

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -25,6 +26,27 @@ from .models import PaymentBankDetails, PaymentRecord, StripeWebhookEvent
 from .services import create_checkout_for_invoice, create_full_refund_for_payment
 
 User = get_user_model()
+
+
+class PaymentConfigurationSafetyTests(TestCase):
+    def test_env_example_uses_placeholders_for_sensitive_values(self):
+        env_example = Path(__file__).resolve().parents[1] / ".env.example"
+        content = env_example.read_text(encoding="utf-8")
+
+        forbidden_values = [
+            "RepublicPoly2026",
+            "re_GnhznSjQ_BGihfGUPq7WGbMTxZ97m8Ljf",
+            "sk_test_51Stps7DcQnuk3ne0",
+            "pk_test_51Stps7DcQnuk3ne0",
+            "anotherSuper",
+            "iamAdminsuper",
+        ]
+        for value in forbidden_values:
+            with self.subTest(value=value):
+                self.assertNotIn(value, content)
+
+        self.assertIn("STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key", content)
+        self.assertIn("EMAIL_HOST_PASSWORD=your_resend_api_key", content)
 
 
 class StripePaymentsPhaseTests(TestCase):
@@ -206,6 +228,97 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertContains(response, "Bank Transfer")
         self.assertContains(response, payment_record.payment_reference)
 
+    def test_customer_can_submit_bank_transfer_notice_without_marking_invoice_paid(self):
+        self.client.login(username="customer_stripe", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("payment-bank-transfer-notice-customer", args=[self.invoice.pk]),
+            data={
+                "manual_customer_amount": str(self.invoice.total_amount),
+                "manual_customer_transfer_date": timezone.localdate().isoformat(),
+                "manual_customer_bank_reference": "CUSTOMER-BANK-REF-001",
+                "manual_customer_notes": "Transferred from DBS.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("customer-invoice-detail", args=[self.invoice.pk]))
+        self.invoice.refresh_from_db()
+        payment_record = PaymentRecord.objects.get(
+            invoice=self.invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+        )
+        self.assertEqual(self.invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(payment_record.manual_customer_amount, self.invoice.total_amount)
+        self.assertEqual(payment_record.manual_customer_bank_reference, "CUSTOMER-BANK-REF-001")
+        self.assertEqual(payment_record.manual_customer_notes, "Transferred from DBS.")
+        self.assertEqual(payment_record.manual_customer_submitted_by, self.customer_user)
+        self.assertIsNotNone(payment_record.manual_customer_submitted_at)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.bank_transfer.notice_submitted",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
+
+    def test_public_invoice_page_can_submit_bank_transfer_notice(self):
+        response = self.client.post(
+            reverse("payment-bank-transfer-notice-public", args=[self.invoice.public_view_token]),
+            data={
+                "manual_customer_amount": str(self.invoice.total_amount),
+                "manual_customer_transfer_date": timezone.localdate().isoformat(),
+                "manual_customer_bank_reference": "PUBLIC-BANK-REF-001",
+                "manual_customer_notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("invoice-public-view", args=[self.invoice.public_view_token]))
+        self.invoice.refresh_from_db()
+        payment_record = PaymentRecord.objects.get(
+            invoice=self.invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+        )
+        self.assertEqual(self.invoice.status, Invoice.STATUS_SENT)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(payment_record.manual_customer_bank_reference, "PUBLIC-BANK-REF-001")
+        self.assertIsNone(payment_record.manual_customer_submitted_by)
+
+    def test_customer_bank_transfer_notice_rejects_invalid_amount_and_future_date(self):
+        self.client.login(username="customer_stripe", password="TempPass123!")
+
+        bad_amount_response = self.client.post(
+            reverse("payment-bank-transfer-notice-customer", args=[self.invoice.pk]),
+            data={
+                "manual_customer_amount": "1.00",
+                "manual_customer_transfer_date": timezone.localdate().isoformat(),
+                "manual_customer_bank_reference": "BAD-AMOUNT",
+                "manual_customer_notes": "",
+            },
+        )
+        future_date_response = self.client.post(
+            reverse("payment-bank-transfer-notice-customer", args=[self.invoice.pk]),
+            data={
+                "manual_customer_amount": str(self.invoice.total_amount),
+                "manual_customer_transfer_date": (timezone.localdate() + timedelta(days=1)).isoformat(),
+                "manual_customer_bank_reference": "FUTURE-DATE",
+                "manual_customer_notes": "",
+            },
+        )
+
+        self.assertEqual(bad_amount_response.status_code, 400)
+        self.assertEqual(future_date_response.status_code, 400)
+        self.invoice.refresh_from_db()
+        payment_record = PaymentRecord.objects.get(
+            invoice=self.invoice,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+        )
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        self.assertIsNone(payment_record.manual_customer_submitted_at)
+
     def test_bank_transfer_is_hidden_when_required_bank_details_are_blank(self):
         PaymentBankDetails.objects.update_or_create(
             pk=1,
@@ -324,10 +437,110 @@ class StripePaymentsPhaseTests(TestCase):
             invoice=self.invoice,
             provider=PaymentRecord.PROVIDER_MANUAL,
         )
-        self.assertContains(response, "Confirm Bank Transfer Paid")
+        self.assertContains(response, "Confirm Verified Bank Transfer")
         self.assertContains(response, payment_record.payment_reference)
         self.assertContains(response, "Test Receiving Bank")
         self.assertContains(response, "987-654321-0")
+        self.assertContains(response, "Amount received")
+        self.assertContains(response, "Bank reference")
+
+    def test_internal_invoice_detail_shows_customer_submitted_bank_transfer_notice(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-SUBMIT",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            manual_customer_amount=self.invoice.total_amount,
+            manual_customer_transfer_date=timezone.localdate(),
+            manual_customer_bank_reference="CUSTOMER-SUBMITTED-REF",
+            manual_customer_notes="Paid before lunch.",
+            manual_customer_submitted_by=self.customer_user,
+            manual_customer_submitted_at=timezone.now(),
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-detail", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Customer transfer notice awaiting verification")
+        self.assertContains(response, payment_record.payment_reference)
+        self.assertContains(response, "CUSTOMER-SUBMITTED-REF")
+        self.assertContains(response, "Paid before lunch.")
+
+    def test_finance_cannot_confirm_bank_transfer_without_proof(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-NOPROOF",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+
+        self.assertEqual(response.status_code, 400)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+
+    def test_finance_cannot_confirm_bank_transfer_with_mismatched_amount(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-BADAMT",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]),
+            data={
+                "manual_received_amount": "1.00",
+                "manual_received_date": timezone.localdate().isoformat(),
+                "manual_bank_reference": "BANKREF-BAD-AMOUNT",
+                "manual_confirmation_notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+
+    def test_finance_cannot_confirm_bank_transfer_with_future_received_date(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-FUTURE",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]),
+            data={
+                "manual_received_amount": str(self.invoice.total_amount),
+                "manual_received_date": (timezone.localdate() + timedelta(days=1)).isoformat(),
+                "manual_bank_reference": "BANKREF-FUTURE",
+                "manual_confirmation_notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
 
     def test_finance_can_confirm_bank_transfer_and_mark_invoice_paid(self):
         payment_record = PaymentRecord.objects.create(
@@ -340,7 +553,15 @@ class StripePaymentsPhaseTests(TestCase):
         )
         self.client.login(username="finance_stripe", password="TempPass123!")
 
-        response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+        response = self.client.post(
+            reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]),
+            data={
+                "manual_received_amount": str(self.invoice.total_amount),
+                "manual_received_date": timezone.localdate().isoformat(),
+                "manual_bank_reference": "BANKREF-ABC123",
+                "manual_confirmation_notes": "Matched in bank portal.",
+            },
+        )
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("invoice-detail", args=[self.invoice.pk]))
@@ -349,11 +570,108 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(self.invoice.status, Invoice.STATUS_PAID)
         self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
         self.assertIsNotNone(payment_record.paid_at)
+        self.assertEqual(payment_record.manual_received_amount, self.invoice.total_amount)
+        self.assertEqual(payment_record.manual_bank_reference, "BANKREF-ABC123")
+        self.assertEqual(payment_record.manual_confirmed_by, self.finance_user)
+        self.assertIsNotNone(payment_record.manual_confirmed_at)
         self.assertTrue(
             AuditLog.objects.filter(
                 action="payment.bank_transfer.confirmed",
                 target_type="invoice",
                 target_id=str(self.invoice.id),
+            ).exists()
+        )
+
+    def test_finance_can_confirm_customer_submitted_bank_transfer_notice(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-CUSTOMER",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            manual_customer_amount=self.invoice.total_amount,
+            manual_customer_transfer_date=timezone.localdate(),
+            manual_customer_bank_reference="CUSTOMER-VERIFY-REF",
+            manual_customer_notes="Please verify.",
+            manual_customer_submitted_by=self.customer_user,
+            manual_customer_submitted_at=timezone.now(),
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]),
+            data={
+                "manual_received_amount": str(self.invoice.total_amount),
+                "manual_received_date": timezone.localdate().isoformat(),
+                "manual_bank_reference": "CUSTOMER-VERIFY-REF",
+                "manual_confirmation_notes": "Matched customer notice to bank portal.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
+        self.assertEqual(payment_record.manual_bank_reference, "CUSTOMER-VERIFY-REF")
+        audit_log = AuditLog.objects.filter(
+            action="payment.bank_transfer.confirmed",
+            target_type="invoice",
+            target_id=str(self.invoice.id),
+        ).latest("created_at")
+        self.assertEqual(audit_log.metadata["manual_customer_bank_reference"], "CUSTOMER-VERIFY-REF")
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    def test_finance_confirmation_sends_bank_transfer_success_email_to_customer(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-EMAIL",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            manual_customer_amount=self.invoice.total_amount,
+            manual_customer_transfer_date=timezone.localdate(),
+            manual_customer_bank_reference="CUSTOMER-EMAIL-REF",
+            manual_customer_submitted_by=self.customer_user,
+            manual_customer_submitted_at=timezone.now(),
+        )
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]),
+            data={
+                "manual_received_amount": str(self.invoice.total_amount),
+                "manual_received_date": timezone.localdate().isoformat(),
+                "manual_bank_reference": "CUSTOMER-EMAIL-REF",
+                "manual_confirmation_notes": "Matched in bank portal.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        payment_record.refresh_from_db()
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Bank transfer verified", mail.outbox[0].subject)
+        self.assertIn("Payment Method: Bank Transfer", mail.outbox[0].body)
+        self.assertIn("CUSTOMER-EMAIL-REF", mail.outbox[0].body)
+        self.assertTrue(
+            EmailDeliveryLog.objects.filter(
+                template_key="bank_transfer_payment_success_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.email.sent",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+                metadata__payment_outcome="bank_transfer_successful",
             ).exists()
         )
 
@@ -372,7 +690,15 @@ class StripePaymentsPhaseTests(TestCase):
         )
         self.client.login(username="finance_stripe", password="TempPass123!")
 
-        response = self.client.post(reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]))
+        response = self.client.post(
+            reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]),
+            data={
+                "manual_received_amount": str(self.invoice.total_amount),
+                "manual_received_date": timezone.localdate().isoformat(),
+                "manual_bank_reference": "BANKREF-OVERDUE",
+                "manual_confirmation_notes": "",
+            },
+        )
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.url, reverse("invoice-detail", args=[self.invoice.pk]))
@@ -481,6 +807,56 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("Payment Status: Successful", mail.outbox[0].body)
         self.assertIn(self.invoice.invoice_number, mail.outbox[0].body)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    @patch("payments.views.construct_webhook_event")
+    def test_webhook_completed_rejects_amount_mismatch(self, construct_event_mock):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-WEBHOOK-MISMATCH-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_webhook_mismatch_1",
+        )
+        construct_event_mock.return_value = {
+            "id": "evt_test_mismatch_1001",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_webhook_mismatch_1",
+                    "payment_status": "paid",
+                    "payment_intent": "pi_test_mismatch_1001",
+                    "amount_total": 100,
+                    "currency": "sgd",
+                    "metadata": {
+                        "payment_record_id": str(payment_record.id),
+                        "invoice_id": str(self.invoice.id),
+                    },
+                }
+            },
+        }
+
+        response = self.client.post(
+            reverse("payment-stripe-webhook"),
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="t=123,v1=abc",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        event = StripeWebhookEvent.objects.get(event_id="evt_test_mismatch_1001")
+        self.assertEqual(event.status, StripeWebhookEvent.STATUS_IGNORED)
+        self.assertIn("Stripe amount mismatch", event.error_message)
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(len(mail.outbox), 0)
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
@@ -1124,6 +1500,48 @@ class StripePaymentsPhaseTests(TestCase):
             ).exists()
         )
         self.assertEqual(len(mail.outbox), 1)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    @patch("payments.views.retrieve_checkout_session")
+    def test_success_page_rejects_amount_mismatch(self, retrieve_session_mock):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-SUCCESS-MISMATCH-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_success_mismatch_1",
+        )
+        retrieve_session_mock.return_value = Mock(
+            payment_status="paid",
+            payment_intent="pi_test_success_mismatch_1",
+            amount_total=100,
+            currency="sgd",
+            metadata={},
+        )
+
+        response = self.client.get(
+            reverse("payment-checkout-success"),
+            data={"session_id": payment_record.stripe_checkout_session_id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertNotEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.stripe.redirect_rejected",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
 
     def test_cancel_page_renders(self):
         response = self.client.get(reverse("payment-checkout-cancel"), data={"next": "/invoices/"})

@@ -25,6 +25,8 @@ from payments.services import (
     get_or_create_bank_transfer_payment,
     successful_payments_queryset,
 )
+from payments.models import PaymentRecord
+from payments.forms import BankTransferConfirmationForm, BankTransferNoticeForm
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
 from .forms import (
@@ -80,12 +82,17 @@ def _bank_transfer_context(invoice: Invoice, initiated_by=None) -> dict:
             "bank_transfer_details": None,
             "bank_transfer_payment": None,
         }
+    bank_transfer_payment = get_or_create_bank_transfer_payment(
+        invoice=invoice,
+        initiated_by=initiated_by,
+    )
     return {
         "bank_transfer_details": bank_transfer_details,
-        "bank_transfer_payment": get_or_create_bank_transfer_payment(
-            invoice=invoice,
-            initiated_by=initiated_by,
+        "bank_transfer_payment": bank_transfer_payment,
+        "bank_transfer_confirmation_form": BankTransferConfirmationForm(
+            payment_record=bank_transfer_payment
         ),
+        "bank_transfer_notice_form": BankTransferNoticeForm(payment_record=bank_transfer_payment),
     }
 
 
@@ -452,6 +459,7 @@ def customer_invoice_detail(request, pk):
             "invoice": invoice,
             "items": invoice.items.all(),
             **_bank_transfer_context(invoice, initiated_by=request.user),
+            "bank_transfer_notice_action": reverse("payment-bank-transfer-notice-customer", args=[invoice.pk]),
             **reminder_context,
         },
     )
@@ -735,8 +743,26 @@ def invoice_dashboard(request):
         .first()
     )
     import_validation_issue_count = latest_import_job_with_issues.invalid_rows if latest_import_job_with_issues else 0
+    submitted_bank_transfer_count = PaymentRecord.objects.filter(
+        provider=PaymentRecord.PROVIDER_MANUAL,
+        status=PaymentRecord.STATUS_PENDING,
+        manual_customer_submitted_at__isnull=False,
+    ).count()
 
     attention_items = []
+    if submitted_bank_transfer_count > 0:
+        attention_items.append(
+            {
+                "priority_label": "Verify",
+                "priority_class": "status-warning",
+                "issue": "Bank transfers awaiting verification",
+                "count": submitted_bank_transfer_count,
+                "scope": "Customer-submitted transfer notices",
+                "detail": "Customers reported bank transfers that Finance needs to match against the bank account.",
+                "action_label": "Review transfers",
+                "action_url": reverse("payment-stripe-report"),
+            }
+        )
     if overdue_count > 0:
         attention_items.append(
             {
@@ -838,6 +864,7 @@ def invoice_dashboard(request):
             "paid_count": paid_count,
             "refunded_count": refunded_count,
             "overdue_count": overdue_count,
+            "submitted_bank_transfer_count": submitted_bank_transfer_count,
             "outstanding_amount": outstanding_amount,
             "overdue_amount": overdue_amount,
             "collected_month": collected_month,
@@ -1173,6 +1200,10 @@ def invoice_public_view(request, token):
             "invoice": invoice,
             "items": invoice.items.all(),
             **_bank_transfer_context(invoice),
+            "bank_transfer_notice_action": reverse(
+                "payment-bank-transfer-notice-public",
+                args=[invoice.public_view_token],
+            ),
         },
     )
 

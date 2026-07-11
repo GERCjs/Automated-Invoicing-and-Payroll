@@ -1066,6 +1066,9 @@ def payment_stripe_report(request):
         provider=PaymentRecord.PROVIDER_MANUAL,
         status=PaymentRecord.STATUS_PENDING,
     )
+    submitted_manual_payments = pending_manual_payments.filter(
+        manual_customer_submitted_at__isnull=False,
+    )
 
     successful_month_amount = _safe_sum(
         succeeded_payments.filter(paid_at__date__gte=month_start, paid_at__date__lte=today),
@@ -1209,6 +1212,7 @@ def payment_stripe_report(request):
             "refunded_count": refunded_payments.count(),
             "refunded_amount": refunded_amount,
             "pending_manual_payment_count": pending_manual_payments.count(),
+            "submitted_manual_payment_count": submitted_manual_payments.count(),
             "outstanding_amount": outstanding_amount,
             "payment_status_summary": payment_status_summary,
             "recent_payments": recent_payments,

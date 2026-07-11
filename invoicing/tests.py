@@ -37,6 +37,7 @@ from .services import (
     parse_invoice_csv,
     parse_invoice_excel,
     refresh_overdue_invoices,
+    transition_invoice_status,
 )
 
 User = get_user_model()
@@ -407,6 +408,20 @@ class InvoicingMvpTests(TestCase):
         self.assertFalse(changed)
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, Invoice.STATUS_PAID)
+
+    def test_status_transition_rejects_manual_paid_change(self):
+        invoice = self._create_basic_invoice(
+            invoice_number="INV-2099-0010A",
+            status=Invoice.STATUS_SENT,
+            due_date=timezone.localdate() + timedelta(days=3),
+        )
+
+        success, message = transition_invoice_status(invoice, Invoice.STATUS_PAID)
+
+        self.assertFalse(success)
+        self.assertIn("Stripe confirmation or verified bank-transfer confirmation", message)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, Invoice.STATUS_SENT)
 
     def test_past_due_refunded_invoice_remains_refunded(self):
         invoice = self._create_basic_invoice(
@@ -2117,6 +2132,38 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertEqual(response.context["import_validation_issue_count"], 2)
         self.assertEqual(len(response.context["recent_action_invoices"]), 4)
         self.assertEqual(response.context["recent_action_invoice_limit"], 8)
+
+    def test_invoice_dashboard_shows_submitted_bank_transfer_verification_card(self):
+        invoice = self._create_invoice(
+            invoice_number="INV-DASH-BANK-VERIFY",
+            status=Invoice.STATUS_OVERDUE,
+            total_amount="109.00",
+            issue_date=timezone.localdate() - timedelta(days=20),
+            due_date=timezone.localdate() - timedelta(days=2),
+        )
+        PaymentRecord.objects.create(
+            invoice=invoice,
+            payment_reference="BANK-DASH-VERIFY-001",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=Decimal("109.00"),
+            currency="SGD",
+            manual_customer_amount=Decimal("109.00"),
+            manual_customer_transfer_date=timezone.localdate(),
+            manual_customer_bank_reference="DASH-CUSTOMER-REF",
+            manual_customer_submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.finance_user)
+
+        response = self.client.get(reverse("invoice-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["submitted_bank_transfer_count"], 1)
+        self.assertContains(response, "Bank Transfers To Verify")
+        self.assertContains(response, "Customer-submitted bank transfer notices waiting for Finance verification.")
+        self.assertContains(response, "Bank transfers awaiting verification")
+        self.assertContains(response, "Review transfers")
+        self.assertContains(response, reverse("payment-stripe-report"))
 
     def test_invoice_dashboard_action_labels_match_status(self):
         today = timezone.localdate()

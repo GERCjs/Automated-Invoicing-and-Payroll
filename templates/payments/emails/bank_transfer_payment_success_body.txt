@@ -1,0 +1,23 @@
+Hello {{ customer.name }},
+
+Your bank transfer payment has been verified and your invoice is now marked as paid.
+
+Payment Status: Successful
+Payment Method: Bank Transfer
+Invoice Number: {{ invoice.invoice_number }}
+Issue Date: {{ invoice.issue_date }}
+Due Date: {{ invoice.due_date }}
+Total Amount: {{ invoice.currency }} {{ invoice.total_amount }}
+Amount Due: {{ invoice.currency }} {{ amount_due }}
+Payment Date: {{ payment_record.paid_at|date:"Y-m-d H:i"|default:"Verified by finance" }}
+Amount Paid: {{ payment_record.currency }} {{ payment_record.amount }}
+Payment Reference: {{ payment_record.payment_reference }}
+Bank Reference: {{ payment_record.manual_bank_reference }}
+
+View your invoice online:
+{{ public_invoice_url }}
+
+If you have questions, contact us at {{ company_email }} or {{ company_phone }}.
+
+Regards,
+{{ company_name }}

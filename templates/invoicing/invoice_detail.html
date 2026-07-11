@@ -85,9 +85,64 @@
                 {% if bank_transfer_details.instructions %}
                 <p class="mb-2 text-muted">{{ bank_transfer_details.instructions }}</p>
                 {% endif %}
+                {% if bank_transfer_payment.has_customer_bank_transfer_notice %}
+                <div class="alert alert-warning py-2">
+                    <strong>Customer transfer notice awaiting verification</strong>
+                    <p class="mb-1 mt-2"><strong>Transferred Amount:</strong> {{ bank_transfer_payment.currency }} {{ bank_transfer_payment.manual_customer_amount }}</p>
+                    <p class="mb-1"><strong>Transfer Date:</strong> {{ bank_transfer_payment.manual_customer_transfer_date }}</p>
+                    <p class="mb-1"><strong>Customer Bank Reference:</strong> {{ bank_transfer_payment.manual_customer_bank_reference }}</p>
+                    <p class="mb-1"><strong>Submitted At:</strong> {{ bank_transfer_payment.manual_customer_submitted_at|date:"Y-m-d H:i" }}</p>
+                    {% if bank_transfer_payment.manual_customer_submitted_by %}
+                    <p class="mb-1"><strong>Submitted By:</strong> {{ bank_transfer_payment.manual_customer_submitted_by.username }}</p>
+                    {% endif %}
+                    {% if bank_transfer_payment.manual_customer_proof %}
+                    <p class="mb-1"><strong>Proof:</strong> <a href="{{ bank_transfer_payment.manual_customer_proof.url }}" target="_blank">Open proof of payment</a></p>
+                    {% endif %}
+                    {% if bank_transfer_payment.manual_customer_notes %}
+                    <p class="mb-0"><strong>Customer Notes:</strong> {{ bank_transfer_payment.manual_customer_notes }}</p>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="alert alert-secondary py-2">
+                    No customer transfer notice has been submitted yet. Confirm only after verifying payment externally.
+                </div>
+                {% endif %}
                 <form method="post" action="{% url 'payment-bank-transfer-confirm' invoice.pk %}">
                     {% csrf_token %}
-                    <button type="submit" class="btn btn-success btn-sm">Confirm Bank Transfer Paid</button>
+                    {% if bank_transfer_confirmation_form.non_field_errors %}
+                    <div class="alert alert-danger py-2">
+                        {{ bank_transfer_confirmation_form.non_field_errors }}
+                    </div>
+                    {% endif %}
+                    <div class="mb-2">
+                        <label class="form-label" for="{{ bank_transfer_confirmation_form.manual_received_amount.id_for_label }}">Amount received</label>
+                        {{ bank_transfer_confirmation_form.manual_received_amount }}
+                        {% for error in bank_transfer_confirmation_form.manual_received_amount.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="{{ bank_transfer_confirmation_form.manual_received_date.id_for_label }}">Received date</label>
+                        {{ bank_transfer_confirmation_form.manual_received_date }}
+                        {% for error in bank_transfer_confirmation_form.manual_received_date.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="{{ bank_transfer_confirmation_form.manual_bank_reference.id_for_label }}">Bank reference</label>
+                        {{ bank_transfer_confirmation_form.manual_bank_reference }}
+                        {% for error in bank_transfer_confirmation_form.manual_bank_reference.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="{{ bank_transfer_confirmation_form.manual_confirmation_notes.id_for_label }}">Confirmation notes</label>
+                        {{ bank_transfer_confirmation_form.manual_confirmation_notes }}
+                        {% for error in bank_transfer_confirmation_form.manual_confirmation_notes.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="btn btn-success btn-sm">Confirm Verified Bank Transfer</button>
                 </form>
             </div>
         </div>

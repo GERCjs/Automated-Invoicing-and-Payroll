@@ -18,6 +18,18 @@ urlpatterns = [
         views.confirm_bank_transfer_payment_for_invoice,
         name="payment-bank-transfer-confirm",
     ),
+    # Customers submit a bank transfer notice here after transferring money externally.
+    path(
+        "bank-transfer/notice/customer/<int:pk>/",
+        views.submit_customer_bank_transfer_notice,
+        name="payment-bank-transfer-notice-customer",
+    ),
+    # Public invoice viewers submit a bank transfer notice here after transferring money externally.
+    path(
+        "bank-transfer/notice/public/<str:token>/",
+        views.submit_public_bank_transfer_notice,
+        name="payment-bank-transfer-notice-public",
+    ),
     # Stripe sends the customer back here after checkout succeeds.
     path("checkout/success/", views.checkout_success, name="payment-checkout-success"),
     # Stripe sends the customer back here if checkout is cancelled.

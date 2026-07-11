@@ -101,9 +101,9 @@
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
                     <div class="card-body">
-                        <div class="report-kpi-label">Pending Bank Transfers</div>
-                        <div class="report-kpi-value">{{ pending_manual_payment_count }}</div>
-                        <div class="small text-muted">Manual payment records still waiting for finance confirmation.</div>
+                        <div class="report-kpi-label">Submitted Bank Transfers</div>
+                        <div class="report-kpi-value">{{ submitted_manual_payment_count }}</div>
+                        <div class="small text-muted">{{ pending_manual_payment_count }} pending manual records; submitted notices are waiting for finance verification.</div>
                     </div>
                 </div>
             </div>
@@ -157,8 +157,10 @@
                             {% for payment in attention_payments %}
                             <tr>
                                 <td>
-                                    {% if payment.provider == "manual" and payment.status == "pending" %}
-                                    <span class="status-badge status-warning">Manual Review</span>
+                                    {% if payment.provider == "manual" and payment.status == "pending" and payment.has_customer_bank_transfer_notice %}
+                                    <span class="status-badge status-warning">Verify Transfer</span>
+                                    {% elif payment.provider == "manual" and payment.status == "pending" %}
+                                    <span class="status-badge status-neutral">Awaiting Notice</span>
                                     {% elif payment.status == "failed" %}
                                     <span class="status-badge status-danger">High</span>
                                     {% elif payment.status == "cancelled" %}
@@ -175,11 +177,11 @@
                                 <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
                                 <td class="text-end">
                                     <div class="payment-report-actions">
+                                        {% if payment.provider == "manual" and payment.status == "pending" and payment.has_customer_bank_transfer_notice %}
+                                        <div class="small text-muted">Submitted ref: {{ payment.manual_customer_bank_reference }}</div>
+                                        {% endif %}
                                         {% if payment.provider == "manual" and payment.status == "pending" %}
-                                        <form method="post" action="{% url 'payment-bank-transfer-confirm' payment.invoice.pk %}" class="d-inline">
-                                            {% csrf_token %}
-                                            <button type="submit" class="btn btn-link btn-sm payment-report-action-button">Confirm bank transfer</button>
-                                        </form>
+                                        <a href="{% url 'invoice-detail' payment.invoice.pk %}" class="payment-report-action-button">Review bank transfer</a>
                                         {% endif %}
                                         <a href="{% url 'invoice-detail' payment.invoice.pk %}" class="report-link">Open invoice</a>
                                     </div>
@@ -286,11 +288,11 @@
                                 <td class="text-end">S${{ payment.amount|floatformat:2|intcomma }}</td>
                                 <td class="text-end">
                                     <div class="payment-report-actions">
+                                        {% if payment.provider == "manual" and payment.status == "pending" and payment.has_customer_bank_transfer_notice %}
+                                        <div class="small text-muted">Submitted ref: {{ payment.manual_customer_bank_reference }}</div>
+                                        {% endif %}
                                         {% if payment.provider == "manual" and payment.status == "pending" %}
-                                        <form method="post" action="{% url 'payment-bank-transfer-confirm' payment.invoice.pk %}" class="d-inline">
-                                            {% csrf_token %}
-                                            <button type="submit" class="btn btn-link btn-sm payment-report-action-button">Confirm bank transfer</button>
-                                        </form>
+                                        <a href="{% url 'invoice-detail' payment.invoice.pk %}" class="payment-report-action-button">Review bank transfer</a>
                                         {% endif %}
                                         <a href="{% url 'invoice-detail' payment.invoice.pk %}" class="report-link">Open invoice</a>
                                     </div>

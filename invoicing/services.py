@@ -106,6 +106,8 @@ def transition_invoice_status(invoice: Invoice, new_status: str) -> tuple[bool, 
         return False, "Invalid status."
     if new_status == invoice.status:
         return False, "Invoice is already in the selected status."
+    if new_status == Invoice.STATUS_PAID:
+        return False, "Invoices can only be marked paid by Stripe confirmation or verified bank-transfer confirmation."
 
     allowed = allowed_transitions.get(invoice.status, set())
     if new_status not in allowed:

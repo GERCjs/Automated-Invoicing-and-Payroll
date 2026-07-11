@@ -289,8 +289,6 @@ def dashboard(request):
         issued_outstanding_invoices,
         "total_amount",
     )
-    draft_invoice_amount = _safe_sum(Invoice.objects.filter(status=Invoice.STATUS_DRAFT), "total_amount")
-
     payroll_status_counts = _safe_group_counts(PayrollBatch.objects.all(), "status")
     payroll_pending_entries = _safe_count(PayrollEntry.objects.filter(status=PayrollEntry.STATUS_PENDING))
     payroll_total_net = _safe_sum(PayrollRecord.objects.all(), "net_salary")
@@ -388,7 +386,14 @@ def dashboard(request):
             ]
         )
     )
-    operational_risk_count = payment_issue_count + suspicious_activity_count + failed_email_count + import_issue_total
+    submitted_bank_transfer_count = _safe_count(
+        PaymentRecord.objects.filter(
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            manual_customer_submitted_at__isnull=False,
+        )
+    )
+    operational_risk_count = payment_issue_count + suspicious_activity_count + import_issue_total
 
     top_collection_risks = _safe_list(
         issued_outstanding_invoices.values("customer_id", "customer__name", "customer__email")
@@ -428,7 +433,7 @@ def dashboard(request):
         },
         {
             "label": "Security Report",
-            "description": "Review suspicious activity and failed email delivery issues.",
+            "description": "Review suspicious activity and permission issues.",
             "url": reverse("admin-security-report"),
         },
     ]
@@ -441,25 +446,14 @@ def dashboard(request):
             "link_url": f"{reverse('invoice-list')}?status=overdue",
         },
         {
-            "label": "Draft Invoice Value",
-            "value": _currency_string(draft_invoice_amount),
-            "note": f"{invoice_status_counts.get(Invoice.STATUS_DRAFT, 0)} draft invoice(s) not counted as receivables.",
-            "link_label": "Review draft invoices",
-            "link_url": f"{reverse('invoice-list')}?status=draft",
-        },
-        {
             "label": "Payment Issues",
             "value": str(payment_issue_count),
-            "note": "Pending, failed, cancelled, or refunded payment records needing finance review.",
+            "note": (
+                f"{submitted_bank_transfer_count} customer-submitted bank transfer(s) "
+                "awaiting verification."
+            ),
             "link_label": "Review payment report",
             "link_url": reverse("payment-stripe-report"),
-        },
-        {
-            "label": "Failed Email Deliveries",
-            "value": str(failed_email_count),
-            "note": "Invoice, reminder or payslip messages may require follow-up.",
-            "link_label": "Review failed emails",
-            "link_url": f"{reverse('email-delivery-log-list')}?status=failed",
         },
         {
             "label": "Import Issues",
@@ -489,7 +483,10 @@ def dashboard(request):
                 "priority_class": "status-warning",
                 "area": "Payments",
                 "finding": f"{payment_issue_count} payment issue(s)",
-                "impact": "Pending, failed, cancelled, or refunded payments may need finance review.",
+                "impact": (
+                    f"{submitted_bank_transfer_count} submitted bank transfer(s) "
+                    "need bank-account verification."
+                ),
                 "link_label": "Review payment report",
                 "link_url": reverse("payment-stripe-report"),
             }
@@ -504,18 +501,6 @@ def dashboard(request):
                 "impact": "Accounts or access attempts may require investigation.",
                 "link_label": "Review security issues",
                 "link_url": reverse("admin-security-report"),
-            }
-        )
-    if failed_email_count:
-        management_attention_items.append(
-            {
-                "priority": "Medium",
-                "priority_class": "status-warning",
-                "area": "Email",
-                "finding": f"{failed_email_count} failed delivery log(s)",
-                "impact": "Some users may not receive invoices, reminders or payroll documents.",
-                "link_label": "Review failed emails",
-                "link_url": f"{reverse('email-delivery-log-list')}?status=failed",
             }
         )
     if import_failed_count or import_with_errors_count:
@@ -552,7 +537,6 @@ def dashboard(request):
             "invoice_paid_count": invoice_status_counts.get(Invoice.STATUS_PAID, 0),
             "invoice_overdue_count": invoice_status_counts.get(Invoice.STATUS_OVERDUE, 0),
             "invoice_outstanding": invoice_outstanding,
-            "draft_invoice_amount": draft_invoice_amount,
             "employee_total": _safe_count(Employee.objects.all()),
             "active_employee_total": _safe_count(Employee.objects.filter(status=Employee.STATUS_ACTIVE)),
             "payroll_batch_total": _safe_count(PayrollBatch.objects.all()),
@@ -589,6 +573,7 @@ def dashboard(request):
             "previous_month_label": previous_month_label,
             "overdue_invoice_amount": overdue_invoice_amount,
             "payment_issue_count": payment_issue_count,
+            "submitted_bank_transfer_count": submitted_bank_transfer_count,
             "suspicious_activity_count": suspicious_activity_count,
             "security_alert_total": security_alert_total,
             "operational_risk_count": operational_risk_count,

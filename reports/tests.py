@@ -122,7 +122,7 @@ class PaymentStripeReportAccessTests(TestCase):
         )
         self.assertContains(response, "Collected This Month")
         self.assertContains(response, "Successful Payments")
-        self.assertContains(response, "Pending Bank Transfers")
+        self.assertContains(response, "Submitted Bank Transfers")
         self.assertContains(response, "Refunded Amount")
         self.assertContains(response, "Collected This Year")
         self.assertContains(response, "Payment Attention")
@@ -133,7 +133,7 @@ class PaymentStripeReportAccessTests(TestCase):
         self.assertNotContains(response, "View Related Invoice")
         self.assertNotContains(response, ">Open<")
 
-    def test_payment_report_shows_pending_manual_bank_transfer_confirmation_action(self):
+    def test_payment_report_links_pending_manual_bank_transfer_to_review_screen(self):
         user = self._make_user("report_manual_attention", FINANCE)
         pending_invoice = Invoice.objects.create(
             invoice_number="INV-REPORT-1003",
@@ -159,8 +159,10 @@ class PaymentStripeReportAccessTests(TestCase):
         response = self.client.get(reverse("payment-stripe-report"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Confirm bank transfer")
-        self.assertContains(response, reverse("payment-bank-transfer-confirm", args=[pending_invoice.pk]))
+        self.assertContains(response, "Awaiting Notice")
+        self.assertContains(response, "Review bank transfer")
+        self.assertContains(response, reverse("invoice-detail", args=[pending_invoice.pk]))
+        self.assertNotContains(response, reverse("payment-bank-transfer-confirm", args=[pending_invoice.pk]))
         self.assertContains(response, pending_invoice.invoice_number)
 
     def test_payment_report_includes_date_range_hooks_and_shared_script(self):

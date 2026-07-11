@@ -66,6 +66,16 @@
                     </div>
                 </div>
             </div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Bank Transfers To Verify</div>
+                        <div class="report-kpi-value">{{ submitted_bank_transfer_count }}</div>
+                        <div class="small text-muted">Customer-submitted bank transfer notices waiting for Finance verification.</div>
+                        <a href="{% url 'payment-stripe-report' %}" class="report-kpi-link">Review transfer notices</a>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 

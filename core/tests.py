@@ -219,7 +219,7 @@ class CoreCollectionReportingTests(TestCase):
         self.assertEqual(response.context["collected_this_month"], Decimal("0.00"))
         self.assertEqual(response.context["outstanding_vs_collected_values"][2], 87.2)
 
-    def test_management_dashboard_separates_drafts_from_issued_outstanding(self):
+    def test_management_dashboard_excludes_drafts_from_ceo_summary(self):
         draft_invoice = Invoice.objects.create(
             invoice_number="INV-CORE-DRAFT",
             customer=self.customer,
@@ -248,12 +248,13 @@ class CoreCollectionReportingTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["invoice_outstanding"], issued_invoice.total_amount)
-        self.assertEqual(response.context["draft_invoice_amount"], draft_invoice.total_amount)
         self.assertContains(response, "Issued Outstanding")
-        self.assertContains(response, "Draft Invoice Value")
-        self.assertContains(response, "Drafts are tracked separately.")
+        self.assertContains(response, "Sent, viewed, and overdue invoices waiting for customer payment.")
         self.assertContains(response, "S$109.00")
-        self.assertContains(response, "S$54.50")
+        self.assertNotContains(response, "Drafts are tracked separately.")
+        self.assertNotContains(response, "Draft Invoice Value")
+        self.assertNotContains(response, "Review draft invoices")
+        self.assertNotContains(response, "S$54.50")
 
     def test_management_dashboard_keeps_payroll_burden_off_ceo_snapshot(self):
         today = timezone.localdate()
@@ -389,9 +390,7 @@ class CoreCollectionReportingTests(TestCase):
         self.assertContains(response, "Issued Outstanding")
         self.assertContains(response, "Operational Risk Items")
         self.assertContains(response, "Overdue Amount")
-        self.assertContains(response, "Draft Invoice Value")
         self.assertContains(response, "Payment Issues")
-        self.assertContains(response, "Failed Email Deliveries")
         self.assertContains(response, "Import Issues")
         self.assertContains(response, "Top Collection Risks")
         self.assertContains(response, "No issued unpaid customer balances were found.")
@@ -407,6 +406,10 @@ class CoreCollectionReportingTests(TestCase):
         self.assertContains(response, "report-kpi-grid")
         self.assertContains(response, "report-chart-summary")
         self.assertContains(response, "No collection trend data is available yet.")
+        self.assertNotContains(response, "Draft Invoice Value")
+        self.assertNotContains(response, "Review draft invoices")
+        self.assertNotContains(response, "Failed Email Deliveries")
+        self.assertNotContains(response, "Review failed emails")
         self.assertNotContains(response, "Payroll Burden This Month")
         self.assertNotContains(response, "Cash After Payroll")
         self.assertNotContains(response, "Monthly Collections vs Payroll")
@@ -458,21 +461,54 @@ class CoreCollectionReportingTests(TestCase):
         self.assertContains(response, "Business Impact")
         self.assertContains(response, "Recommended Action")
         self.assertContains(response, "High")
-        self.assertContains(response, "Medium")
         self.assertContains(response, "Low")
         self.assertContains(response, "Finance")
         self.assertContains(response, "Security")
-        self.assertContains(response, "Email")
         self.assertContains(response, "Imports")
         self.assertContains(response, "Top Collection Risks")
         self.assertContains(response, self.customer.name)
         self.assertContains(response, "Review customer")
         self.assertContains(response, f'{reverse("invoice-list")}?status=overdue')
-        self.assertContains(response, f'{reverse("email-delivery-log-list")}?status=failed')
+        self.assertNotContains(response, f'{reverse("email-delivery-log-list")}?status=failed')
+        self.assertNotContains(response, "failed delivery")
         self.assertContains(response, reverse("admin-security-report"))
         self.assertContains(response, reverse("dashboard-validation-errors"))
         self.assertNotContains(response, overdue_invoice.invoice_number)
         self.assertContains(response, "report-attention-table")
+
+    def test_management_dashboard_surfaces_submitted_bank_transfers_for_verification(self):
+        invoice = Invoice.objects.create(
+            invoice_number="INV-CORE-BANK-VERIFY",
+            customer=self.customer,
+            status=Invoice.STATUS_OVERDUE,
+            issue_date=timezone.localdate() - timedelta(days=20),
+            due_date=timezone.localdate() - timedelta(days=2),
+            currency="SGD",
+            subtotal=Decimal("100.00"),
+            tax_amount=Decimal("9.00"),
+            total_amount=Decimal("109.00"),
+        )
+        PaymentRecord.objects.create(
+            invoice=invoice,
+            payment_reference="BANK-CORE-VERIFY-001",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=Decimal("109.00"),
+            currency="SGD",
+            manual_customer_amount=Decimal("109.00"),
+            manual_customer_transfer_date=timezone.localdate(),
+            manual_customer_bank_reference="CORE-CUSTOMER-REF",
+            manual_customer_submitted_at=timezone.now(),
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["submitted_bank_transfer_count"], 1)
+        self.assertContains(response, "1 customer-submitted bank transfer(s) awaiting verification.")
+        self.assertContains(response, "1 submitted bank transfer(s) need bank-account verification.")
+        self.assertContains(response, reverse("payment-stripe-report"))
 
     def test_management_dashboard_is_reserved_for_management_roles(self):
         superadmin = User.objects.create_superuser(

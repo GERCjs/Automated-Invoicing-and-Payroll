@@ -94,6 +94,48 @@ class PaymentRecord(models.Model):
     currency = models.CharField(max_length=3, default="SGD")
     # Time when the payment succeeded. It stays blank until payment is confirmed.
     paid_at = models.DateTimeField(null=True, blank=True)
+    # Manual bank-transfer proof captured before finance marks the invoice paid.
+    manual_received_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    manual_received_date = models.DateField(null=True, blank=True)
+    manual_bank_reference = models.CharField(max_length=100, blank=True)
+    manual_confirmation_notes = models.TextField(blank=True)
+    manual_customer_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    manual_customer_transfer_date = models.DateField(null=True, blank=True)
+    manual_customer_bank_reference = models.CharField(max_length=100, blank=True)
+    manual_customer_notes = models.TextField(blank=True)
+    manual_customer_proof = models.FileField(
+        upload_to="payment_proofs/",
+        null=True,
+        blank=True,
+    )
+    manual_customer_submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manual_payment_notices_submitted",
+    )
+    manual_customer_submitted_at = models.DateTimeField(null=True, blank=True)
+    manual_confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manual_payments_confirmed",
+    )
+    manual_confirmed_at = models.DateTimeField(null=True, blank=True)
     # External ID from the payment provider, such as a Stripe payment intent ID.
     external_transaction_id = models.CharField(max_length=255, blank=True)
     # Stripe Checkout session ID. Unique so one Stripe session maps to one record.
@@ -127,6 +169,10 @@ class PaymentRecord(models.Model):
     def __str__(self) -> str:
         # This is how the object is shown as text in admin/debug output.
         return self.payment_reference
+
+    @property
+    def has_customer_bank_transfer_notice(self) -> bool:
+        return self.manual_customer_submitted_at is not None
 
 
 # A StripeWebhookEvent stores one event sent by Stripe to this application.

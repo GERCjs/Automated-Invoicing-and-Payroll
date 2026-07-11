@@ -45,7 +45,7 @@
                     <div class="card-body">
                         <div class="report-kpi-label">Issued Outstanding</div>
                         <div class="report-kpi-value">S${{ invoice_outstanding|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">Sent, viewed, and overdue invoices only. Drafts are tracked separately.</div>
+                        <div class="small text-muted">Sent, viewed, and overdue invoices waiting for customer payment.</div>
                         <a href="{% url 'invoice-customer-report' %}" class="report-link mt-auto">View Finance Report &rarr;</a>
                     </div>
                 </div>
@@ -55,7 +55,7 @@
                     <div class="card-body">
                         <div class="report-kpi-label">Operational Risk Items</div>
                         <div class="report-kpi-value">{{ operational_risk_count }}</div>
-                        <div class="small text-muted">{{ payment_issue_count }} payment, {{ suspicious_activity_count }} security, {{ email_failed_count }} email, {{ import_issue_total }} import.</div>
+                        <div class="small text-muted">{{ payment_issue_count }} payment, {{ suspicious_activity_count }} security, {{ import_issue_total }} import.</div>
                         <a href="#management-attention" class="report-link mt-auto">Review Attention List &rarr;</a>
                     </div>
                 </div>
