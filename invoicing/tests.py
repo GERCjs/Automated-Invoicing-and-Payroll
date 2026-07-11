@@ -1791,7 +1791,7 @@ class InvoiceCollectionReportingTests(TestCase):
         )
 
         self.client.force_login(self.finance_user)
-        response = self.client.get(reverse("invoice-dashboard"))
+        response = self.client.get(reverse("invoice-dashboard"), data={"category": "outstanding"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["collected_month"], Decimal("0.00"))
@@ -1838,7 +1838,7 @@ class InvoiceCollectionReportingTests(TestCase):
         )
 
         self.client.force_login(self.finance_user)
-        response = self.client.get(reverse("invoice-dashboard"))
+        response = self.client.get(reverse("invoice-dashboard"), data={"category": "outstanding"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["collected_month"], Decimal("0.00"))
@@ -1919,6 +1919,20 @@ class InvoiceDashboardUiTests(TestCase):
             tax_amount=Decimal("9.00"),
             total_amount=total_amount_decimal,
             created_by=self.finance_user,
+        )
+
+    def _create_submitted_bank_transfer(self, invoice, *, payment_reference="BANK-DASH-VERIFY-001", status=None):
+        return PaymentRecord.objects.create(
+            invoice=invoice,
+            payment_reference=payment_reference,
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=status or PaymentRecord.STATUS_PENDING,
+            amount=invoice.total_amount,
+            currency=invoice.currency,
+            manual_customer_amount=invoice.total_amount,
+            manual_customer_transfer_date=timezone.localdate(),
+            manual_customer_bank_reference=f"{payment_reference}-CUSTOMER-REF",
+            manual_customer_submitted_at=timezone.now(),
         )
 
     def test_superadmin_admin_and_finance_can_access_invoice_dashboard(self):
@@ -2110,14 +2124,11 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertContains(response, "Draft invoices not sent")
         self.assertContains(response, "Failed invoice email deliveries")
         self.assertContains(response, "Import validation issues")
-        self.assertContains(response, "Recent Invoices Requiring Action")
-        self.assertContains(response, "Showing the next 8 draft, pending, viewed, and overdue invoices ordered by due date.")
-        self.assertContains(response, draft_invoice.invoice_number)
-        self.assertContains(response, viewed_invoice.invoice_number)
-        self.assertContains(response, overdue_invoice.invoice_number)
-        self.assertContains(response, "Edit Draft")
-        self.assertContains(response, "Send Invoice")
-        self.assertContains(response, "Send Reminder")
+        self.assertContains(response, "Invoice Category Queue")
+        self.assertContains(response, "Viewing: Bank Transfer to Verify")
+        self.assertNotContains(response, draft_invoice.invoice_number)
+        self.assertNotContains(response, viewed_invoice.invoice_number)
+        self.assertNotContains(response, overdue_invoice.invoice_number)
         self.assertEqual(response.context["collected_month"], Decimal("218.00"))
         self.assertEqual(response.context["collected_year"], Decimal("545.00"))
         self.assertEqual(response.context["outstanding_amount"], Decimal("430.00"))
@@ -2130,8 +2141,9 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertEqual(response.context["refunded_count"], 1)
         self.assertEqual(response.context["failed_invoice_email_count"], 1)
         self.assertEqual(response.context["import_validation_issue_count"], 2)
-        self.assertEqual(len(response.context["recent_action_invoices"]), 4)
-        self.assertEqual(response.context["recent_action_invoice_limit"], 8)
+        self.assertEqual(response.context["selected_invoice_category_key"], "bank_transfer_to_verify")
+        self.assertEqual(response.context["selected_invoice_category"]["label"], "Bank Transfer to Verify")
+        self.assertEqual(list(response.context["category_invoices"]), [])
 
     def test_invoice_dashboard_shows_submitted_bank_transfer_verification_card(self):
         invoice = self._create_invoice(
@@ -2141,18 +2153,7 @@ class InvoiceDashboardUiTests(TestCase):
             issue_date=timezone.localdate() - timedelta(days=20),
             due_date=timezone.localdate() - timedelta(days=2),
         )
-        PaymentRecord.objects.create(
-            invoice=invoice,
-            payment_reference="BANK-DASH-VERIFY-001",
-            provider=PaymentRecord.PROVIDER_MANUAL,
-            status=PaymentRecord.STATUS_PENDING,
-            amount=Decimal("109.00"),
-            currency="SGD",
-            manual_customer_amount=Decimal("109.00"),
-            manual_customer_transfer_date=timezone.localdate(),
-            manual_customer_bank_reference="DASH-CUSTOMER-REF",
-            manual_customer_submitted_at=timezone.now(),
-        )
+        self._create_submitted_bank_transfer(invoice)
         self.client.force_login(self.finance_user)
 
         response = self.client.get(reverse("invoice-dashboard"))
@@ -2164,6 +2165,9 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertContains(response, "Bank transfers awaiting verification")
         self.assertContains(response, "Review transfers")
         self.assertContains(response, reverse("payment-stripe-report"))
+        self.assertContains(response, "Viewing: Bank Transfer to Verify")
+        self.assertContains(response, invoice.invoice_number)
+        self.assertContains(response, reverse("invoice-detail", args=[invoice.pk]))
 
     def test_invoice_dashboard_action_labels_match_status(self):
         today = timezone.localdate()
@@ -2196,8 +2200,9 @@ class InvoiceDashboardUiTests(TestCase):
             due_date=today - timedelta(days=2),
         )
 
+        self._create_submitted_bank_transfer(sent_invoice)
         self.client.force_login(self.finance_user)
-        response = self.client.get(reverse("invoice-dashboard"))
+        response = self.client.get(reverse("invoice-dashboard"), data={"category": "requires_follow_up"})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, reverse("invoice-edit", args=[draft_invoice.pk]))
@@ -2207,30 +2212,185 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertContains(response, "View Invoice")
         self.assertContains(response, "Send Reminder")
 
-    def test_invoice_dashboard_recent_action_table_is_limited(self):
+    def test_invoice_dashboard_defaults_to_bank_transfer_category_and_rejects_invalid_category(self):
         today = timezone.localdate()
-        created_invoices = []
-        for index in range(10):
-            created_invoices.append(
-                self._create_invoice(
-                    invoice_number=f"INV-DASH-LIMIT-{index}",
-                    status=Invoice.STATUS_SENT,
-                    total_amount="109.00",
-                    issue_date=today - timedelta(days=index),
-                    due_date=today + timedelta(days=index + 1),
-                )
-            )
+        bank_invoice = self._create_invoice(
+            invoice_number="INV-DASH-DEFAULT-BANK",
+            status=Invoice.STATUS_SENT,
+            total_amount="109.00",
+            issue_date=today - timedelta(days=1),
+            due_date=today + timedelta(days=2),
+        )
+        outstanding_invoice = self._create_invoice(
+            invoice_number="INV-DASH-DEFAULT-OUT",
+            status=Invoice.STATUS_SENT,
+            total_amount="150.00",
+            issue_date=today,
+            due_date=today + timedelta(days=5),
+        )
+        self._create_submitted_bank_transfer(bank_invoice)
 
         self.client.force_login(self.finance_user)
         response = self.client.get(reverse("invoice-dashboard"))
+        invalid_response = self.client.get(reverse("invoice-dashboard"), data={"category": "all"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context["recent_action_invoices"]), 8)
-        self.assertContains(response, "Showing the next 8 draft, pending, viewed, and overdue invoices ordered by due date.")
-        self.assertContains(response, created_invoices[0].invoice_number)
-        self.assertContains(response, created_invoices[7].invoice_number)
-        self.assertNotContains(response, created_invoices[8].invoice_number)
-        self.assertNotContains(response, created_invoices[9].invoice_number)
+        self.assertEqual(response.context["selected_invoice_category_key"], "bank_transfer_to_verify")
+        self.assertContains(response, "Viewing: Bank Transfer to Verify")
+        self.assertContains(response, bank_invoice.invoice_number)
+        self.assertNotContains(response, outstanding_invoice.invoice_number)
+        self.assertEqual(invalid_response.context["selected_invoice_category_key"], "bank_transfer_to_verify")
+        self.assertContains(invalid_response, "Viewing: Bank Transfer to Verify")
+        self.assertContains(invalid_response, bank_invoice.invoice_number)
+        self.assertNotContains(invalid_response, outstanding_invoice.invoice_number)
+
+    def test_invoice_dashboard_filters_outstanding_category(self):
+        today = timezone.localdate()
+        draft_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FILTER-DRAFT",
+            status=Invoice.STATUS_DRAFT,
+            total_amount="109.00",
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        sent_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FILTER-SENT",
+            status=Invoice.STATUS_SENT,
+            total_amount="150.00",
+            issue_date=today - timedelta(days=2),
+            due_date=today + timedelta(days=5),
+        )
+        viewed_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FILTER-VIEWED",
+            status=Invoice.STATUS_VIEWED,
+            total_amount="200.00",
+            issue_date=today - timedelta(days=3),
+            due_date=today + timedelta(days=4),
+        )
+        overdue_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FILTER-OVERDUE",
+            status=Invoice.STATUS_OVERDUE,
+            total_amount="80.00",
+            issue_date=today - timedelta(days=20),
+            due_date=today - timedelta(days=2),
+        )
+        paid_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FILTER-PAID",
+            status=Invoice.STATUS_PAID,
+            total_amount="218.00",
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+
+        self.client.force_login(self.finance_user)
+        response = self.client.get(reverse("invoice-dashboard"), data={"category": "outstanding"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_invoice_category_key"], "outstanding")
+        self.assertContains(response, "Viewing: Outstanding")
+        self.assertContains(response, sent_invoice.invoice_number)
+        self.assertContains(response, viewed_invoice.invoice_number)
+        self.assertContains(response, overdue_invoice.invoice_number)
+        self.assertContains(response, reverse("invoice-detail", args=[sent_invoice.pk]))
+        self.assertNotContains(response, draft_invoice.invoice_number)
+        self.assertNotContains(response, paid_invoice.invoice_number)
+
+    def test_invoice_dashboard_filters_requires_follow_up_category(self):
+        today = timezone.localdate()
+        draft_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FOLLOW-DRAFT",
+            status=Invoice.STATUS_DRAFT,
+            total_amount="109.00",
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        sent_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FOLLOW-SENT",
+            status=Invoice.STATUS_SENT,
+            total_amount="150.00",
+            issue_date=today - timedelta(days=2),
+            due_date=today + timedelta(days=5),
+        )
+        paid_invoice = self._create_invoice(
+            invoice_number="INV-DASH-FOLLOW-PAID",
+            status=Invoice.STATUS_PAID,
+            total_amount="218.00",
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+
+        self.client.force_login(self.finance_user)
+        response = self.client.get(reverse("invoice-dashboard"), data={"category": "requires_follow_up"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Viewing: Requires Follow Up")
+        self.assertContains(response, draft_invoice.invoice_number)
+        self.assertContains(response, sent_invoice.invoice_number)
+        self.assertNotContains(response, paid_invoice.invoice_number)
+        self.assertContains(response, reverse("invoice-edit", args=[draft_invoice.pk]))
+        self.assertContains(response, "Edit Draft")
+        self.assertContains(response, "Send Invoice")
+
+    def test_invoice_dashboard_filters_overdue_category(self):
+        today = timezone.localdate()
+        overdue_invoice = self._create_invoice(
+            invoice_number="INV-DASH-ONLY-OVERDUE",
+            status=Invoice.STATUS_OVERDUE,
+            total_amount="80.00",
+            issue_date=today - timedelta(days=20),
+            due_date=today - timedelta(days=2),
+        )
+        sent_invoice = self._create_invoice(
+            invoice_number="INV-DASH-NOT-OVERDUE",
+            status=Invoice.STATUS_SENT,
+            total_amount="150.00",
+            issue_date=today,
+            due_date=today + timedelta(days=5),
+        )
+
+        self.client.force_login(self.finance_user)
+        response = self.client.get(reverse("invoice-dashboard"), data={"category": "overdue"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Viewing: Overdue")
+        self.assertContains(response, overdue_invoice.invoice_number)
+        self.assertNotContains(response, sent_invoice.invoice_number)
+
+    def test_invoice_dashboard_bank_transfer_category_handles_overlap_and_payment_status(self):
+        today = timezone.localdate()
+        overlapping_invoice = self._create_invoice(
+            invoice_number="INV-DASH-BANK-OVERLAP",
+            status=Invoice.STATUS_OVERDUE,
+            total_amount="109.00",
+            issue_date=today - timedelta(days=20),
+            due_date=today - timedelta(days=2),
+        )
+        succeeded_invoice = self._create_invoice(
+            invoice_number="INV-DASH-BANK-SUCCEEDED",
+            status=Invoice.STATUS_PAID,
+            total_amount="150.00",
+            issue_date=today - timedelta(days=4),
+            due_date=today + timedelta(days=2),
+        )
+        self._create_submitted_bank_transfer(overlapping_invoice, payment_reference="BANK-DASH-OVERLAP-001")
+        self._create_submitted_bank_transfer(overlapping_invoice, payment_reference="BANK-DASH-OVERLAP-002")
+        self._create_submitted_bank_transfer(
+            succeeded_invoice,
+            payment_reference="BANK-DASH-SUCCEEDED",
+            status=PaymentRecord.STATUS_SUCCEEDED,
+        )
+
+        self.client.force_login(self.finance_user)
+        bank_response = self.client.get(reverse("invoice-dashboard"), data={"category": "bank_transfer_to_verify"})
+        overdue_response = self.client.get(reverse("invoice-dashboard"), data={"category": "overdue"})
+
+        self.assertEqual(bank_response.status_code, 200)
+        self.assertEqual(bank_response.context["submitted_bank_transfer_count"], 1)
+        self.assertEqual(bank_response.context["category_invoices"].count(), 1)
+        self.assertContains(bank_response, overlapping_invoice.invoice_number, count=1)
+        self.assertContains(bank_response, reverse("invoice-detail", args=[overlapping_invoice.pk]))
+        self.assertNotContains(bank_response, succeeded_invoice.invoice_number)
+        self.assertContains(overdue_response, overlapping_invoice.invoice_number)
 
     def test_invoice_dashboard_shows_empty_states_when_no_invoice_data_exists(self):
         self.client.force_login(self.finance_user)
@@ -2239,7 +2399,7 @@ class InvoiceDashboardUiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No invoice issues need attention right now.")
-        self.assertContains(response, "No invoice records require action for the current dashboard view.")
+        self.assertContains(response, "No invoices match Bank Transfer to Verify.")
 
 
 class InvoiceFileUploadTests(TestCase):

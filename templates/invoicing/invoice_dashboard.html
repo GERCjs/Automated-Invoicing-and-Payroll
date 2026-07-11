@@ -150,13 +150,28 @@
     </section>
 
     <section class="report-section">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <span>Recent Invoices Requiring Action</span>
-                <span class="text-muted small">{{ recent_action_scope_note }}</span>
+        <div class="card invoice-category-card">
+            <div class="card-header invoice-category-header">
+                <div>
+                    <span>Invoice Category Queue</span>
+                    <div class="text-muted small">Viewing: {{ selected_invoice_category.label }}</div>
+                </div>
+                <span class="text-muted small">{{ selected_invoice_category.description }}</span>
+            </div>
+            <div class="card-body">
+                <nav class="invoice-category-filters" aria-label="Invoice category filters">
+                    {% for category in invoice_dashboard_categories %}
+                    <a href="{{ category.url }}"
+                       class="invoice-category-filter{% if category.is_selected %} is-active{% endif %}"
+                       {% if category.is_selected %}aria-current="page"{% endif %}>
+                        <span>{{ category.label }}</span>
+                        <span class="invoice-category-filter-count">{{ category.count }}</span>
+                    </a>
+                    {% endfor %}
+                </nav>
             </div>
             <div class="card-body p-0">
-                {% if recent_action_invoices %}
+                {% if category_invoices %}
                 <div class="table-responsive report-attention-table">
                     <table class="table table-clean table-hover mb-0">
                         <thead>
@@ -171,9 +186,9 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for invoice in recent_action_invoices %}
+                            {% for invoice in category_invoices %}
                             <tr>
-                                <td>{{ invoice.invoice_number }}</td>
+                                <td><a href="{% url 'invoice-detail' invoice.pk %}" class="report-link">{{ invoice.invoice_number }}</a></td>
                                 <td>{{ invoice.customer.name }}</td>
                                 <td>
                                     {% if invoice.status == "overdue" %}
@@ -214,7 +229,7 @@
                     </table>
                 </div>
                 {% else %}
-                <div class="report-empty-state m-3">No invoice records require action for the current dashboard view.</div>
+                <div class="report-empty-state m-3">No invoices match {{ selected_invoice_category.label }}.</div>
                 {% endif %}
             </div>
         </div>

@@ -1190,6 +1190,58 @@ textarea.form-control:focus {
     padding: 0.95rem 1rem;
 }
 
+.invoice-dashboard-page .invoice-category-header {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: space-between;
+}
+
+.invoice-dashboard-page .invoice-category-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.invoice-dashboard-page .invoice-category-filter {
+    align-items: center;
+    background: #f7f9fc;
+    border: 1px solid #d8e0ea;
+    border-radius: 8px;
+    color: #2f3a48;
+    display: inline-flex;
+    font-weight: 700;
+    gap: 0.5rem;
+    min-height: 42px;
+    padding: 0.55rem 0.85rem;
+}
+
+.invoice-dashboard-page .invoice-category-filter:hover,
+.invoice-dashboard-page .invoice-category-filter:focus {
+    background: #eef4fb;
+    border-color: #9fb0c5;
+    color: #17202b;
+}
+
+.invoice-dashboard-page .invoice-category-filter.is-active {
+    background: #263342;
+    border-color: #263342;
+    color: #fff;
+}
+
+.invoice-dashboard-page .invoice-category-filter-count {
+    background: rgba(38, 51, 66, 0.1);
+    border-radius: 999px;
+    min-width: 1.75rem;
+    padding: 0.1rem 0.45rem;
+    text-align: center;
+}
+
+.invoice-dashboard-page .invoice-category-filter.is-active .invoice-category-filter-count {
+    background: rgba(255, 255, 255, 0.18);
+}
+
 .invoice-dashboard-page .invoice-dashboard-table-actions {
     align-items: flex-end;
     display: inline-flex;

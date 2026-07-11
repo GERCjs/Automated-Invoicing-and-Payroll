@@ -67,7 +67,72 @@ OUTSTANDING_INVOICE_STATUSES = {
     Invoice.STATUS_VIEWED,
     Invoice.STATUS_OVERDUE,
 }
-INVOICE_DASHBOARD_RECENT_ACTION_LIMIT = 8
+INVOICE_DASHBOARD_DEFAULT_CATEGORY = "bank_transfer_to_verify"
+
+
+def _invoice_dashboard_category_queryset(category_key: str):
+    base_queryset = Invoice.objects.select_related("customer")
+    if category_key == "outstanding":
+        return base_queryset.filter(status__in=OUTSTANDING_INVOICE_STATUSES)
+    if category_key == "overdue":
+        return base_queryset.filter(status=Invoice.STATUS_OVERDUE)
+    if category_key == "requires_follow_up":
+        return base_queryset.filter(
+            status__in=[
+                Invoice.STATUS_DRAFT,
+                Invoice.STATUS_SENT,
+                Invoice.STATUS_VIEWED,
+                Invoice.STATUS_OVERDUE,
+            ]
+        )
+    if category_key == "bank_transfer_to_verify":
+        return base_queryset.filter(
+            payment_records__provider=PaymentRecord.PROVIDER_MANUAL,
+            payment_records__status=PaymentRecord.STATUS_PENDING,
+            payment_records__manual_customer_submitted_at__isnull=False,
+        ).distinct()
+    return base_queryset.none()
+
+
+def _order_invoice_dashboard_category_queryset(queryset):
+    return queryset.order_by("due_date", "-issue_date", "-created_at")
+
+
+def _build_invoice_dashboard_categories(selected_key: str):
+    category_definitions = [
+        {
+            "key": "bank_transfer_to_verify",
+            "label": "Bank Transfer to Verify",
+            "description": "Customer-submitted bank transfer notices waiting for Finance verification.",
+        },
+        {
+            "key": "outstanding",
+            "label": "Outstanding",
+            "description": "Sent, viewed, and overdue invoices still waiting for payment.",
+        },
+        {
+            "key": "overdue",
+            "label": "Overdue",
+            "description": "Invoices already past due and needing immediate collection follow-up.",
+        },
+        {
+            "key": "requires_follow_up",
+            "label": "Requires Follow Up",
+            "description": "Draft, pending, viewed, and overdue invoices that still need Finance action.",
+        },
+    ]
+    categories = []
+    for category in category_definitions:
+        category_queryset = _invoice_dashboard_category_queryset(category["key"])
+        categories.append(
+            {
+                **category,
+                "count": category_queryset.count(),
+                "is_selected": category["key"] == selected_key,
+                "url": f"{reverse('invoice-dashboard')}?category={category['key']}",
+            }
+        )
+    return categories
 
 
 def _bank_transfer_context(invoice: Invoice, initiated_by=None) -> dict:
@@ -243,12 +308,6 @@ def _format_invoice_batch_feedback(entries: list[str], *, max_items: int = 5) ->
     if len(entries) > max_items:
         suffix = f" and {len(entries) - max_items} more"
     return "; ".join(visible_entries) + suffix
-
-
-def _invoice_dashboard_recent_scope_note(limit: int) -> str:
-    return (
-        f"Showing the next {limit} draft, pending, viewed, and overdue invoices ordered by due date."
-    )
 
 
 @login_required
@@ -610,6 +669,18 @@ def invoice_list(request):
 @role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_dashboard(request):
     refresh_overdue_invoices()
+    requested_category = request.GET.get("category", "").strip().lower()
+    allowed_category_keys = {
+        "bank_transfer_to_verify",
+        "outstanding",
+        "overdue",
+        "requires_follow_up",
+    }
+    selected_invoice_category_key = (
+        requested_category
+        if requested_category in allowed_category_keys
+        else INVOICE_DASHBOARD_DEFAULT_CATEGORY
+    )
     today = timezone.localdate()
     month_start = today.replace(day=1)
     year_start = today.replace(month=1, day=1)
@@ -743,10 +814,8 @@ def invoice_dashboard(request):
         .first()
     )
     import_validation_issue_count = latest_import_job_with_issues.invalid_rows if latest_import_job_with_issues else 0
-    submitted_bank_transfer_count = PaymentRecord.objects.filter(
-        provider=PaymentRecord.PROVIDER_MANUAL,
-        status=PaymentRecord.STATUS_PENDING,
-        manual_customer_submitted_at__isnull=False,
+    submitted_bank_transfer_count = _invoice_dashboard_category_queryset(
+        "bank_transfer_to_verify"
     ).count()
 
     attention_items = []
@@ -839,12 +908,12 @@ def invoice_dashboard(request):
         },
     ]
 
-    recent_action_invoices = (
-        Invoice.objects.select_related("customer")
-        .filter(
-            status__in=open_statuses
-        )
-        .order_by("due_date", "-issue_date", "-created_at")[:INVOICE_DASHBOARD_RECENT_ACTION_LIMIT]
+    invoice_dashboard_categories = _build_invoice_dashboard_categories(selected_invoice_category_key)
+    selected_invoice_category = next(
+        category for category in invoice_dashboard_categories if category["is_selected"]
+    )
+    category_invoices = _order_invoice_dashboard_category_queryset(
+        _invoice_dashboard_category_queryset(selected_invoice_category_key)
     )
 
     return render(
@@ -879,11 +948,10 @@ def invoice_dashboard(request):
             "attention_items": attention_items,
             "failed_invoice_email_count": failed_invoice_email_count,
             "import_validation_issue_count": import_validation_issue_count,
-            "recent_action_invoices": recent_action_invoices,
-            "recent_action_invoice_limit": INVOICE_DASHBOARD_RECENT_ACTION_LIMIT,
-            "recent_action_scope_note": _invoice_dashboard_recent_scope_note(
-                INVOICE_DASHBOARD_RECENT_ACTION_LIMIT
-            ),
+            "invoice_dashboard_categories": invoice_dashboard_categories,
+            "selected_invoice_category_key": selected_invoice_category_key,
+            "selected_invoice_category": selected_invoice_category,
+            "category_invoices": category_invoices,
         },
     )
 
