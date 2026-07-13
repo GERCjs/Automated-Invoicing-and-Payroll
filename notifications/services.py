@@ -743,6 +743,32 @@ def _build_payment_reminder_message(invoice: Invoice, reminder_type: str, public
     return subject, body
 
 
+def build_payment_reminder_template_preview() -> dict:
+    return {
+        "subject": "Payment Reminder: INV-2026-0001 is overdue",
+        "body": (
+            "Dear Customer Name,\n\n"
+            "This is a payment reminder for invoice INV-2026-0001.\n"
+            "Due date: 2026-07-31\n"
+            "Amount due: SGD 139.00\n\n"
+            "View invoice: https://client-domain.com/invoices/view/example-token/\n\n"
+            "If payment has already been made, please disregard this reminder.\n\n"
+            f"{settings.COMPANY_NAME}\n"
+            f"{settings.COMPANY_EMAIL}"
+        ),
+        "editable_fields": [
+            "customer name",
+            "invoice number",
+            "due date",
+            "currency",
+            "amount due",
+            "invoice link",
+            "company name",
+            "company email",
+        ],
+    }
+
+
 def _send_payment_reminder(
     invoice: Invoice,
     reminder_type: str,

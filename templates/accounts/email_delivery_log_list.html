@@ -6,7 +6,7 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Delivery Logs</h1>
-        <p class="page-subtitle">Announcement email and payment reminder delivery attempts.</p>
+        <p class="page-subtitle">Announcement, reminder, and support resolution delivery attempts.</p>
     </div>
     <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
 </div>
@@ -17,9 +17,10 @@
             <div class="col-md-2">
                 <label class="form-label small">Type</label>
                 <select name="type" class="form-select form-select-sm">
-                    <option value="">Announcements and reminders</option>
+                    <option value="">All operational emails</option>
                     <option value="mass" {% if selected_type == "mass" %}selected{% endif %}>Announcement email</option>
                     <option value="reminder" {% if selected_type == "reminder" %}selected{% endif %}>Reminder email</option>
+                    <option value="support" {% if selected_type == "support" %}selected{% endif %}>Support resolution email</option>
                 </select>
             </div>
             <div class="col-md-2">
@@ -68,6 +69,8 @@
                     <td>
                         {% if log.template_key == "admin_mass_email" %}
                         Announcement Email
+                        {% elif log.template_key == "support_ticket_resolved_v1" %}
+                        Support Resolution Email
                         {% else %}
                         Reminder Email
                         {% endif %}
@@ -91,6 +94,8 @@
                     <td>
                         {% if log.template_key == "admin_mass_email" %}
                         {{ log.related_object_id|default:"Selected roles" }}
+                        {% elif log.template_key == "support_ticket_resolved_v1" %}
+                        Support Ticket #{{ log.related_object_id }}
                         {% else %}
                         {{ log.metadata.invoice_number|default:log.related_object_id }}
                         {% endif %}

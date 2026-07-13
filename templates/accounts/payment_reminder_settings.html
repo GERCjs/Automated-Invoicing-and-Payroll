@@ -3,8 +3,8 @@
 {% block title %}Reminder Settings | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-8">
+<div class="row g-3 justify-content-center">
+    <div class="col-lg-6">
         <div class="page-header">
             <div>
                 <h1 class="page-title">Payment Reminder Settings</h1>
@@ -73,6 +73,18 @@
                         <button type="submit" class="btn btn-primary">Send Payment Reminders</button>
                     </form>
                 </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">Reminder Email Template Preview</div>
+            <div class="card-body">
+                <label class="form-label small">Subject</label>
+                <div class="sub-kpi mb-3">{{ template_preview.subject }}</div>
+
+                <label class="form-label small">Body</label>
+                <pre class="sub-kpi mb-3" style="white-space: pre-wrap; font-family: inherit;">{{ template_preview.body }}</pre>
             </div>
         </div>
     </div>

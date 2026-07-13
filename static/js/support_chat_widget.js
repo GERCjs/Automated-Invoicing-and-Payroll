@@ -17,6 +17,32 @@
     const optionsScript = widget.querySelector("#support-chat-options");
     const chatOptions = optionsScript ? JSON.parse(optionsScript.textContent) : { options: [], references: [] };
     let activeOption = null;
+    const generalAnswers = [
+        {
+            keywords: ["pay invoice", "make payment", "how to pay", "payment method", "bank transfer", "card payment"],
+            answer: "Open My Invoices, choose the invoice, then use the payment instructions or available payment action on that invoice page.",
+        },
+        {
+            keywords: ["view invoice", "find invoice", "my invoice", "invoice history"],
+            answer: "Open My Invoices to see pending, overdue, and paid invoices linked to your account.",
+        },
+        {
+            keywords: ["view payslip", "my payslip", "payslip history", "payroll record"],
+            answer: "Open My Payslips to view the payroll records linked to your staff account.",
+        },
+        {
+            keywords: ["ticket status", "support status", "my support", "support request", "request history"],
+            answer: "Open My Support Requests to review the tickets you submitted and any resolution notes from the support team.",
+        },
+        {
+            keywords: ["how long", "response time", "resolve", "resolved", "response target"],
+            answer: "The support team uses a 3 day response target. Tickets that pass that target are highlighted for the responsible officers.",
+        },
+        {
+            keywords: ["who handles", "finance", "payroll", "hr", "admin"],
+            answer: "Finance handles invoice and payment requests. Payroll handles payslip and payroll requests. Admin handles account and general support routing.",
+        },
+    ];
 
     function appendMessage(text, type) {
         const bubble = document.createElement("div");
@@ -100,6 +126,14 @@
         });
     }
 
+    function findGeneralAnswer(message) {
+        const normalized = message.toLowerCase();
+        const matchedAnswer = generalAnswers.find((entry) => (
+            entry.keywords.some((keyword) => normalized.includes(keyword))
+        ));
+        return matchedAnswer ? matchedAnswer.answer : "";
+    }
+
     function setOpen(isOpen) {
         panel.hidden = !isOpen;
         toggles.forEach((toggle) => {
@@ -135,6 +169,18 @@
         const message = String(formData.get("message") || "").trim();
         if (!message) {
             appendMessage("Please type a message before sending.", "bot");
+            return;
+        }
+
+        const generalAnswer = activeOption ? "" : findGeneralAnswer(message);
+        if (generalAnswer) {
+            appendMessage(message, "user");
+            appendMessage(generalAnswer, "bot");
+            form.reset();
+            messageInput.style.height = "";
+            resetConversationMetadata();
+            showTopicOptions("Do you need to submit a support request?");
+            messageInput.focus();
             return;
         }
 

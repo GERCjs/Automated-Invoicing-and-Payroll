@@ -1,5 +1,5 @@
 from django import forms
-from accounts.roles import ADMIN, CUSTOMER, STAFF, SUPERADMIN
+from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from .models import SupportTicket
 
 
@@ -53,7 +53,7 @@ class SupportTicketUpdateForm(forms.ModelForm):
     def __init__(self, *args, actor_role=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["assigned_role"].choices = [("", "Unassigned"), *SupportTicket.ASSIGNED_ROLE_CHOICES]
-        if actor_role not in {SUPERADMIN, ADMIN}:
+        if actor_role not in {SUPERADMIN, ADMIN, FINANCE, HR}:
             self.fields["assigned_role"].disabled = True
 
 

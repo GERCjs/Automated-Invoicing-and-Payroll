@@ -15,7 +15,7 @@ from django.utils import timezone
 from core.audit import get_client_ip, log_event
 from core.models import AuditLog
 from notifications.models import EmailDeliveryLog, PaymentReminderSettings
-from notifications.services import run_payment_reminder_check
+from notifications.services import build_payment_reminder_template_preview, run_payment_reminder_check
 
 from .forms import (
     AdminAccountCreationForm,
@@ -797,11 +797,15 @@ def login_security_policy_update(request, role=None):
 def payment_reminder_settings_update(request):
     # Page for editing automatic payment reminder settings.
     reminder_settings = PaymentReminderSettings.load()
+    template_preview = build_payment_reminder_template_preview()
     if request.method != "POST":
         return render(
             request,
             "accounts/payment_reminder_settings.html",
-            {"form": PaymentReminderSettingsForm(instance=reminder_settings)},
+            {
+                "form": PaymentReminderSettingsForm(instance=reminder_settings),
+                "template_preview": template_preview,
+            },
         )
     form = PaymentReminderSettingsForm(request.POST, instance=reminder_settings)
     if form.is_valid():
@@ -828,7 +832,14 @@ def payment_reminder_settings_update(request):
         )
         messages.success(request, "Payment reminder settings updated.")
         return redirect("admin-dashboard")
-    return render(request, "accounts/payment_reminder_settings.html", {"form": form})
+    return render(
+        request,
+        "accounts/payment_reminder_settings.html",
+        {
+            "form": form,
+            "template_preview": template_preview,
+        },
+    )
 
 
 @login_required
@@ -927,21 +938,24 @@ def mass_email_send(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def email_delivery_log_list(request):
-    # List recent admin mass-email and payment-reminder email logs.
+    # List recent operational email logs.
     selected_type = request.GET.get("type", "").strip()
     selected_status = request.GET.get("status", "").strip()
     search_query = request.GET.get("q", "").strip()
     date_from = parse_date(request.GET.get("date_from", "").strip())
     date_to = parse_date(request.GET.get("date_to", "").strip())
 
-    # Only show admin mass email and payment reminder logs here.
     logs = EmailDeliveryLog.objects.select_related("triggered_by").filter(
-        Q(template_key="admin_mass_email") | Q(template_key__startswith="payment_reminder_")
+        Q(template_key="admin_mass_email")
+        | Q(template_key__startswith="payment_reminder_")
+        | Q(template_key="support_ticket_resolved_v1")
     )
     if selected_type == "mass":
         logs = logs.filter(template_key="admin_mass_email")
     elif selected_type == "reminder":
         logs = logs.filter(template_key__startswith="payment_reminder_")
+    elif selected_type == "support":
+        logs = logs.filter(template_key="support_ticket_resolved_v1")
     if selected_status:
         logs = logs.filter(status=selected_status)
     if date_from:

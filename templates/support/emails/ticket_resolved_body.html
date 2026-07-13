@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #222;">
+    <p>Dear {{ ticket.requester_name }},</p>
+    <p>Your support request has been marked as resolved.</p>
+    <table cellpadding="6" cellspacing="0" style="border-collapse: collapse;">
+        <tr><td><strong>Subject</strong></td><td>{{ ticket.subject }}</td></tr>
+        <tr><td><strong>Reference</strong></td><td>{{ ticket.related_reference|default:"-" }}</td></tr>
+        <tr><td><strong>Status</strong></td><td>{{ ticket.get_status_display }}</td></tr>
+    </table>
+    {% if ticket.resolution_note %}
+    <p><strong>Resolution note</strong></p>
+    <p style="white-space: pre-wrap;">{{ ticket.resolution_note }}</p>
+    {% endif %}
+    <p><a href="{{ ticket_url }}">Review this support request</a></p>
+    <p>If you still need help, please open the request in the portal and submit a new support message.</p>
+    <p>{{ company_name }}<br>{{ company_email }}</p>
+</body>
+</html>

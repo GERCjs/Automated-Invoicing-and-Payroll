@@ -17,6 +17,7 @@ from .forms import (
     SupportTicketUpdateForm,
 )
 from .models import SupportTicket
+from .services import send_support_ticket_resolved_email
 
 
 TICKET_HANDLER_ROLES = {SUPERADMIN, ADMIN, FINANCE, HR}
@@ -233,7 +234,7 @@ def finance_support_ticket_list(request):
 
 
 @login_required
-@role_required(CUSTOMER)
+@role_required(CUSTOMER, STAFF)
 def customer_support_ticket_list(request):
     return render(
         request,
@@ -242,7 +243,7 @@ def customer_support_ticket_list(request):
             request,
             _customer_ticket_queryset_for(request.user),
             page_title="My Support Requests",
-            page_subtitle="Review the support requests you submitted and any resolution notes from Finance.",
+            page_subtitle="Review the support requests you submitted and any resolution notes from the support team.",
             detail_url_name="customer-support-ticket-detail",
             show_requester_details=False,
             show_assignment=False,
@@ -476,18 +477,31 @@ def support_ticket_detail(request, ticket_id):
             messages.error(request, "You cannot update this support ticket.")
             return redirect("support-ticket-detail", ticket_id=ticket.id)
         previous_status = ticket.status
-        previous_assignee_id = ticket.assigned_to_id
-        previous_assigned_role = ticket.assigned_role
         form = SupportTicketUpdateForm(request.POST, instance=ticket, actor_role=role)
         if form.is_valid():
             updated_ticket = form.save(commit=False)
-            if role not in {SUPERADMIN, ADMIN}:
-                updated_ticket.assigned_to_id = previous_assignee_id
-                updated_ticket.assigned_role = previous_assigned_role
-            elif updated_ticket.assigned_role:
+            if updated_ticket.assigned_role:
                 updated_ticket.assigned_to = None
             updated_ticket.mark_resolution_timestamp()
             updated_ticket.save()
+            resolution_email_status = ""
+            resolution_email_log_id = ""
+            requester_role = get_user_role(updated_ticket.created_by) if updated_ticket.created_by_id else None
+            if (
+                previous_status != SupportTicket.STATUS_RESOLVED
+                and updated_ticket.status == SupportTicket.STATUS_RESOLVED
+                and requester_role in {CUSTOMER, STAFF}
+            ):
+                ticket_url = request.build_absolute_uri(
+                    reverse("customer-support-ticket-detail", args=[updated_ticket.id])
+                )
+                email_sent, email_log = send_support_ticket_resolved_email(
+                    ticket=updated_ticket,
+                    ticket_url=ticket_url,
+                    triggered_by=request.user,
+                )
+                resolution_email_status = "sent" if email_sent else "failed"
+                resolution_email_log_id = str(email_log.id)
             log_event(
                 action="support.ticket.updated",
                 user=request.user,
@@ -499,6 +513,8 @@ def support_ticket_detail(request, ticket_id):
                     "assigned_to_id": updated_ticket.assigned_to_id,
                     "assigned_role": updated_ticket.assigned_role,
                     "priority": updated_ticket.priority,
+                    "resolution_email_status": resolution_email_status,
+                    "resolution_email_log_id": resolution_email_log_id,
                 },
                 ip_address=get_client_ip(request),
             )
@@ -523,7 +539,7 @@ def support_ticket_detail(request, ticket_id):
 
 
 @login_required
-@role_required(CUSTOMER)
+@role_required(CUSTOMER, STAFF)
 def customer_support_ticket_detail(request, ticket_id):
     ticket = get_object_or_404(_customer_ticket_queryset_for(request.user), pk=ticket_id)
     return render(

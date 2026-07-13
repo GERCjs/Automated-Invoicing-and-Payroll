@@ -153,6 +153,7 @@
 
                 {% if current_user_role == "staff" %}
                 <a class="portal-nav-link" href="{% url 'my-payslips' %}">My Payslips</a>
+                <a class="portal-nav-link{% if current_url_name == 'customer-support-ticket-list' or current_url_name == 'customer-support-ticket-detail' %} is-active{% endif %}" href="{% url 'customer-support-ticket-list' %}">My Support Requests</a>
                 {% endif %}
             </div>
             {% endwith %}

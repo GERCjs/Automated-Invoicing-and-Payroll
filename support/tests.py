@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF
 from invoicing.models import Customer, Invoice
+from notifications.models import EmailDeliveryLog
 from payroll.models import Employee, PayrollRecord
 
 from .models import SupportTicket
@@ -156,6 +157,33 @@ class SupportTicketFlowTests(TestCase):
         self.assertContains(response, "support-chat-widget")
         self.assertContains(response, "My payslip looks wrong")
         self.assertContains(response, "STF-000777 / 2026-06-30")
+
+    def test_staff_can_view_own_support_requests(self):
+        staff = self._make_user("ticket_staff", STAFF)
+        own_ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_PAYROLL,
+            subject="Payslip support",
+            message="Please check my payslip.",
+            related_reference="STF-000777 / 2026-06-30",
+            created_by=staff,
+        )
+        other_staff = self._make_user("other_ticket_staff", STAFF)
+        SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_PAYROLL,
+            subject="Other staff support",
+            message="This belongs to someone else.",
+            created_by=other_staff,
+        )
+        self.client.force_login(staff)
+
+        list_response = self.client.get(reverse("customer-support-ticket-list"))
+        detail_response = self.client.get(reverse("customer-support-ticket-detail", args=[own_ticket.id]))
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertContains(list_response, "Payslip support")
+        self.assertNotContains(list_response, "Other staff support")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertContains(detail_response, "STF-000777 / 2026-06-30")
 
     def test_customer_cannot_view_internal_support_ticket_history(self):
         customer = self._make_user("history_customer", CUSTOMER)
@@ -433,7 +461,7 @@ class SupportTicketFlowTests(TestCase):
             data={
                 "status": SupportTicket.STATUS_RESOLVED,
                 "priority": SupportTicket.PRIORITY_MEDIUM,
-                "assigned_role": SupportTicket.ASSIGNED_ROLE_FINANCE,
+                "assigned_role": SupportTicket.ASSIGNED_ROLE_ADMIN,
                 "resolution_note": "Finance confirmed the invoice and closed the request.",
             },
         )
@@ -441,8 +469,67 @@ class SupportTicketFlowTests(TestCase):
         ticket.refresh_from_db()
         self.assertRedirects(response, reverse("support-ticket-detail", args=[ticket.id]))
         self.assertEqual(ticket.status, SupportTicket.STATUS_RESOLVED)
+        self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_ADMIN)
         self.assertEqual(ticket.resolution_note, "Finance confirmed the invoice and closed the request.")
         self.assertIsNotNone(ticket.resolved_at)
+
+    def test_resolving_customer_ticket_sends_email_notification(self):
+        customer = self._make_user("email_resolution_customer", CUSTOMER)
+        finance = self._make_user("email_resolution_finance", FINANCE)
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Email me when resolved",
+            message="Please resolve this.",
+            created_by=customer,
+            assigned_role=SupportTicket.ASSIGNED_ROLE_FINANCE,
+        )
+        self.client.force_login(finance)
+
+        response = self.client.post(
+            reverse("support-ticket-detail", args=[ticket.id]),
+            data={
+                "status": SupportTicket.STATUS_RESOLVED,
+                "priority": SupportTicket.PRIORITY_MEDIUM,
+                "assigned_role": SupportTicket.ASSIGNED_ROLE_FINANCE,
+                "resolution_note": "This has been resolved.",
+            },
+        )
+
+        self.assertRedirects(response, reverse("support-ticket-detail", args=[ticket.id]))
+        email_log = EmailDeliveryLog.objects.get(
+            template_key="support_ticket_resolved_v1",
+            related_object_type="support_ticket",
+            related_object_id=str(ticket.id),
+        )
+        self.assertEqual(email_log.recipient_email, customer.email)
+        self.assertEqual(email_log.status, EmailDeliveryLog.STATUS_SENT)
+
+    def test_hr_can_assign_payroll_ticket_to_role(self):
+        staff = self._make_user("payroll_ticket_staff", STAFF)
+        hr = self._make_user("payroll_ticket_hr", HR)
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_PAYROLL,
+            subject="Payroll assignment",
+            message="Please check this payslip.",
+            created_by=staff,
+            assigned_role=SupportTicket.ASSIGNED_ROLE_PAYROLL,
+        )
+        self.client.force_login(hr)
+
+        response = self.client.post(
+            reverse("support-ticket-detail", args=[ticket.id]),
+            data={
+                "status": SupportTicket.STATUS_IN_PROGRESS,
+                "priority": SupportTicket.PRIORITY_HIGH,
+                "assigned_role": SupportTicket.ASSIGNED_ROLE_ADMIN,
+                "resolution_note": "Escalating to admin.",
+            },
+        )
+
+        ticket.refresh_from_db()
+        self.assertRedirects(response, reverse("support-ticket-detail", args=[ticket.id]))
+        self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_ADMIN)
+        self.assertEqual(ticket.resolution_note, "Escalating to admin.")
 
     def test_customer_can_view_finance_resolution_note(self):
         customer = self._make_user("resolution_view_customer", CUSTOMER)
