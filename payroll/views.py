@@ -470,12 +470,6 @@ def payroll_dashboard(request):
             "total_payroll_cost": total_payroll_cost,
             "total_cpf": total_cpf,
             "employees_paid": employees_paid,
-            "delivery_status_labels": ["Emailed", "Downloaded", "Email Failed"],
-            "delivery_status_values": [
-                delivery_status_totals["emailed"],
-                delivery_status_totals["downloaded"],
-                delivery_status_totals["failed"],
-            ],
             "payroll_trend_labels": payroll_trend_labels,
             "payroll_trend_values": payroll_trend_values,
             "payroll_chart_summary": payroll_chart_summary,

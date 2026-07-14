@@ -1390,7 +1390,6 @@ class PayrollReportPlacementAndAccessTests(TestCase):
         self.assertContains(response, 'name="month"', html=False)
         self.assertContains(response, 'value="2026-06"', html=False)
         self.assertContains(response, "Payroll Cost Trend")
-        self.assertContains(response, "Payslip Delivery Status")
         self.assertContains(response, "Payroll Mix Snapshot")
         self.assertContains(response, "js/report_charts.js")
         self.assertContains(response, "S$6,050.00")

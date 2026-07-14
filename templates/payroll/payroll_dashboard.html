@@ -162,16 +162,6 @@
             </div>
             <div class="col-lg-6">
                 <div class="report-chart-card">
-                    <div class="report-chart-header">Payslip Delivery Status</div>
-                    <div class="report-chart-body">
-                        <canvas id="payrollDashboardDeliveryChart" class="report-chart-canvas" aria-label="Payslip delivery status chart" role="img"></canvas>
-                        <div id="payrollDashboardDeliveryChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-                    </div>
-                    <div class="px-3 pb-3 text-muted small">Shows how this month’s payroll records are progressing through delivery and download steps.</div>
-                </div>
-            </div>
-            <div class="col-12">
-                <div class="report-chart-card">
                     <div class="report-chart-header">Payroll Mix Snapshot</div>
                     <div class="report-chart-body">
                         <canvas id="payrollDashboardMixChart" class="report-chart-canvas" aria-label="Payroll mix chart" role="img"></canvas>
@@ -186,8 +176,6 @@
 
 {{ payroll_trend_labels|json_script:"payroll-dashboard-trend-labels" }}
 {{ payroll_trend_values|json_script:"payroll-dashboard-trend-values" }}
-{{ delivery_status_labels|json_script:"payroll-dashboard-delivery-labels" }}
-{{ delivery_status_values|json_script:"payroll-dashboard-delivery-values" }}
 {{ pay_mix_labels|json_script:"payroll-dashboard-mix-labels" }}
 {{ pay_mix_values|json_script:"payroll-dashboard-mix-values" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
@@ -221,28 +209,6 @@
                 }
             },
             emptyText: "No payroll trend data is available yet."
-        });
-
-        var deliveryLabels = window.ReportCharts.parseJsonScript("payroll-dashboard-delivery-labels", []);
-        var deliveryValues = window.ReportCharts.parseJsonScript("payroll-dashboard-delivery-values", []);
-        window.ReportCharts.renderChart({
-            canvasId: "payrollDashboardDeliveryChart",
-            emptyStateId: "payrollDashboardDeliveryChartEmpty",
-            type: "doughnut",
-            labels: deliveryLabels,
-            datasets: [
-                {
-                    label: "Payslip Delivery",
-                    data: deliveryValues,
-                    backgroundColor: ["#198754", "#0d6efd", "#dc3545"],
-                    borderColor: ["#198754", "#0d6efd", "#dc3545"],
-                    borderWidth: 1
-                }
-            ],
-            options: {
-                maintainAspectRatio: false
-            },
-            emptyText: "No payslip delivery activity is available yet."
         });
 
         var mixLabels = window.ReportCharts.parseJsonScript("payroll-dashboard-mix-labels", []);
