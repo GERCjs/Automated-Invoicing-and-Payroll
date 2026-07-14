@@ -23,6 +23,7 @@ from core.models import AuditLog
 from imports.models import ImportJob
 from notifications.models import EmailDeliveryLog
 from payments.models import PaymentBankDetails, PaymentRecord
+from support.models import SupportTicket
 
 from .exports import (
     _build_invoice_logo,
@@ -1949,6 +1950,89 @@ class InvoiceDashboardUiTests(TestCase):
             self.assertEqual(response.status_code, 403)
             self.client.logout()
 
+    def test_finance_sees_invoice_support_ticket_action_counts(self):
+        open_ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Open invoice ticket",
+            message="Needs Finance review.",
+            status=SupportTicket.STATUS_OPEN,
+            created_by=self.customer_user,
+        )
+        SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_PAYMENT,
+            subject="Payment ticket in progress",
+            message="Finance is reviewing this.",
+            status=SupportTicket.STATUS_IN_PROGRESS,
+            created_by=self.customer_user,
+        )
+        SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Resolved invoice ticket",
+            message="Already handled.",
+            status=SupportTicket.STATUS_RESOLVED,
+            created_by=self.customer_user,
+        )
+        SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_PAYROLL,
+            subject="Payroll ticket",
+            message="Not a Finance invoice/payment ticket.",
+            status=SupportTicket.STATUS_OPEN,
+            created_by=self.staff_user,
+        )
+        open_ticket.created_at = timezone.now() - timedelta(days=settings.SUPPORT_TICKET_SLA_DAYS + 1)
+        open_ticket.save(update_fields=["created_at"])
+        self.client.force_login(self.finance_user)
+
+        response = self.client.get(reverse("invoice-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.context["invoice_support_ticket_summary"]
+        self.assertEqual(summary["open_count"], 1)
+        self.assertEqual(summary["in_progress_count"], 1)
+        self.assertEqual(summary["overdue_count"], 1)
+        self.assertEqual(summary["active_count"], 2)
+        self.assertContains(response, "Invoice Support Tickets")
+        self.assertContains(response, "Open")
+        self.assertContains(response, "In Progress")
+        self.assertContains(response, "Overdue")
+        self.assertContains(response, reverse("finance-support-ticket-list"))
+        self.assertNotContains(response, "No invoice support tickets require action.")
+
+    def test_admin_and_superadmin_see_invoice_support_ticket_action_counts(self):
+        SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Admin visible invoice ticket",
+            message="Needs Finance action.",
+            status=SupportTicket.STATUS_OPEN,
+            created_by=self.customer_user,
+        )
+
+        for user in [self.admin_user, self.superadmin_user]:
+            self.client.force_login(user)
+            response = self.client.get(reverse("invoice-dashboard"))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.context["invoice_support_ticket_summary"]["open_count"], 1)
+            self.assertContains(response, "Invoice Support Tickets")
+            self.assertContains(response, reverse("finance-support-ticket-list"))
+            self.client.logout()
+
+    def test_invoice_dashboard_support_ticket_empty_state(self):
+        SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Resolved only",
+            message="This should not require action.",
+            status=SupportTicket.STATUS_RESOLVED,
+            created_by=self.customer_user,
+        )
+        self.client.force_login(self.finance_user)
+
+        response = self.client.get(reverse("invoice-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.context["invoice_support_ticket_summary"]
+        self.assertEqual(summary["active_count"], 0)
+        self.assertContains(response, "No invoice support tickets require action.")
+
     def test_invoice_dashboard_outstanding_amount_counts_only_issued_unpaid_invoices(self):
         today = timezone.localdate()
         self._create_invoice(
@@ -2399,6 +2483,7 @@ class InvoiceDashboardUiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No invoice issues need attention right now.")
+        self.assertContains(response, "No invoice support tickets require action.")
         self.assertContains(response, "No invoices match Bank Transfer to Verify.")
 
 

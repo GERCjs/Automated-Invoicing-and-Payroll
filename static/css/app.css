@@ -1242,6 +1242,19 @@ textarea.form-control:focus {
     background: rgba(255, 255, 255, 0.18);
 }
 
+.invoice-dashboard-page .invoice-support-action-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.invoice-dashboard-page .invoice-support-action-item {
+    background: #f7f9fc;
+    border: 1px solid #d8e0ea;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+}
+
 .invoice-dashboard-page .invoice-dashboard-table-actions {
     align-items: flex-end;
     display: inline-flex;

@@ -150,6 +150,35 @@
     </section>
 
     <section class="report-section">
+        <div class="card invoice-support-action-card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Invoice Support Tickets</span>
+                <a href="{{ invoice_support_ticket_summary.list_url }}" class="btn btn-sm btn-outline-primary">Open Finance Support</a>
+            </div>
+            <div class="card-body">
+                {% if invoice_support_ticket_summary.active_count %}
+                <div class="invoice-support-action-grid">
+                    <div class="invoice-support-action-item">
+                        <div class="report-summary-label">Open</div>
+                        <div class="report-summary-value">{{ invoice_support_ticket_summary.open_count }}</div>
+                    </div>
+                    <div class="invoice-support-action-item">
+                        <div class="report-summary-label">In Progress</div>
+                        <div class="report-summary-value">{{ invoice_support_ticket_summary.in_progress_count }}</div>
+                    </div>
+                    <div class="invoice-support-action-item">
+                        <div class="report-summary-label">Overdue</div>
+                        <div class="report-summary-value">{{ invoice_support_ticket_summary.overdue_count }}</div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="report-empty-state">No invoice support tickets require action.</div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
         <div class="card invoice-category-card">
             <div class="card-header invoice-category-header">
                 <div>

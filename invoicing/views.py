@@ -27,6 +27,7 @@ from payments.services import (
 )
 from payments.models import PaymentRecord
 from payments.forms import BankTransferConfirmationForm, BankTransferNoticeForm
+from support.models import SupportTicket
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
 from .forms import (
@@ -133,6 +134,32 @@ def _build_invoice_dashboard_categories(selected_key: str):
             }
         )
     return categories
+
+
+def _invoice_support_ticket_action_summary():
+    active_tickets = list(
+        SupportTicket.objects.filter(
+            category__in=[
+                SupportTicket.CATEGORY_INVOICE,
+                SupportTicket.CATEGORY_PAYMENT,
+            ],
+            status__in=[
+                SupportTicket.STATUS_OPEN,
+                SupportTicket.STATUS_IN_PROGRESS,
+            ],
+        ).only("id", "status", "created_at")
+    )
+    open_count = sum(1 for ticket in active_tickets if ticket.status == SupportTicket.STATUS_OPEN)
+    in_progress_count = sum(
+        1 for ticket in active_tickets if ticket.status == SupportTicket.STATUS_IN_PROGRESS
+    )
+    return {
+        "open_count": open_count,
+        "in_progress_count": in_progress_count,
+        "overdue_count": sum(1 for ticket in active_tickets if ticket.is_sla_breached),
+        "active_count": len(active_tickets),
+        "list_url": reverse("finance-support-ticket-list"),
+    }
 
 
 def _bank_transfer_context(invoice: Invoice, initiated_by=None) -> dict:
@@ -915,6 +942,7 @@ def invoice_dashboard(request):
     category_invoices = _order_invoice_dashboard_category_queryset(
         _invoice_dashboard_category_queryset(selected_invoice_category_key)
     )
+    invoice_support_ticket_summary = _invoice_support_ticket_action_summary()
 
     return render(
         request,
@@ -952,6 +980,7 @@ def invoice_dashboard(request):
             "selected_invoice_category_key": selected_invoice_category_key,
             "selected_invoice_category": selected_invoice_category,
             "category_invoices": category_invoices,
+            "invoice_support_ticket_summary": invoice_support_ticket_summary,
         },
     )
 
