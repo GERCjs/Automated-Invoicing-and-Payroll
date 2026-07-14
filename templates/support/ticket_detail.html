@@ -39,7 +39,17 @@
                     <dt class="col-sm-4">Priority</dt>
                     <dd class="col-sm-8">{{ ticket.get_priority_display }}</dd>
                     <dt class="col-sm-4">Related Invoice / Reference</dt>
-                    <dd class="col-sm-8">{{ ticket.related_reference|default:"-" }}</dd>
+                    <dd class="col-sm-8">
+                        {% if ticket.related_reference %}
+                            {% if related_reference_url %}
+                            <a href="{{ related_reference_url }}">{{ ticket.related_reference }}</a>
+                            {% else %}
+                            {{ ticket.related_reference }}
+                            {% endif %}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </dd>
                     {% if can_manage %}
                     <dt class="col-sm-4">Assigned To</dt>
                     <dd class="col-sm-8">{{ ticket.assigned_display }}</dd>

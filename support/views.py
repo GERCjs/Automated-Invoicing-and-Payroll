@@ -40,6 +40,11 @@ def _default_assigned_role_for_category(category):
     return ""
 
 
+def _apply_assigned_status(ticket):
+    if ticket.assigned_role and ticket.status == SupportTicket.STATUS_OPEN:
+        ticket.status = SupportTicket.STATUS_IN_PROGRESS
+
+
 def _ticket_queryset_for(user):
     role = get_user_role(user)
     tickets = _ticket_base_queryset()
@@ -169,6 +174,37 @@ def _validated_customer_invoice_reference(user, category, raw_invoice_id="", raw
     return invoice.invoice_number
 
 
+def _invoice_for_ticket_reference(ticket):
+    if ticket.category not in INVOICE_PAYMENT_CATEGORIES:
+        return None
+    related_reference = (ticket.related_reference or "").strip()
+    if not related_reference:
+        return None
+
+    from invoicing.models import Invoice
+
+    return (
+        Invoice.objects.select_related("customer")
+        .filter(invoice_number=related_reference)
+        .first()
+    )
+
+
+def _related_reference_url_for(user, ticket):
+    invoice = _invoice_for_ticket_reference(ticket)
+    if invoice is None:
+        return ""
+
+    role = get_user_role(user)
+    if role in {SUPERADMIN, ADMIN, FINANCE}:
+        return reverse("invoice-detail", args=[invoice.pk])
+    if role == CUSTOMER:
+        user_email = (user.email or "").strip()
+        if user_email and invoice.customer.email.lower() == user_email.lower():
+            return reverse("customer-invoice-detail", args=[invoice.pk])
+    return ""
+
+
 def _can_manage_ticket(user, ticket):
     role = get_user_role(user)
     if role in {SUPERADMIN, ADMIN}:
@@ -261,6 +297,7 @@ def support_ticket_create(request):
             ticket = form.save(commit=False)
             ticket.created_by = request.user
             ticket.assigned_role = _default_assigned_role_for_category(ticket.category)
+            _apply_assigned_status(ticket)
             ticket.save()
             log_event(
                 action="support.ticket.created",
@@ -296,6 +333,7 @@ def customer_invoice_support_ticket_create(request, invoice_id):
             ticket.related_reference = invoice.invoice_number
             ticket.created_by = request.user
             ticket.assigned_role = SupportTicket.ASSIGNED_ROLE_FINANCE
+            _apply_assigned_status(ticket)
             ticket.save()
             log_event(
                 action="support.ticket.created",
@@ -378,6 +416,9 @@ def support_ticket_chat_create(request):
         created_by=request.user,
         assigned_role=_default_assigned_role_for_category(category),
     )
+    _apply_assigned_status(ticket)
+    if ticket.status == SupportTicket.STATUS_IN_PROGRESS:
+        ticket.save(update_fields=["status", "updated_at"])
     log_event(
         action="support.ticket.created",
         user=request.user,
@@ -482,6 +523,7 @@ def support_ticket_detail(request, ticket_id):
             updated_ticket = form.save(commit=False)
             if updated_ticket.assigned_role:
                 updated_ticket.assigned_to = None
+            _apply_assigned_status(updated_ticket)
             updated_ticket.mark_resolution_timestamp()
             updated_ticket.save()
             resolution_email_status = ""
@@ -531,6 +573,7 @@ def support_ticket_detail(request, ticket_id):
             "form": form,
             "can_manage": can_manage,
             "support_ticket_sla_days": settings.SUPPORT_TICKET_SLA_DAYS,
+            "related_reference_url": _related_reference_url_for(request.user, ticket),
             "back_url": _internal_ticket_back_url_for(request.user),
             "back_label": "Back",
             "show_requester_details": True,
@@ -550,6 +593,7 @@ def customer_support_ticket_detail(request, ticket_id):
             "form": None,
             "can_manage": False,
             "support_ticket_sla_days": settings.SUPPORT_TICKET_SLA_DAYS,
+            "related_reference_url": _related_reference_url_for(request.user, ticket),
             "back_url": reverse("customer-support-ticket-list"),
             "back_label": "Back to My Support Requests",
             "show_requester_details": False,

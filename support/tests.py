@@ -54,6 +54,25 @@ class SupportTicketFlowTests(TestCase):
         self.assertRedirects(response, reverse("support-ticket-detail", args=[ticket.id]))
         self.assertEqual(ticket.created_by, admin)
         self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_FINANCE)
+        self.assertEqual(ticket.status, SupportTicket.STATUS_IN_PROGRESS)
+
+    def test_general_unassigned_ticket_remains_open(self):
+        admin = self._make_user("general_admin", ADMIN)
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            reverse("support-ticket-create"),
+            data={
+                "category": SupportTicket.CATEGORY_ACCOUNT,
+                "subject": "Account settings question",
+                "related_reference": "",
+                "message": "Please check these account settings.",
+            },
+        )
+
+        ticket = SupportTicket.objects.get(subject="Account settings question")
+        self.assertRedirects(response, reverse("support-ticket-detail", args=[ticket.id]))
+        self.assertEqual(ticket.assigned_role, "")
         self.assertEqual(ticket.status, SupportTicket.STATUS_OPEN)
 
     def test_customer_can_create_ticket_from_chat_message(self):
@@ -81,6 +100,7 @@ class SupportTicketFlowTests(TestCase):
         self.assertEqual(ticket.priority, SupportTicket.PRIORITY_HIGH)
         self.assertEqual(ticket.related_reference, invoice.invoice_number)
         self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_FINANCE)
+        self.assertEqual(ticket.status, SupportTicket.STATUS_IN_PROGRESS)
         self.assertEqual(ticket.message, "Can I get a payment receipt for PAY-2002?")
 
     def test_customer_chat_message_saves_guided_reference(self):
@@ -265,6 +285,84 @@ class SupportTicketFlowTests(TestCase):
         self.assertContains(response, "The tax amount looks wrong.")
         self.assertContains(response, "Finance confirmed the corrected amount.")
 
+    def test_customer_invoice_ticket_detail_shows_clickable_own_invoice_link(self):
+        customer = self._make_user("own_link_customer", CUSTOMER)
+        invoice = self._make_customer_invoice(customer, "INV-LINK-OWN")
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Invoice link",
+            message="Please check this invoice.",
+            related_reference=invoice.invoice_number,
+            created_by=customer,
+        )
+        self.client.force_login(customer)
+
+        response = self.client.get(reverse("customer-support-ticket-detail", args=[ticket.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'href="{reverse("customer-invoice-detail", args=[invoice.pk])}"')
+        self.assertContains(response, f">{invoice.invoice_number}</a>")
+
+    def test_customer_cannot_access_another_customers_invoice_through_ticket_link(self):
+        customer_a = self._make_user("link_owner_a", CUSTOMER)
+        customer_b = self._make_user("link_owner_b", CUSTOMER)
+        other_invoice = self._make_customer_invoice(customer_b, "INV-LINK-OTHER")
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Wrong invoice link",
+            message="This ticket should not expose another invoice.",
+            related_reference=other_invoice.invoice_number,
+            created_by=customer_a,
+        )
+        self.client.force_login(customer_a)
+
+        response = self.client.get(reverse("customer-support-ticket-detail", args=[ticket.id]))
+        invoice_response = self.client.get(reverse("customer-invoice-detail", args=[other_invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, other_invoice.invoice_number)
+        self.assertNotContains(response, reverse("customer-invoice-detail", args=[other_invoice.pk]))
+        self.assertEqual(invoice_response.status_code, 404)
+
+    def test_finance_ticket_detail_shows_clickable_internal_invoice_link(self):
+        customer = self._make_user("finance_link_customer", CUSTOMER)
+        finance = self._make_user("finance_link_user", FINANCE)
+        invoice = self._make_customer_invoice(customer, "INV-LINK-FIN")
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Finance invoice link",
+            message="Finance should use the internal invoice page.",
+            related_reference=invoice.invoice_number,
+            created_by=customer,
+            assigned_role=SupportTicket.ASSIGNED_ROLE_FINANCE,
+        )
+        self.client.force_login(finance)
+
+        response = self.client.get(reverse("support-ticket-detail", args=[ticket.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'href="{reverse("invoice-detail", args=[invoice.pk])}"')
+        self.assertContains(response, f">{invoice.invoice_number}</a>")
+
+    def test_missing_invoice_reference_stays_plain_text(self):
+        customer = self._make_user("missing_link_customer", CUSTOMER)
+        finance = self._make_user("missing_link_finance", FINANCE)
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Missing invoice link",
+            message="This invoice number does not exist.",
+            related_reference="INV-NOT-FOUND",
+            created_by=customer,
+            assigned_role=SupportTicket.ASSIGNED_ROLE_FINANCE,
+        )
+        self.client.force_login(finance)
+
+        response = self.client.get(reverse("support-ticket-detail", args=[ticket.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "INV-NOT-FOUND")
+        self.assertNotContains(response, f">INV-NOT-FOUND</a>")
+
     def test_invoice_enquiry_from_invoice_detail_stores_invoice_reference(self):
         customer = self._make_user("invoice_request_customer", CUSTOMER)
         invoice = self._make_customer_invoice(customer, "INV-AUTO-001")
@@ -283,6 +381,7 @@ class SupportTicketFlowTests(TestCase):
         self.assertEqual(ticket.related_reference, "INV-AUTO-001")
         self.assertEqual(ticket.category, SupportTicket.CATEGORY_INVOICE)
         self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_FINANCE)
+        self.assertEqual(ticket.status, SupportTicket.STATUS_IN_PROGRESS)
 
     def test_customer_cannot_create_ticket_for_another_customers_invoice(self):
         customer_a = self._make_user("invoice_owner_a", CUSTOMER)
