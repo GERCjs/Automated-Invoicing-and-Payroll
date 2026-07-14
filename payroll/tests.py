@@ -406,7 +406,7 @@ class PayrollUploadPreviewTests(TestCase):
         self.assertContains(response, "data-date-to")
         self.assertContains(response, "data-date-error")
         self.assertContains(response, "js/date-range-filters.js")
-        self.assertContains(response, 'type="month"', html=False)
+        self.assertNotContains(response, 'type="month"', html=False)
 
     def test_payroll_list_rejects_invalid_date_range_and_preserves_values(self):
         response = self.client.get(
@@ -452,7 +452,7 @@ class PayrollUploadPreviewTests(TestCase):
         self.assertContains(response, "EMP001")
         self.assertNotContains(response, "EMP002")
 
-    def test_payroll_list_filters_by_selected_month(self):
+    def test_payroll_list_filters_by_search_and_date_range_without_month_filter(self):
         PayrollRecord.objects.create(
             employee_name="Alex Tan",
             employee_id="EMP001",
@@ -476,15 +476,16 @@ class PayrollUploadPreviewTests(TestCase):
 
         response = self.client.get(
             reverse("payroll-list"),
-            {"month": "2026-08"},
+            {"q": "Alex", "date_from": "2026-08-01", "date_to": "2026-08-31"},
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "EMP001")
         self.assertNotContains(response, "EMP002")
-        self.assertContains(response, 'name="month"', html=False)
-        self.assertContains(response, 'value="2026-08"', html=False)
-        self.assertContains(response, "Month: 2026-08")
+        self.assertNotContains(response, 'name="month"', html=False)
+        self.assertContains(response, 'value="2026-08-01"', html=False)
+        self.assertContains(response, 'value="2026-08-31"', html=False)
+        self.assertContains(response, 'value="Alex"', html=False)
 
 
 class PayrollInvalidRowDownloadTests(TestCase):

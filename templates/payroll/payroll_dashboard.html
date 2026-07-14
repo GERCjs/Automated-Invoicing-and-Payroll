@@ -114,7 +114,6 @@
                             <tr>
                                 <th>Employee</th>
                                 <th>Payment Date</th>
-                                <th>Status</th>
                                 <th class="text-end">Deductions</th>
                                 <th class="text-end">Net Salary</th>
                                 <th class="text-end">Actions</th>
@@ -128,7 +127,6 @@
                                     <div class="text-muted small">{{ item.record.employee_id }}</div>
                                 </td>
                                 <td>{{ item.record.payment_date|date:"d M Y" }}</td>
-                                <td><span class="status-badge {{ item.status_class }}">{{ item.status_label }}</span></td>
                                 <td class="text-end">S${{ item.record.deductions|floatformat:2|intcomma }}</td>
                                 <td class="text-end">S${{ item.record.net_salary|floatformat:2|intcomma }}</td>
                                 <td class="text-end">

@@ -381,27 +381,7 @@ def payroll_dashboard(request):
         "created_at",
     )[:8])
 
-    recent_action_records = []
-    for record in recent_payslip_records:
-        if record.pk in emailed_ids:
-            status_label = "Emailed"
-            status_class = "status-success"
-        elif record.pk in downloaded_ids:
-            status_label = "Downloaded"
-            status_class = "status-neutral"
-        elif record.pk in failed_email_ids:
-            status_label = "Email Failed"
-            status_class = "status-danger"
-        else:
-            status_label = "Needs Delivery"
-            status_class = "status-warning"
-        recent_action_records.append(
-            {
-                "record": record,
-                "status_label": status_label,
-                "status_class": status_class,
-            }
-        )
+    recent_action_records = [{"record": record} for record in recent_payslip_records]
 
     payroll_chart_summary = _build_chart_summary(payroll_trend_labels, payroll_trend_values)
     reporting_period_label = month_start.strftime("%B %Y")
@@ -515,7 +495,6 @@ def payroll_dashboard(request):
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_list(request):
     search_query = request.GET.get("q", "").strip()
-    selected_month, month_start, month_end = _parse_month_filter(request.GET.get("month"))
     raw_date_from = (request.GET.get("date_from") or "").strip()
     raw_date_to = (request.GET.get("date_to") or "").strip()
     date_from, date_to, filter_date_from, filter_date_to, date_filter_error = _parse_date_range(
@@ -529,8 +508,6 @@ def payroll_list(request):
             | Q(employee_id__icontains=search_query)
         )
     if not date_filter_error:
-        if month_start and month_end:
-            payslip_records = payslip_records.filter(payment_date__gte=month_start, payment_date__lte=month_end)
         if filter_date_from:
             payslip_records = payslip_records.filter(payment_date__gte=filter_date_from)
         if filter_date_to:
@@ -542,7 +519,6 @@ def payroll_list(request):
         {
             "payslip_records": payslip_records,
             "search_query": search_query,
-            "selected_month": selected_month,
             "date_from": date_from.isoformat() if date_from else raw_date_from,
             "date_to": date_to.isoformat() if date_to else raw_date_to,
             "date_filter_error": date_filter_error,
