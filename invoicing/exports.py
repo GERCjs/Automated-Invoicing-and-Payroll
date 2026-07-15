@@ -14,6 +14,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from payments.models import PaymentRecord
 from payments.services import get_bank_transfer_details
 
 from .models import Invoice, InvoiceTemplateSettings
@@ -104,26 +105,56 @@ def _build_customer_display(invoice: Invoice) -> str:
     return customer_display
 
 
+def _payment_records_for_invoice(invoice: Invoice) -> list[PaymentRecord]:
+    try:
+        return list(invoice.payment_records.all())
+    except (AttributeError, ValueError):
+        return []
+
+
+def _sum_payment_amounts(payment_records: list[PaymentRecord], statuses: set[str]) -> Decimal:
+    return sum(
+        (Decimal(record.amount or 0) for record in payment_records if record.status in statuses and record.paid_at),
+        Decimal("0.00"),
+    )
+
+
 def _resolve_invoice_payment_summary(invoice: Invoice) -> dict:
+    payment_records = _payment_records_for_invoice(invoice)
+    successful_paid_amount = _sum_payment_amounts(payment_records, {PaymentRecord.STATUS_SUCCEEDED})
+    refunded_amount = _sum_payment_amounts(payment_records, {PaymentRecord.STATUS_REFUNDED})
+    recorded_paid_amount = successful_paid_amount + refunded_amount
     amount_paid = Decimal("0.00")
-    if invoice.status == Invoice.STATUS_PAID:
-        amount_paid = invoice.total_amount
-    amount_due = invoice.total_amount - amount_paid
+    amount_due = invoice.total_amount
+    payment_status_message = ""
+    payment_data_issue = ""
+
+    if invoice.total_amount == Decimal("0.00"):
+        amount_due = Decimal("0.00")
+        payment_status_message = "No Payment Required"
+    elif invoice.status == Invoice.STATUS_REFUNDED:
+        amount_paid = recorded_paid_amount
+        amount_due = Decimal("0.00")
+        payment_status_message = "Refunded"
+        if refunded_amount == Decimal("0.00"):
+            payment_data_issue = "Refund status requires review: no matching refunded payment record was found."
+    elif invoice.status == Invoice.STATUS_PAID:
+        amount_paid = successful_paid_amount or invoice.total_amount
+        amount_due = max(invoice.total_amount - amount_paid, Decimal("0.00"))
+        payment_status_message = "Paid in Full" if amount_due == Decimal("0.00") else ""
+
     show_payment_instructions = (
         invoice.status in ISSUED_INVOICE_STATUSES
         and amount_due > Decimal("0.00")
         and invoice.status not in {Invoice.STATUS_PAID, Invoice.STATUS_REFUNDED}
     )
-    payment_status_message = ""
-    if amount_due <= Decimal("0.00"):
-        payment_status_message = "Paid in Full"
-    elif invoice.status == Invoice.STATUS_REFUNDED:
-        payment_status_message = "Refunded"
     return {
         "amount_paid": amount_paid,
+        "refunded_amount": refunded_amount,
         "amount_due": amount_due,
         "show_payment_instructions": show_payment_instructions,
         "payment_status_message": payment_status_message,
+        "payment_data_issue": payment_data_issue,
     }
 
 
@@ -514,14 +545,17 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
 
     payment_summary = _resolve_invoice_payment_summary(invoice)
     amount_paid = payment_summary["amount_paid"]
+    refunded_amount = payment_summary["refunded_amount"]
     amount_due = payment_summary["amount_due"]
     totals = [
         ["Subtotal", f"{invoice.subtotal:.2f}"],
         ["GST", f"{invoice.tax_amount:.2f}"],
         [f"TOTAL {invoice.currency}", f"{invoice.total_amount:.2f}"],
         ["Less Amount Paid", f"{amount_paid:.2f}"],
-        [f"AMOUNT DUE {invoice.currency}", f"{amount_due:.2f}"],
     ]
+    if invoice.status == Invoice.STATUS_REFUNDED or refunded_amount > Decimal("0.00"):
+        totals.append(["Refunded", f"{refunded_amount:.2f}"])
+    totals.append([f"AMOUNT DUE {invoice.currency}", f"{amount_due:.2f}"])
     totals_table = Table(totals, colWidths=[124 * mm, 36 * mm])
     totals_table.setStyle(
         TableStyle(
@@ -542,6 +576,8 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     story.append(Spacer(1, 8))
     if payment_summary["payment_status_message"]:
         story.append(Paragraph(f"<b>{payment_summary['payment_status_message']}</b>", body))
+        if payment_summary["payment_data_issue"]:
+            story.append(Paragraph(payment_summary["payment_data_issue"], small))
     else:
         story.append(Paragraph(f"Due Date: {invoice.due_date.strftime('%d %b %Y')}", body))
         story.append(Paragraph(f"Payment Term: {context['invoice_payment_term_days']} Days", body))

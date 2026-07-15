@@ -1179,6 +1179,20 @@ textarea.form-control:focus {
     min-height: 220px;
 }
 
+.invoice-dashboard-page .invoice-dashboard-balance-breakdown {
+    border-top: 1px solid #d8e0ea;
+    display: grid;
+    gap: 0.25rem;
+    margin-top: 0.75rem;
+    padding-top: 0.65rem;
+}
+
+.invoice-dashboard-page .invoice-dashboard-balance-breakdown div {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+}
+
 .invoice-dashboard-page .report-summary-strip {
     gap: 1rem;
 }

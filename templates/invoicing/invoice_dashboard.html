@@ -39,9 +39,13 @@
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
                     <div class="card-body">
-                        <div class="report-kpi-label">Outstanding Amount</div>
-                        <div class="report-kpi-value">S${{ outstanding_amount|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">Sent, viewed, and overdue invoices still waiting for payment.</div>
+                        <div class="report-kpi-label">Total Unpaid Balance</div>
+                        <div class="report-kpi-value">S${{ total_unpaid_balance|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Pending payment, viewed, and overdue invoice balances. Overdue Balance is included in this total.</div>
+                        <div class="invoice-dashboard-balance-breakdown small">
+                            <div><span>Not yet due</span><strong>S${{ not_yet_due_balance|floatformat:2|intcomma }}</strong></div>
+                            <div><span>Overdue</span><strong>S${{ overdue_balance|floatformat:2|intcomma }}</strong></div>
+                        </div>
                         <a href="{% url 'invoice-list' %}?status=outstanding" class="report-kpi-link">View outstanding invoices</a>
                     </div>
                 </div>
@@ -49,9 +53,9 @@
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
                     <div class="card-body">
-                        <div class="report-kpi-label">Overdue Amount</div>
-                        <div class="report-kpi-value">S${{ overdue_amount|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">Invoices already past due and needing immediate collection follow-up.</div>
+                        <div class="report-kpi-label">Overdue Balance</div>
+                        <div class="report-kpi-value">S${{ overdue_balance|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Past-due unpaid invoices only. This is a subset of Total Unpaid Balance.</div>
                         <a href="{% url 'invoice-list' %}?status=overdue" class="report-kpi-link">View overdue invoices</a>
                     </div>
                 </div>
@@ -59,10 +63,10 @@
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
                     <div class="card-body">
-                        <div class="report-kpi-label">Invoices Requiring Follow-up</div>
-                        <div class="report-kpi-value">{{ invoices_requiring_follow_up_count }}</div>
-                        <div class="small text-muted">Draft, pending, viewed, and overdue invoices that still need Finance action.</div>
-                        <a href="{% url 'invoice-list' %}?status=outstanding" class="report-kpi-link">Open follow-up invoices</a>
+                        <div class="report-kpi-label">Invoices Requiring Action</div>
+                        <div class="report-kpi-value">{{ invoices_requiring_action_count }}</div>
+                        <div class="small text-muted">Drafts awaiting issue and unpaid invoices requiring collection or delivery action.</div>
+                        <a href="{% url 'invoice-list' %}?status=outstanding" class="report-kpi-link">Open action invoices</a>
                     </div>
                 </div>
             </div>

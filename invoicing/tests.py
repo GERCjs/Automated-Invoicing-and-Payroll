@@ -644,6 +644,57 @@ class InvoicingMvpTests(TestCase):
         self.assertContains(response, draft_invoice.invoice_number)
         self.assertNotContains(response, paid_invoice.invoice_number)
 
+    def test_invoice_list_outstanding_filter_shows_only_issued_unpaid_invoices(self):
+        today = timezone.localdate()
+        draft_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-FILTER-DRAFT",
+            status=Invoice.STATUS_DRAFT,
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        sent_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-FILTER-SENT",
+            status=Invoice.STATUS_SENT,
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        viewed_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-FILTER-VIEWED",
+            status=Invoice.STATUS_VIEWED,
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        overdue_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-FILTER-OVERDUE",
+            status=Invoice.STATUS_OVERDUE,
+            issue_date=today - timedelta(days=10),
+            due_date=today - timedelta(days=1),
+        )
+        paid_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-FILTER-PAID",
+            status=Invoice.STATUS_PAID,
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        refunded_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-FILTER-REFUNDED",
+            status=Invoice.STATUS_REFUNDED,
+            issue_date=today,
+            due_date=today + timedelta(days=7),
+        )
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-list"), data={"status": "outstanding"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Showing: Outstanding invoices")
+        self.assertContains(response, sent_invoice.invoice_number)
+        self.assertContains(response, viewed_invoice.invoice_number)
+        self.assertContains(response, overdue_invoice.invoice_number)
+        self.assertNotContains(response, draft_invoice.invoice_number)
+        self.assertNotContains(response, paid_invoice.invoice_number)
+        self.assertNotContains(response, refunded_invoice.invoice_number)
+
     def test_finance_can_search_invoice_list_by_number_name_and_email(self):
         acme_invoice = Invoice.objects.create(
             invoice_number="INV-ACME-5001",
@@ -915,6 +966,58 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, matching_invoice.invoice_number)
         self.assertNotContains(response, other_status_invoice.invoice_number)
+        self.assertNotContains(response, other_date_invoice.invoice_number)
+
+    def test_invoice_list_combines_search_outstanding_status_and_valid_issue_date_range(self):
+        target_customer = Customer.objects.create(
+            name="Outstanding Gamma",
+            email="outstanding.gamma@example.com",
+            created_by=self.finance_user,
+        )
+        matching_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-GAMMA-1018",
+            status=Invoice.STATUS_VIEWED,
+            customer=target_customer,
+            issue_date=timezone.localdate() - timedelta(days=3),
+            due_date=timezone.localdate() + timedelta(days=5),
+        )
+        draft_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-GAMMA-1019",
+            status=Invoice.STATUS_DRAFT,
+            customer=target_customer,
+            issue_date=timezone.localdate() - timedelta(days=3),
+            due_date=timezone.localdate() + timedelta(days=5),
+        )
+        paid_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-GAMMA-1020",
+            status=Invoice.STATUS_PAID,
+            customer=target_customer,
+            issue_date=timezone.localdate() - timedelta(days=3),
+            due_date=timezone.localdate() + timedelta(days=5),
+        )
+        other_date_invoice = self._create_basic_invoice(
+            invoice_number="INV-OUT-GAMMA-1021",
+            status=Invoice.STATUS_SENT,
+            customer=target_customer,
+            issue_date=timezone.localdate() - timedelta(days=10),
+            due_date=timezone.localdate() + timedelta(days=5),
+        )
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(
+            reverse("invoice-list"),
+            data={
+                "q": "Outstanding Gamma",
+                "status": "outstanding",
+                "issue_date_from": (timezone.localdate() - timedelta(days=4)).strftime("%Y-%m-%d"),
+                "issue_date_to": (timezone.localdate() - timedelta(days=2)).strftime("%Y-%m-%d"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, matching_invoice.invoice_number)
+        self.assertNotContains(response, draft_invoice.invoice_number)
+        self.assertNotContains(response, paid_invoice.invoice_number)
         self.assertNotContains(response, other_date_invoice.invoice_number)
 
     def test_invoice_list_reset_link_returns_base_url_without_filters(self):
@@ -1780,6 +1883,27 @@ class InvoiceTemplateSettingsTests(TestCase):
             },
         )[0]
 
+    def _create_payment_record(
+        self,
+        *,
+        invoice=None,
+        status=PaymentRecord.STATUS_SUCCEEDED,
+        amount=None,
+        provider=PaymentRecord.PROVIDER_STRIPE,
+        reference="PAY-TEMPLATE-001",
+    ):
+        invoice = invoice or self.invoice
+        return PaymentRecord.objects.create(
+            invoice=invoice,
+            payment_reference=reference,
+            provider=provider,
+            status=status,
+            amount=amount if amount is not None else invoice.total_amount,
+            currency=invoice.currency,
+            paid_at=timezone.now(),
+            external_transaction_id=f"pi_{reference.lower().replace('-', '_')}",
+        )
+
     def test_authorized_user_can_open_invoice_template_settings(self):
         self.client.force_login(self.finance_user)
 
@@ -2149,6 +2273,7 @@ class InvoiceTemplateSettingsTests(TestCase):
     def test_paid_invoice_with_zero_balance_hides_bank_details_and_shows_paid_in_full(self):
         self._save_complete_bank_details()
         self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
+        self._create_payment_record(reference="PAY-TEMPLATE-PAID")
         self.invoice.status = Invoice.STATUS_PAID
         self.invoice.save(update_fields=["status", "updated_at"])
 
@@ -2162,9 +2287,13 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertEqual(payment_summary["payment_status_message"], "Paid in Full")
         self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
 
-    def test_refunded_invoice_hides_bank_details(self):
+    def test_fully_refunded_invoice_shows_refund_amount_and_zero_due(self):
         self._save_complete_bank_details()
         self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
+        self._create_payment_record(
+            status=PaymentRecord.STATUS_REFUNDED,
+            reference="PAY-TEMPLATE-REFUNDED",
+        )
         self.invoice.status = Invoice.STATUS_REFUNDED
         self.invoice.save(update_fields=["status", "updated_at"])
 
@@ -2175,6 +2304,47 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertFalse(payment_summary["show_payment_instructions"])
         self.assertEqual(payment_summary["payment_status_message"], "Refunded")
+        self.assertEqual(payment_summary["amount_paid"], self.invoice.total_amount)
+        self.assertEqual(payment_summary["refunded_amount"], self.invoice.total_amount)
+        self.assertEqual(payment_summary["amount_due"], Decimal("0.00"))
+        self.assertEqual(payment_summary["payment_data_issue"], "")
+        self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
+
+    def test_inconsistent_refunded_invoice_without_payment_record_is_reported_safely(self):
+        self._save_complete_bank_details()
+        self.invoice.status = Invoice.STATUS_REFUNDED
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertFalse(payment_summary["show_payment_instructions"])
+        self.assertEqual(payment_summary["payment_status_message"], "Refunded")
+        self.assertEqual(payment_summary["amount_paid"], Decimal("0.00"))
+        self.assertEqual(payment_summary["refunded_amount"], Decimal("0.00"))
+        self.assertEqual(payment_summary["amount_due"], Decimal("0.00"))
+        self.assertIn("requires review", payment_summary["payment_data_issue"])
+
+    def test_zero_value_invoice_shows_no_payment_required_and_hides_payment_instructions(self):
+        self._save_complete_bank_details()
+        self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
+        self.invoice.subtotal = Decimal("0.00")
+        self.invoice.tax_amount = Decimal("0.00")
+        self.invoice.total_amount = Decimal("0.00")
+        self.invoice.status = Invoice.STATUS_SENT
+        self.invoice.save(update_fields=["subtotal", "tax_amount", "total_amount", "status", "updated_at"])
+
+        context = build_export_context(self.invoice)
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(payment_summary["payment_status_message"], "No Payment Required")
+        self.assertNotEqual(payment_summary["payment_status_message"], "Paid in Full")
+        self.assertFalse(payment_summary["show_payment_instructions"])
+        self.assertEqual(payment_summary["amount_paid"], Decimal("0.00"))
+        self.assertEqual(payment_summary["amount_due"], Decimal("0.00"))
         self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
 
     def test_computer_generated_statement_is_rendered_once(self):
@@ -2720,7 +2890,7 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertEqual(summary["active_count"], 0)
         self.assertContains(response, "No invoice support tickets require action.")
 
-    def test_invoice_dashboard_outstanding_amount_counts_only_issued_unpaid_invoices(self):
+    def test_invoice_dashboard_total_unpaid_balance_counts_only_issued_unpaid_invoices(self):
         today = timezone.localdate()
         self._create_invoice(
             invoice_number="INV-DASH-OUT-1",
@@ -2769,10 +2939,21 @@ class InvoiceDashboardUiTests(TestCase):
         response = self.client.get(reverse("invoice-dashboard"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_unpaid_balance"], Decimal("430.00"))
+        self.assertEqual(response.context["overdue_balance"], Decimal("80.00"))
+        self.assertEqual(response.context["not_yet_due_balance"], Decimal("350.00"))
         self.assertEqual(response.context["outstanding_amount"], Decimal("430.00"))
+        self.assertLessEqual(response.context["overdue_balance"], response.context["total_unpaid_balance"])
+        self.assertEqual(
+            response.context["not_yet_due_balance"],
+            response.context["total_unpaid_balance"] - response.context["overdue_balance"],
+        )
         self.assertEqual(response.context["draft_count"], 1)
         self.assertContains(response, "Draft Invoices")
-        self.assertContains(response, "Sent, viewed, and overdue invoices still waiting for payment.")
+        self.assertContains(response, "Total Unpaid Balance")
+        self.assertContains(response, "Not yet due")
+        self.assertContains(response, "Overdue Balance is included in this total.")
+        self.assertContains(response, "Past-due unpaid invoices only. This is a subset of Total Unpaid Balance.")
         self.assertNotContains(response, "Draft, sent, viewed, and overdue invoices still waiting for payment.")
 
     def test_invoice_dashboard_renders_operational_sections_and_preserves_calculations(self):
@@ -2877,10 +3058,15 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertContains(response, "Reporting period:")
         self.assertContains(response, "Last updated:")
         self.assertContains(response, "Collected This Month")
-        self.assertContains(response, "Outstanding Amount")
-        self.assertContains(response, "Overdue Amount")
-        self.assertContains(response, "Invoices Requiring Follow-up")
-        self.assertContains(response, "Sent, viewed, and overdue invoices still waiting for payment.")
+        self.assertContains(response, "Total Unpaid Balance")
+        self.assertContains(response, "Overdue Balance")
+        self.assertContains(response, "Invoices Requiring Action")
+        self.assertContains(response, "Drafts awaiting issue and unpaid invoices requiring collection or delivery action.")
+        self.assertContains(response, "Not yet due")
+        self.assertContains(response, "Overdue Balance is included in this total.")
+        self.assertNotContains(response, "Outstanding Amount")
+        self.assertNotContains(response, "Overdue Amount")
+        self.assertNotContains(response, "Invoices Requiring Follow-up")
         self.assertContains(response, "Draft Invoices")
         self.assertContains(response, "Pending Payment")
         self.assertContains(response, "Viewed Invoices")
@@ -2902,9 +3088,13 @@ class InvoiceDashboardUiTests(TestCase):
         self.assertNotContains(response, overdue_invoice.invoice_number)
         self.assertEqual(response.context["collected_month"], Decimal("218.00"))
         self.assertEqual(response.context["collected_year"], Decimal("545.00"))
+        self.assertEqual(response.context["total_unpaid_balance"], Decimal("430.00"))
+        self.assertEqual(response.context["overdue_balance"], Decimal("80.00"))
+        self.assertEqual(response.context["not_yet_due_balance"], Decimal("350.00"))
         self.assertEqual(response.context["outstanding_amount"], Decimal("430.00"))
         self.assertEqual(response.context["overdue_amount"], Decimal("80.00"))
         self.assertEqual(response.context["total_invoices"], 7)
+        self.assertEqual(response.context["invoices_requiring_action_count"], 4)
         self.assertEqual(response.context["invoices_requiring_follow_up_count"], 4)
         self.assertEqual(response.context["draft_count"], 1)
         self.assertEqual(response.context["pending_payment_count"], 1)
@@ -3094,7 +3284,7 @@ class InvoiceDashboardUiTests(TestCase):
         response = self.client.get(reverse("invoice-dashboard"), data={"category": "requires_follow_up"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Viewing: Requires Follow Up")
+        self.assertContains(response, "Viewing: Requires Action")
         self.assertContains(response, draft_invoice.invoice_number)
         self.assertContains(response, sent_invoice.invoice_number)
         self.assertNotContains(response, paid_invoice.invoice_number)

@@ -118,8 +118,8 @@ def _build_invoice_dashboard_categories(selected_key: str):
         },
         {
             "key": "requires_follow_up",
-            "label": "Requires Follow Up",
-            "description": "Draft, pending, viewed, and overdue invoices that still need Finance action.",
+            "label": "Requires Action",
+            "description": "Drafts awaiting issue and unpaid invoices requiring collection or delivery action.",
         },
     ]
     categories = []
@@ -624,7 +624,6 @@ def invoice_list(request):
         "refunded": [Invoice.STATUS_REFUNDED],
         "overdue": [Invoice.STATUS_OVERDUE],
         "outstanding": [
-            Invoice.STATUS_DRAFT,
             Invoice.STATUS_SENT,
             Invoice.STATUS_VIEWED,
             Invoice.STATUS_OVERDUE,
@@ -733,18 +732,22 @@ def invoice_dashboard(request):
     paid_count = counts_by_status.get(Invoice.STATUS_PAID, 0)
     refunded_count = counts_by_status.get(Invoice.STATUS_REFUNDED, 0)
     overdue_count = counts_by_status.get(Invoice.STATUS_OVERDUE, 0)
-    invoices_requiring_follow_up_count = draft_count + pending_payment_count + viewed_count + overdue_count
+    invoices_requiring_action_count = draft_count + pending_payment_count + viewed_count + overdue_count
 
-    outstanding_amount = (
+    total_unpaid_balance = (
         Invoice.objects.filter(
             status__in=OUTSTANDING_INVOICE_STATUSES
         ).aggregate(total=Sum("total_amount"))["total"]
         or 0
     )
-    overdue_amount = (
-        Invoice.objects.filter(status=Invoice.STATUS_OVERDUE).aggregate(total=Sum("total_amount"))["total"]
+    overdue_balance = (
+        Invoice.objects.filter(
+            status=Invoice.STATUS_OVERDUE,
+            due_date__lt=today,
+        ).aggregate(total=Sum("total_amount"))["total"]
         or 0
     )
+    not_yet_due_balance = total_unpaid_balance - overdue_balance
 
     successful_payments = successful_payments_queryset()
     collected_month = (
@@ -867,7 +870,7 @@ def invoice_dashboard(request):
                 "issue": "Overdue invoices",
                 "count": overdue_count,
                 "scope": reporting_period_label,
-                "detail": f"S${overdue_amount:,.2f} is already overdue and needs collection follow-up.",
+                "detail": f"S${overdue_balance:,.2f} is already overdue and needs collection follow-up.",
                 "action_label": "View invoices",
                 "action_url": f"{reverse('invoice-list')}?status=overdue",
             }
@@ -953,7 +956,8 @@ def invoice_dashboard(request):
             "total_invoices": total_invoices,
             "month_to_date_invoice_count": month_to_date_invoice_count,
             "year_to_date_invoice_count": year_to_date_invoice_count,
-            "invoices_requiring_follow_up_count": invoices_requiring_follow_up_count,
+            "invoices_requiring_action_count": invoices_requiring_action_count,
+            "invoices_requiring_follow_up_count": invoices_requiring_action_count,
             "draft_count": draft_count,
             "sent_count": sent_count,
             "pending_payment_count": pending_payment_count,
@@ -962,8 +966,11 @@ def invoice_dashboard(request):
             "refunded_count": refunded_count,
             "overdue_count": overdue_count,
             "submitted_bank_transfer_count": submitted_bank_transfer_count,
-            "outstanding_amount": outstanding_amount,
-            "overdue_amount": overdue_amount,
+            "total_unpaid_balance": total_unpaid_balance,
+            "overdue_balance": overdue_balance,
+            "not_yet_due_balance": not_yet_due_balance,
+            "outstanding_amount": total_unpaid_balance,
+            "overdue_amount": overdue_balance,
             "collected_month": collected_month,
             "collected_year": collected_year,
             "collection_trend_labels": collection_trend_labels,
