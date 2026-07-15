@@ -26,9 +26,14 @@ from payments.models import PaymentBankDetails, PaymentRecord
 from support.models import SupportTicket
 
 from .exports import (
+    COMPUTER_GENERATED_INVOICE_STATEMENT,
     _build_invoice_logo,
     _build_logo_row,
+    _payment_note_lines_for_pdf,
+    _registered_office_line,
+    _resolve_invoice_payment_summary,
     _resolve_invoice_branding,
+    _invoice_text_lines,
     build_export_context,
     generate_invoice_pdf,
 )
@@ -1762,6 +1767,19 @@ class InvoiceTemplateSettingsTests(TestCase):
         template_settings.save()
         return template_settings
 
+    def _save_complete_bank_details(self):
+        return PaymentBankDetails.objects.update_or_create(
+            pk=1,
+            defaults={
+                "account_name": "Configured Account Name",
+                "bank_name": "Configured Bank",
+                "account_number": "123456789",
+                "paynow_id": "PAYNOW123",
+                "bic": "BANKSGSG",
+                "instructions": "Use invoice number as reference.",
+            },
+        )[0]
+
     def test_authorized_user_can_open_invoice_template_settings(self):
         self.client.force_login(self.finance_user)
 
@@ -2091,17 +2109,7 @@ class InvoiceTemplateSettingsTests(TestCase):
 
     def test_bank_transfer_details_still_come_from_payment_bank_details(self):
         self._save_template_settings(invoice_payment_notes="Configured invoice note")
-        PaymentBankDetails.objects.update_or_create(
-            pk=1,
-            defaults={
-                "account_name": "Configured Account Name",
-                "bank_name": "Configured Bank",
-                "account_number": "123456789",
-                "paynow_id": "PAYNOW123",
-                "bic": "BANKSGSG",
-                "instructions": "Use invoice number as reference.",
-            },
-        )
+        self._save_complete_bank_details()
 
         context = build_export_context(self.invoice)
 
@@ -2111,6 +2119,127 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertEqual(context["bank_transfer_details"]["paynow_id"], "PAYNOW123")
         self.assertEqual(context["bank_transfer_details"]["bic"], "BANKSGSG")
         self.assertEqual(context["bank_transfer_details"]["instructions"], "Use invoice number as reference.")
+
+    def test_unpaid_issued_invoice_with_balance_shows_bank_details(self):
+        self._save_complete_bank_details()
+        self.invoice.status = Invoice.STATUS_SENT
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        context = build_export_context(self.invoice)
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertTrue(payment_summary["show_payment_instructions"])
+        self.assertIsNotNone(context["bank_transfer_details"])
+        self.assertEqual(payment_summary["amount_due"], self.invoice.total_amount)
+
+    def test_overdue_invoice_with_balance_shows_bank_details(self):
+        self._save_complete_bank_details()
+        self.invoice.status = Invoice.STATUS_OVERDUE
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertTrue(payment_summary["show_payment_instructions"])
+        self.assertEqual(payment_summary["amount_due"], self.invoice.total_amount)
+
+    def test_paid_invoice_with_zero_balance_hides_bank_details_and_shows_paid_in_full(self):
+        self._save_complete_bank_details()
+        self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        context = build_export_context(self.invoice)
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertFalse(payment_summary["show_payment_instructions"])
+        self.assertEqual(payment_summary["amount_due"], Decimal("0.00"))
+        self.assertEqual(payment_summary["payment_status_message"], "Paid in Full")
+        self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
+
+    def test_refunded_invoice_hides_bank_details(self):
+        self._save_complete_bank_details()
+        self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
+        self.invoice.status = Invoice.STATUS_REFUNDED
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        context = build_export_context(self.invoice)
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertFalse(payment_summary["show_payment_instructions"])
+        self.assertEqual(payment_summary["payment_status_message"], "Refunded")
+        self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
+
+    def test_computer_generated_statement_is_rendered_once(self):
+        self._save_template_settings(
+            invoice_payment_notes=(
+                f"{COMPUTER_GENERATED_INVOICE_STATEMENT}\nPlease include your invoice number as reference."
+            ),
+            footer_text=COMPUTER_GENERATED_INVOICE_STATEMENT,
+        )
+        self.invoice.status = Invoice.STATUS_SENT
+        self.invoice.save(update_fields=["status", "updated_at"])
+        context = build_export_context(self.invoice)
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+
+        rendered_lines = (
+            _payment_note_lines_for_pdf(context, payment_summary)
+            + _invoice_text_lines(context["invoice_footer_text"])
+            + [COMPUTER_GENERATED_INVOICE_STATEMENT]
+        )
+
+        self.assertEqual(rendered_lines.count(COMPUTER_GENERATED_INVOICE_STATEMENT), 1)
+        self.assertIn("Please include your invoice number as reference.", rendered_lines)
+
+    def test_registered_office_prefix_is_rendered_once(self):
+        self._save_template_settings(
+            registered_office_text="Registered Office: Registered Office: 7 Office Road, Singapore 070707"
+        )
+
+        office_line = _registered_office_line(build_export_context(self.invoice))
+
+        self.assertEqual(office_line.count("Registered Office:"), 1)
+        self.assertEqual(office_line, "Registered Office: 7 Office Road, Singapore 070707")
+
+    def test_configured_payment_notes_render_when_payment_is_due(self):
+        self._save_template_settings(invoice_payment_notes="Configured payment note")
+        self.invoice.status = Invoice.STATUS_SENT
+        self.invoice.save(update_fields=["status", "updated_at"])
+        context = build_export_context(self.invoice)
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+
+        self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), ["Configured payment note"])
+
+    def test_payment_notes_conflicting_with_configured_term_are_skipped(self):
+        self._save_template_settings(
+            default_payment_term_days=30,
+            invoice_payment_notes=(
+                "We will payout within 10 days from Invoice Date.\n"
+                "Please include your invoice number as reference."
+            ),
+        )
+        self.invoice.status = Invoice.STATUS_SENT
+        self.invoice.save(update_fields=["status", "updated_at"])
+        context = build_export_context(self.invoice)
+        payment_summary = _resolve_invoice_payment_summary(self.invoice)
+
+        self.assertEqual(
+            _payment_note_lines_for_pdf(context, payment_summary),
+            ["Please include your invoice number as reference."],
+        )
+
+    def test_pdf_context_labels_customer_information_as_bill_to(self):
+        context = build_export_context(self.invoice)
+
+        self.assertEqual(context["bill_to_label"], "Bill To")
+        self.assertEqual(context["customer_display"], "Template Customer")
 
     def test_pdf_generation_works_without_logo_when_business_fields_are_configured(self):
         self._save_template_settings(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from io import BytesIO
 
@@ -34,6 +35,16 @@ ADDRESS_ALIGNMENT_MAP = {
     InvoiceTemplateSettings.ADDRESS_POSITION_LEFT: "LEFT",
     InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT: "RIGHT",
 }
+ISSUED_INVOICE_STATUSES = {
+    Invoice.STATUS_SENT,
+    Invoice.STATUS_VIEWED,
+    Invoice.STATUS_OVERDUE,
+}
+COMPUTER_GENERATED_INVOICE_STATEMENT = (
+    "This is a computer generated invoice and therefore no signature is required."
+)
+REGISTERED_OFFICE_PREFIX_RE = re.compile(r"^\s*registered\s+office\s*:\s*", re.IGNORECASE)
+TERM_CONFLICT_RE = re.compile(r"\bwithin\s+(\d+)\s+days?\b.*\binvoice\s+date\b", re.IGNORECASE)
 
 
 def _normalize_pdf_multiline_text(value: str) -> str:
@@ -41,6 +52,90 @@ def _normalize_pdf_multiline_text(value: str) -> str:
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
     normalized = normalized.replace("\\r\\n", "\n").replace("\\n", "\n")
     return normalized
+
+
+def _normalize_pdf_line(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _strip_registered_office_prefix(value: str) -> str:
+    normalized = _normalize_pdf_multiline_text(value).strip()
+    previous = None
+    while normalized and normalized != previous:
+        previous = normalized
+        normalized = REGISTERED_OFFICE_PREFIX_RE.sub("", normalized).strip()
+    return normalized
+
+
+def _registered_office_line(context: dict) -> str:
+    registered_office = _strip_registered_office_prefix(context["registered_office_text"])
+    if not registered_office:
+        return "Registered Office:"
+    return f"Registered Office: {registered_office}"
+
+
+def _is_computer_generated_statement(line: str) -> bool:
+    normalized_line = _normalize_pdf_line(line).rstrip(".").lower()
+    normalized_statement = _normalize_pdf_line(COMPUTER_GENERATED_INVOICE_STATEMENT).rstrip(".").lower()
+    return normalized_line == normalized_statement
+
+
+def _payment_note_conflicts_with_term(line: str, payment_term_days: int) -> bool:
+    match = TERM_CONFLICT_RE.search(_normalize_pdf_line(line))
+    return bool(match and int(match.group(1)) != int(payment_term_days))
+
+
+def _invoice_text_lines(value: str, *, skip_computer_statement: bool = True) -> list[str]:
+    lines = []
+    for line in _normalize_pdf_multiline_text(value).split("\n"):
+        normalized_line = _normalize_pdf_line(line)
+        if not normalized_line:
+            continue
+        if skip_computer_statement and _is_computer_generated_statement(normalized_line):
+            continue
+        lines.append(normalized_line)
+    return lines
+
+
+def _build_customer_display(invoice: Invoice) -> str:
+    customer_display = invoice.customer.name
+    if invoice.customer.tax_number:
+        customer_display = f"{customer_display} ({invoice.customer.tax_number})"
+    return customer_display
+
+
+def _resolve_invoice_payment_summary(invoice: Invoice) -> dict:
+    amount_paid = Decimal("0.00")
+    if invoice.status == Invoice.STATUS_PAID:
+        amount_paid = invoice.total_amount
+    amount_due = invoice.total_amount - amount_paid
+    show_payment_instructions = (
+        invoice.status in ISSUED_INVOICE_STATUSES
+        and amount_due > Decimal("0.00")
+        and invoice.status not in {Invoice.STATUS_PAID, Invoice.STATUS_REFUNDED}
+    )
+    payment_status_message = ""
+    if amount_due <= Decimal("0.00"):
+        payment_status_message = "Paid in Full"
+    elif invoice.status == Invoice.STATUS_REFUNDED:
+        payment_status_message = "Refunded"
+    return {
+        "amount_paid": amount_paid,
+        "amount_due": amount_due,
+        "show_payment_instructions": show_payment_instructions,
+        "payment_status_message": payment_status_message,
+    }
+
+
+def _payment_note_lines_for_pdf(context: dict, payment_summary: dict) -> list[str]:
+    if not payment_summary["show_payment_instructions"]:
+        return []
+    lines = []
+    for line in _invoice_text_lines(context["invoice_payment_notes"]):
+        if _payment_note_conflicts_with_term(line, context["invoice_payment_term_days"]):
+            continue
+        lines.append(line)
+    return lines
 
 
 def _setting_text_value(
@@ -230,6 +325,8 @@ def build_export_context(invoice: Invoice) -> dict:
         "invoice_template_settings": template_settings,
         "invoice_branding": branding,
         "invoice_logo_path": _get_invoice_logo_path(template_settings),
+        "bill_to_label": "Bill To",
+        "customer_display": _build_customer_display(invoice),
         "invoice": invoice,
         "items": items,
     }
@@ -307,10 +404,6 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         alignment=2,
     )
 
-    customer_display = invoice.customer.name
-    if invoice.customer.tax_number:
-        customer_display = f"{customer_display} ({invoice.customer.tax_number})"
-
     template_settings = context["invoice_template_settings"]
     branding = context["invoice_branding"]
     address_is_right = branding["address_position"] == InvoiceTemplateSettings.ADDRESS_POSITION_RIGHT
@@ -318,9 +411,8 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     company_body_style = body_right if address_is_right else body
     logo_flowable = _build_invoice_logo(template_settings, branding)
 
-    registered_office = context["registered_office_text"]
     attention_email = context["invoice_attention_email"]
-    office_line = f"Registered Office: {registered_office}"
+    office_line = _registered_office_line(context)
     attention_line = f"Attention: {attention_email}"
     header_left = []
     if logo_flowable is not None:
@@ -349,7 +441,8 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
 
     right_header_data = [
         [Paragraph("INVOICE", right_title)],
-        [Paragraph(customer_display, right_bold)],
+        [Paragraph(f"<b>{context['bill_to_label']}</b>", right)],
+        [Paragraph(context["customer_display"], right_bold)],
         [Paragraph("<b>Invoice Date</b>", right)],
         [Paragraph(str(invoice.issue_date.strftime("%d %b %Y")), right)],
         [Paragraph("<b>Invoice Number</b>", right)],
@@ -371,9 +464,8 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         Paragraph(office_line, small_right),
         Paragraph(attention_line, small_right),
     ]
-    for line in context["invoice_header_text"].split("\n"):
-        if line.strip():
-            story.append(Paragraph(line, small_right))
+    for line in _invoice_text_lines(context["invoice_header_text"], skip_computer_statement=False):
+        story.append(Paragraph(line, small_right))
     story.extend(
         [
             Spacer(1, 6),
@@ -420,10 +512,9 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     story.append(table)
     story.append(Spacer(1, 10))
 
-    amount_paid = Decimal("0.00")
-    if invoice.status == Invoice.STATUS_PAID:
-        amount_paid = invoice.total_amount
-    amount_due = invoice.total_amount - amount_paid
+    payment_summary = _resolve_invoice_payment_summary(invoice)
+    amount_paid = payment_summary["amount_paid"]
+    amount_due = payment_summary["amount_due"]
     totals = [
         ["Subtotal", f"{invoice.subtotal:.2f}"],
         ["GST", f"{invoice.tax_amount:.2f}"],
@@ -449,10 +540,13 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     story.append(totals_table)
 
     story.append(Spacer(1, 8))
-    story.append(Paragraph(f"Due Date: {invoice.due_date.strftime('%d %b %Y')}", body))
-    story.append(Paragraph(f"Payment Term: {context['invoice_payment_term_days']} Days", body))
+    if payment_summary["payment_status_message"]:
+        story.append(Paragraph(f"<b>{payment_summary['payment_status_message']}</b>", body))
+    else:
+        story.append(Paragraph(f"Due Date: {invoice.due_date.strftime('%d %b %Y')}", body))
+        story.append(Paragraph(f"Payment Term: {context['invoice_payment_term_days']} Days", body))
     bank_transfer_details = context["bank_transfer_details"]
-    if bank_transfer_details:
+    if bank_transfer_details and payment_summary["show_payment_instructions"]:
         story.append(Spacer(1, 6))
         story.append(Paragraph("<b>Bank Transfer Details</b>", body))
         story.append(Paragraph("Please arrange payment via bank transfer to:", body))
@@ -471,20 +565,19 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
                 story.append(Paragraph(line, body))
 
     story.append(Spacer(1, 4))
-    for line in context["invoice_payment_notes"].split("\n"):
-        if line.strip():
-            story.append(Paragraph(line, small))
+    for line in _payment_note_lines_for_pdf(context, payment_summary):
+        story.append(Paragraph(line, small))
 
     if invoice.notes:
         story.append(Spacer(1, 6))
         story.append(Paragraph(f"Notes: {invoice.notes}", body))
 
     story.append(Spacer(1, 6))
-    for line in context["invoice_footer_text"].split("\n"):
-        if line.strip():
-            story.append(Paragraph(line, small))
+    footer_lines = _invoice_text_lines(context["invoice_footer_text"])
+    for line in footer_lines:
+        story.append(Paragraph(line, small))
 
-    if context["invoice_footer_text"].strip():
+    if footer_lines:
         story.append(Spacer(1, 4))
     story.append(
         Paragraph(
