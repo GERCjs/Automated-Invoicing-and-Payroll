@@ -284,6 +284,14 @@ class InvoiceTemplateSettings(models.Model):
     def __str__(self) -> str:
         return "Invoice template settings"
 
+    def has_logo_file(self) -> bool:
+        if not self.logo or not self.logo.name:
+            return False
+        try:
+            return self.logo.storage.exists(self.logo.name)
+        except (NotImplementedError, OSError, ValueError):
+            return False
+
     @classmethod
     def load(cls):
         settings_obj, _ = cls.objects.get_or_create(pk=1)

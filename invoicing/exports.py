@@ -126,6 +126,8 @@ def _get_invoice_logo_path(template_settings: InvoiceTemplateSettings | None) ->
     if template_settings is None or not template_settings.logo:
         return ""
     try:
+        if not template_settings.logo.storage.exists(template_settings.logo.name):
+            return ""
         return template_settings.logo.path
     except (NotImplementedError, ValueError, OSError):
         return ""

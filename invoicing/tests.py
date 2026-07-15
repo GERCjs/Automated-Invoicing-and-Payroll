@@ -1907,6 +1907,86 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Logo exceeds the maximum file size")
 
+    def test_settings_page_does_not_show_link_for_missing_existing_logo_file(self):
+        template_settings = InvoiceTemplateSettings.load()
+        template_settings.logo = "invoice_branding/logos/ocbc.png"
+        template_settings.save(update_fields=["logo", "updated_at"])
+        self.client.force_login(self.finance_user)
+
+        response = self.client.get(reverse("invoice-template-settings"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Open uploaded logo")
+
+    def test_post_with_missing_existing_logo_file_saves_other_settings_and_clears_stale_logo(self):
+        template_settings = InvoiceTemplateSettings.load()
+        template_settings.logo = "invoice_branding/logos/ocbc.png"
+        template_settings.save(update_fields=["logo", "updated_at"])
+        self.client.force_login(self.finance_user)
+
+        response = self.client.post(
+            reverse("invoice-template-settings"),
+            data={
+                "company_display_name": "Recovered Company Pte Ltd",
+                "company_address": "8 Recovery Road\nSingapore 888888",
+                "logo_size": InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+                "logo_position": InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+                "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        template_settings.refresh_from_db()
+        self.assertEqual(template_settings.company_display_name, "Recovered Company Pte Ltd")
+        self.assertEqual(template_settings.company_address, "8 Recovery Road\nSingapore 888888")
+        self.assertEqual(template_settings.logo.name, "")
+        self.assertEqual(template_settings.updated_by, self.finance_user)
+
+    def test_replacement_logo_upload_saves_when_existing_logo_file_is_missing(self):
+        template_settings = InvoiceTemplateSettings.load()
+        template_settings.logo = "invoice_branding/logos/ocbc.png"
+        template_settings.save(update_fields=["logo", "updated_at"])
+        self.client.force_login(self.finance_user)
+
+        response = self.client.post(
+            reverse("invoice-template-settings"),
+            data={
+                "company_display_name": "Replacement Logo Company Pte Ltd",
+                "company_address": "9 Replacement Road\nSingapore 999999",
+                "logo": self._build_logo_upload(filename="replacement-logo.png"),
+                "logo_size": InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+                "logo_position": InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+                "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        template_settings.refresh_from_db()
+        self.assertTrue(template_settings.logo.name.endswith(".png"))
+        self.assertTrue(template_settings.logo.storage.exists(template_settings.logo.name))
+        self.assertEqual(template_settings.company_display_name, "Replacement Logo Company Pte Ltd")
+
+    def test_clear_logo_checkbox_still_clears_existing_valid_logo(self):
+        template_settings = self._save_template_settings(logo=self._build_logo_upload())
+        self.assertTrue(template_settings.has_logo_file())
+        self.client.force_login(self.finance_user)
+
+        response = self.client.post(
+            reverse("invoice-template-settings"),
+            data={
+                "company_display_name": "Clear Logo Company Pte Ltd",
+                "company_address": "10 Clear Road\nSingapore 101010",
+                "logo-clear": "on",
+                "logo_size": InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+                "logo_position": InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+                "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        template_settings.refresh_from_db()
+        self.assertEqual(template_settings.logo.name, "")
+
     def test_pdf_generation_still_works_with_no_template_settings(self):
         InvoiceTemplateSettings.objects.all().delete()
 
@@ -1930,6 +2010,18 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertEqual(context["company_name"], "Custom Invoice Company Pte Ltd")
         self.assertEqual(context["company_address"], "77 Custom Avenue\nSingapore 654321")
+
+    def test_pdf_generation_uses_no_logo_fallback_when_existing_logo_file_is_missing(self):
+        template_settings = InvoiceTemplateSettings.load()
+        template_settings.logo = "invoice_branding/logos/ocbc.png"
+        template_settings.save(update_fields=["logo", "updated_at"])
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        context = build_export_context(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(context["invoice_logo_path"], "")
+        self.assertIsNone(_build_invoice_logo(template_settings, context["invoice_branding"]))
 
     def test_pdf_generation_uses_saved_company_business_information(self):
         self._save_template_settings(

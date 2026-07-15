@@ -78,7 +78,7 @@
                         {{ form.logo }}
                         <div class="form-text">Accepted file types: PNG or JPEG. Maximum size: 2 MB.</div>
                         {% for error in form.logo.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
-                        {% if template_settings.logo %}
+                        {% if template_settings.has_logo_file %}
                         <div class="small text-muted mt-2">Current logo: <a href="{{ template_settings.logo.url }}" target="_blank">Open uploaded logo</a></div>
                         {% endif %}
                     </div>

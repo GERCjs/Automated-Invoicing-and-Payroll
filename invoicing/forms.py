@@ -1,5 +1,7 @@
 from django import forms
 from django.conf import settings
+from django.core.files.uploadedfile import UploadedFile
+from django.db.models.fields.files import FieldFile
 from django.forms import inlineformset_factory
 from PIL import Image as PilImage
 from PIL import UnidentifiedImageError
@@ -108,6 +110,10 @@ class InvoiceTemplateSettingsForm(forms.ModelForm):
         widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": ".png,.jpg,.jpeg"}),
     )
 
+    def __init__(self, *args, **kwargs):
+        self.stale_logo_missing = False
+        super().__init__(*args, **kwargs)
+
     class Meta:
         model = InvoiceTemplateSettings
         fields = [
@@ -164,7 +170,22 @@ class InvoiceTemplateSettingsForm(forms.ModelForm):
 
     def clean_logo(self):
         logo = self.cleaned_data.get("logo")
-        if not logo:
+        if logo is False or not logo:
+            return logo
+
+        if isinstance(logo, FieldFile):
+            if not logo.name:
+                return logo
+            try:
+                logo_exists = logo.storage.exists(logo.name)
+            except (NotImplementedError, OSError, ValueError):
+                logo_exists = False
+            if not logo_exists:
+                self.stale_logo_missing = True
+                return False
+            return logo
+
+        if not isinstance(logo, UploadedFile):
             return logo
 
         max_bytes = int(getattr(settings, "INVOICE_TEMPLATE_LOGO_MAX_UPLOAD_BYTES", 2097152))

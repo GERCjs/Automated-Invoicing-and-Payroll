@@ -1002,6 +1002,8 @@ def invoice_template_settings(request):
     form = InvoiceTemplateSettingsForm(request.POST, request.FILES, instance=template_settings)
     if form.is_valid():
         changed_fields = list(form.changed_data)
+        if getattr(form, "stale_logo_missing", False) and "logo" not in changed_fields:
+            changed_fields.append("logo")
         if changed_fields:
             settings_obj = form.save(commit=False)
             settings_obj.updated_by = request.user
