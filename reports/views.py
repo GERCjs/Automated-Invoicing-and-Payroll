@@ -1081,12 +1081,7 @@ def payment_stripe_report(request):
 
     outstanding_amount = _safe_sum(
         Invoice.objects.filter(
-            status__in=[
-                Invoice.STATUS_DRAFT,
-                Invoice.STATUS_SENT,
-                Invoice.STATUS_VIEWED,
-                Invoice.STATUS_OVERDUE,
-            ]
+            status__in=OUTSTANDING_INVOICE_STATUSES,
         ),
         "total_amount",
     )
@@ -1190,7 +1185,7 @@ def payment_stripe_report(request):
         {
             "label": "Outstanding Invoice Amount",
             "value": f"S${outstanding_amount:,.2f}",
-            "note": "Draft, sent, viewed, and overdue invoices still awaiting collection.",
+            "note": "Sent, viewed, and overdue invoices still awaiting collection.",
         },
     ]
 

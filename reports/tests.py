@@ -133,6 +133,41 @@ class PaymentStripeReportAccessTests(TestCase):
         self.assertNotContains(response, "View Related Invoice")
         self.assertNotContains(response, ">Open<")
 
+    def test_payment_report_outstanding_amount_uses_issued_unpaid_statuses_only(self):
+        user = self._make_user("report_payment_outstanding", FINANCE)
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        today = timezone.localdate()
+        invoice_rows = [
+            ("INV-REPORT-OUT-DRAFT", Invoice.STATUS_DRAFT, Decimal("10.00")),
+            ("INV-REPORT-OUT-SENT", Invoice.STATUS_SENT, Decimal("20.00")),
+            ("INV-REPORT-OUT-VIEWED", Invoice.STATUS_VIEWED, Decimal("30.00")),
+            ("INV-REPORT-OUT-OVERDUE", Invoice.STATUS_OVERDUE, Decimal("40.00")),
+            ("INV-REPORT-OUT-PAID", Invoice.STATUS_PAID, Decimal("50.00")),
+            ("INV-REPORT-OUT-REFUNDED", Invoice.STATUS_REFUNDED, Decimal("60.00")),
+        ]
+        for invoice_number, status, total_amount in invoice_rows:
+            Invoice.objects.create(
+                invoice_number=invoice_number,
+                customer=self.customer,
+                status=status,
+                issue_date=today,
+                due_date=today + timedelta(days=7),
+                currency="SGD",
+                subtotal=total_amount,
+                tax_amount=Decimal("0.00"),
+                total_amount=total_amount,
+            )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("payment-stripe-report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["outstanding_amount"], Decimal("90.00"))
+        self.assertContains(response, "S$90.00")
+        self.assertContains(response, "Sent, viewed, and overdue invoices still awaiting collection.")
+        self.assertNotContains(response, "Draft, sent, viewed, and overdue invoices still awaiting collection.")
+
     def test_payment_report_links_pending_manual_bank_transfer_to_review_screen(self):
         user = self._make_user("report_manual_attention", FINANCE)
         pending_invoice = Invoice.objects.create(
