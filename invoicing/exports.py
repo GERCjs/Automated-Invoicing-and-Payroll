@@ -43,6 +43,36 @@ def _normalize_pdf_multiline_text(value: str) -> str:
     return normalized
 
 
+def _setting_text_value(
+    template_settings: InvoiceTemplateSettings | None,
+    field_name: str,
+    fallback: str,
+    *,
+    multiline: bool = False,
+) -> str:
+    value = ""
+    if template_settings is not None:
+        value = str(getattr(template_settings, field_name, "") or "").strip()
+    if not value:
+        value = str(fallback or "").strip()
+    if multiline:
+        return _normalize_pdf_multiline_text(value)
+    return value
+
+
+def _resolve_invoice_payment_term_days(template_settings: InvoiceTemplateSettings | None) -> int:
+    if template_settings is not None and template_settings.default_payment_term_days:
+        return int(template_settings.default_payment_term_days)
+
+    try:
+        fallback_days = int(getattr(settings, "INVOICE_PAYMENT_TERM_DAYS", 30))
+    except (TypeError, ValueError):
+        return 30
+    if fallback_days < 1 or fallback_days > 365:
+        return 30
+    return fallback_days
+
+
 def _normalize_logo_position(value: str) -> str:
     normalized = (value or "").strip().lower()
     if normalized == "center":
@@ -147,7 +177,7 @@ def build_export_context(invoice: Invoice) -> dict:
     template_settings = InvoiceTemplateSettings.current()
     branding = _resolve_invoice_branding(template_settings)
     default_company_name = getattr(settings, "COMPANY_NAME", "Vaniday Singapore Pte Ltd")
-    default_company_address = _normalize_pdf_multiline_text(settings.COMPANY_ADDRESS)
+    default_company_address = _normalize_pdf_multiline_text(getattr(settings, "COMPANY_ADDRESS", ""))
     company_name = branding["company_name"] or default_company_name
     company_address = branding["company_address"] or default_company_address
     bank_transfer_details = get_bank_transfer_details()
@@ -158,15 +188,43 @@ def build_export_context(invoice: Invoice) -> dict:
         }
     return {
         "company_name": company_name,
-        "company_email": settings.COMPANY_EMAIL,
-        "company_phone": settings.COMPANY_PHONE,
+        "company_email": _setting_text_value(
+            template_settings,
+            "company_email",
+            getattr(settings, "COMPANY_EMAIL", ""),
+        ),
+        "company_phone": _setting_text_value(
+            template_settings,
+            "company_phone",
+            getattr(settings, "COMPANY_PHONE", ""),
+        ),
         "company_address": company_address,
-        "company_reg_no": settings.COMPANY_REG_NO,
-        "registered_office_text": _normalize_pdf_multiline_text(settings.REGISTERED_OFFICE_TEXT),
-        "invoice_payment_term_days": settings.INVOICE_PAYMENT_TERM_DAYS,
+        "company_reg_no": _setting_text_value(
+            template_settings,
+            "company_registration_number",
+            getattr(settings, "COMPANY_REG_NO", ""),
+        ),
+        "registered_office_text": _setting_text_value(
+            template_settings,
+            "registered_office_text",
+            getattr(settings, "REGISTERED_OFFICE_TEXT", ""),
+            multiline=True,
+        ),
+        "invoice_payment_term_days": _resolve_invoice_payment_term_days(template_settings),
         "bank_transfer_details": bank_transfer_details,
-        "invoice_payment_notes": _normalize_pdf_multiline_text(settings.INVOICE_PAYMENT_NOTES),
-        "invoice_attention_email": getattr(settings, "COMPANY_EMAIL", "finance@vaniday.com"),
+        "invoice_payment_notes": _setting_text_value(
+            template_settings,
+            "invoice_payment_notes",
+            getattr(settings, "INVOICE_PAYMENT_NOTES", ""),
+            multiline=True,
+        ),
+        "invoice_header_text": _setting_text_value(template_settings, "header_text", "", multiline=True),
+        "invoice_footer_text": _setting_text_value(template_settings, "footer_text", "", multiline=True),
+        "invoice_attention_email": _setting_text_value(
+            template_settings,
+            "company_email",
+            getattr(settings, "COMPANY_EMAIL", "finance@vaniday.com"),
+        ),
         "invoice_template_settings": template_settings,
         "invoice_branding": branding,
         "invoice_logo_path": _get_invoice_logo_path(template_settings),
@@ -310,10 +368,17 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
     story = [
         Paragraph(office_line, small_right),
         Paragraph(attention_line, small_right),
-        Spacer(1, 6),
-        Table([[left_header_table, right_header_table]], colWidths=[78 * mm, 82 * mm]),
-        Spacer(1, 10),
     ]
+    for line in context["invoice_header_text"].split("\n"):
+        if line.strip():
+            story.append(Paragraph(line, small_right))
+    story.extend(
+        [
+            Spacer(1, 6),
+            Table([[left_header_table, right_header_table]], colWidths=[78 * mm, 82 * mm]),
+            Spacer(1, 10),
+        ]
+    )
 
     amount_header = f"Amount {invoice.currency}"
     table_data = [["Description", "Quantity", "Unit Price", amount_header]]
@@ -413,6 +478,12 @@ def generate_invoice_pdf(invoice: Invoice) -> bytes:
         story.append(Paragraph(f"Notes: {invoice.notes}", body))
 
     story.append(Spacer(1, 6))
+    for line in context["invoice_footer_text"].split("\n"):
+        if line.strip():
+            story.append(Paragraph(line, small))
+
+    if context["invoice_footer_text"].strip():
+        story.append(Spacer(1, 4))
     story.append(
         Paragraph(
             "This is a computer generated invoice and therefore no signature is required.",

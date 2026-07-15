@@ -113,6 +113,14 @@ class InvoiceTemplateSettingsForm(forms.ModelForm):
         fields = [
             "company_display_name",
             "company_address",
+            "company_email",
+            "company_phone",
+            "company_registration_number",
+            "registered_office_text",
+            "default_payment_term_days",
+            "invoice_payment_notes",
+            "header_text",
+            "footer_text",
             "logo",
             "logo_size",
             "logo_position",
@@ -124,6 +132,30 @@ class InvoiceTemplateSettingsForm(forms.ModelForm):
             ),
             "company_address": forms.Textarea(
                 attrs={"class": "form-control", "rows": 4, "placeholder": "Company address shown on invoice PDFs"}
+            ),
+            "company_email": forms.EmailInput(
+                attrs={"class": "form-control", "placeholder": "finance@example.com"}
+            ),
+            "company_phone": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "+65 6000 0000"}
+            ),
+            "company_registration_number": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "Company registration number"}
+            ),
+            "registered_office_text": forms.Textarea(
+                attrs={"class": "form-control", "rows": 3, "placeholder": "Registered office text shown on invoice PDFs"}
+            ),
+            "default_payment_term_days": forms.NumberInput(
+                attrs={"class": "form-control", "min": "1", "max": "365", "step": "1"}
+            ),
+            "invoice_payment_notes": forms.Textarea(
+                attrs={"class": "form-control", "rows": 4, "placeholder": "Payment notes shown on invoice PDFs"}
+            ),
+            "header_text": forms.Textarea(
+                attrs={"class": "form-control", "rows": 2, "placeholder": "Optional header text"}
+            ),
+            "footer_text": forms.Textarea(
+                attrs={"class": "form-control", "rows": 2, "placeholder": "Optional footer text"}
             ),
             "logo_size": forms.Select(attrs={"class": "form-select"}),
             "logo_position": forms.Select(attrs={"class": "form-select"}),

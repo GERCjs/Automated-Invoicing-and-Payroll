@@ -234,6 +234,18 @@ class InvoiceTemplateSettings(models.Model):
 
     company_display_name = models.CharField(max_length=255, blank=True, default="")
     company_address = models.TextField(blank=True, default="")
+    company_email = models.EmailField(blank=True, default="")
+    company_phone = models.CharField(max_length=50, blank=True, default="")
+    company_registration_number = models.CharField(max_length=100, blank=True, default="")
+    registered_office_text = models.TextField(blank=True, default="")
+    default_payment_term_days = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(365)],
+    )
+    invoice_payment_notes = models.TextField(blank=True, default="")
+    header_text = models.TextField(blank=True, default="")
+    footer_text = models.TextField(blank=True, default="")
     logo = models.ImageField(
         upload_to="invoice_branding/logos/",
         blank=True,

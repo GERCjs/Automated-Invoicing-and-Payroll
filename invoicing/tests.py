@@ -1683,9 +1683,25 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.finance_user.role_profile.role = FINANCE
         self.finance_user.role_profile.save(update_fields=["role", "updated_at"])
 
+        self.admin_user = User.objects.create_user(username="admin_template", password="TempPass123!")
+        self.admin_user.role_profile.role = ADMIN
+        self.admin_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.superadmin_user = User.objects.create_user(username="superadmin_template", password="TempPass123!")
+        self.superadmin_user.role_profile.role = SUPERADMIN
+        self.superadmin_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.hr_user = User.objects.create_user(username="hr_template", password="TempPass123!")
+        self.hr_user.role_profile.role = HR
+        self.hr_user.role_profile.save(update_fields=["role", "updated_at"])
+
         self.staff_user = User.objects.create_user(username="staff_template", password="TempPass123!")
         self.staff_user.role_profile.role = STAFF
         self.staff_user.role_profile.save(update_fields=["role", "updated_at"])
+
+        self.customer_user = User.objects.create_user(username="customer_template", password="TempPass123!")
+        self.customer_user.role_profile.role = CUSTOMER
+        self.customer_user.role_profile.save(update_fields=["role", "updated_at"])
 
         self.customer = Customer.objects.create(
             name="Template Customer",
@@ -1731,6 +1747,7 @@ class InvoiceTemplateSettingsTests(TestCase):
         logo_size=InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
         logo_position=InvoiceTemplateSettings.LOGO_POSITION_LEFT,
         address_position=InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+        **extra_fields,
     ):
         template_settings = InvoiceTemplateSettings.load()
         template_settings.company_display_name = company_name
@@ -1738,6 +1755,8 @@ class InvoiceTemplateSettingsTests(TestCase):
         template_settings.logo_size = logo_size
         template_settings.logo_position = logo_position
         template_settings.address_position = address_position
+        for field_name, value in extra_fields.items():
+            setattr(template_settings, field_name, value)
         if logo is not None:
             template_settings.logo = logo
         template_settings.save()
@@ -1751,12 +1770,14 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Invoice Template Settings")
 
-    def test_unauthorized_user_cannot_access_invoice_template_settings(self):
-        self.client.force_login(self.staff_user)
+    def test_unauthorized_users_cannot_access_invoice_template_settings(self):
+        for user in [self.customer_user, self.hr_user, self.staff_user]:
+            with self.subTest(role=user.role_profile.role):
+                self.client.force_login(user)
 
-        response = self.client.get(reverse("invoice-template-settings"))
+                response = self.client.get(reverse("invoice-template-settings"))
 
-        self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.status_code, 403)
 
     def test_invoice_template_settings_can_be_saved(self):
         self.client.force_login(self.finance_user)
@@ -1787,6 +1808,61 @@ class InvoiceTemplateSettingsTests(TestCase):
                 target_id=str(template_settings.id),
             ).exists()
         )
+
+    def test_authorized_users_can_update_new_invoice_template_fields(self):
+        authorized_users = [self.finance_user, self.admin_user, self.superadmin_user]
+        for user in authorized_users:
+            with self.subTest(role=user.role_profile.role):
+                self.client.force_login(user)
+
+                response = self.client.post(
+                    reverse("invoice-template-settings"),
+                    data={
+                        "company_display_name": f"{user.username} Company Pte Ltd",
+                        "company_address": "1 Example Street\nSingapore 111111",
+                        "company_email": f"{user.username}@example.com",
+                        "company_phone": "+65 6123 4567",
+                        "company_registration_number": "202600001Z",
+                        "registered_office_text": "50 Office Road, Singapore 050050",
+                        "default_payment_term_days": 21,
+                        "invoice_payment_notes": "Configured note one\nConfigured note two",
+                        "header_text": "Configured header",
+                        "footer_text": "Configured footer",
+                        "logo_size": InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+                        "logo_position": InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+                        "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+                    },
+                )
+
+                self.assertEqual(response.status_code, 302)
+                template_settings = InvoiceTemplateSettings.load()
+                self.assertEqual(template_settings.company_email, f"{user.username}@example.com")
+                self.assertEqual(template_settings.company_phone, "+65 6123 4567")
+                self.assertEqual(template_settings.company_registration_number, "202600001Z")
+                self.assertEqual(template_settings.registered_office_text, "50 Office Road, Singapore 050050")
+                self.assertEqual(template_settings.default_payment_term_days, 21)
+                self.assertEqual(template_settings.invoice_payment_notes, "Configured note one\nConfigured note two")
+                self.assertEqual(template_settings.header_text, "Configured header")
+                self.assertEqual(template_settings.footer_text, "Configured footer")
+                self.assertEqual(template_settings.updated_by, user)
+
+    def test_invalid_default_payment_term_is_rejected(self):
+        self.client.force_login(self.finance_user)
+
+        response = self.client.post(
+            reverse("invoice-template-settings"),
+            data={
+                "company_display_name": "Student Demo Company Pte Ltd",
+                "company_address": "1 Example Street\nSingapore 111111",
+                "default_payment_term_days": 0,
+                "logo_size": InvoiceTemplateSettings.LOGO_SIZE_MEDIUM,
+                "logo_position": InvoiceTemplateSettings.LOGO_POSITION_LEFT,
+                "address_position": InvoiceTemplateSettings.ADDRESS_POSITION_LEFT,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Ensure this value is greater than or equal to 1.")
 
     def test_invalid_logo_type_is_rejected(self):
         self.client.force_login(self.finance_user)
@@ -1854,6 +1930,130 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertEqual(context["company_name"], "Custom Invoice Company Pte Ltd")
         self.assertEqual(context["company_address"], "77 Custom Avenue\nSingapore 654321")
+
+    def test_pdf_generation_uses_saved_company_business_information(self):
+        self._save_template_settings(
+            company_email="configured.finance@example.com",
+            company_phone="+65 6987 6543",
+            company_registration_number="202655555M",
+            registered_office_text="99 Configured Office Road\nSingapore 099999",
+            default_payment_term_days=45,
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        context = build_export_context(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(context["company_email"], "configured.finance@example.com")
+        self.assertEqual(context["company_phone"], "+65 6987 6543")
+        self.assertEqual(context["company_reg_no"], "202655555M")
+        self.assertEqual(context["registered_office_text"], "99 Configured Office Road\nSingapore 099999")
+        self.assertEqual(context["invoice_payment_term_days"], 45)
+        self.assertEqual(context["invoice_attention_email"], "configured.finance@example.com")
+
+    def test_pdf_generation_uses_saved_payment_notes_header_and_footer(self):
+        self._save_template_settings(
+            invoice_payment_notes="Configured payment note A\nConfigured payment note B",
+            header_text="Configured header A\nConfigured header B",
+            footer_text="Configured footer A\nConfigured footer B",
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        context = build_export_context(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(context["invoice_payment_notes"], "Configured payment note A\nConfigured payment note B")
+        self.assertEqual(context["invoice_header_text"], "Configured header A\nConfigured header B")
+        self.assertEqual(context["invoice_footer_text"], "Configured footer A\nConfigured footer B")
+
+    @override_settings(
+        COMPANY_EMAIL="fallback.finance@example.com",
+        COMPANY_PHONE="+65 6000 9999",
+        COMPANY_REG_NO="199900001A",
+        REGISTERED_OFFICE_TEXT="Fallback registered office",
+        INVOICE_PAYMENT_TERM_DAYS=30,
+        INVOICE_PAYMENT_NOTES="Fallback payment note",
+    )
+    def test_blank_template_fields_fall_back_to_django_settings(self):
+        self._save_template_settings(
+            company_email="",
+            company_phone="",
+            company_registration_number="",
+            registered_office_text="",
+            default_payment_term_days=None,
+            invoice_payment_notes="",
+            header_text="",
+            footer_text="",
+        )
+
+        context = build_export_context(self.invoice)
+
+        self.assertEqual(context["company_email"], "fallback.finance@example.com")
+        self.assertEqual(context["company_phone"], "+65 6000 9999")
+        self.assertEqual(context["company_reg_no"], "199900001A")
+        self.assertEqual(context["registered_office_text"], "Fallback registered office")
+        self.assertEqual(context["invoice_payment_term_days"], 30)
+        self.assertEqual(context["invoice_payment_notes"], "Fallback payment note")
+        self.assertEqual(context["invoice_header_text"], "")
+        self.assertEqual(context["invoice_footer_text"], "")
+
+    def test_bank_transfer_details_still_come_from_payment_bank_details(self):
+        self._save_template_settings(invoice_payment_notes="Configured invoice note")
+        PaymentBankDetails.objects.update_or_create(
+            pk=1,
+            defaults={
+                "account_name": "Configured Account Name",
+                "bank_name": "Configured Bank",
+                "account_number": "123456789",
+                "paynow_id": "PAYNOW123",
+                "bic": "BANKSGSG",
+                "instructions": "Use invoice number as reference.",
+            },
+        )
+
+        context = build_export_context(self.invoice)
+
+        self.assertEqual(context["bank_transfer_details"]["account_name"], "Configured Account Name")
+        self.assertEqual(context["bank_transfer_details"]["bank_name"], "Configured Bank")
+        self.assertEqual(context["bank_transfer_details"]["account_number"], "123456789")
+        self.assertEqual(context["bank_transfer_details"]["paynow_id"], "PAYNOW123")
+        self.assertEqual(context["bank_transfer_details"]["bic"], "BANKSGSG")
+        self.assertEqual(context["bank_transfer_details"]["instructions"], "Use invoice number as reference.")
+
+    def test_pdf_generation_works_without_logo_when_business_fields_are_configured(self):
+        self._save_template_settings(
+            company_email="configured.finance@example.com",
+            company_phone="+65 6987 6543",
+            company_registration_number="202655555M",
+        )
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        context = build_export_context(self.invoice)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(context["invoice_logo_path"], "")
+
+    def test_pdf_generation_does_not_change_invoice_totals_or_status(self):
+        self._save_template_settings(default_payment_term_days=45)
+        original_values = {
+            "status": self.invoice.status,
+            "issue_date": self.invoice.issue_date,
+            "due_date": self.invoice.due_date,
+            "subtotal": self.invoice.subtotal,
+            "tax_amount": self.invoice.tax_amount,
+            "total_amount": self.invoice.total_amount,
+        }
+
+        pdf_bytes = generate_invoice_pdf(self.invoice)
+        self.invoice.refresh_from_db()
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(self.invoice.status, original_values["status"])
+        self.assertEqual(self.invoice.issue_date, original_values["issue_date"])
+        self.assertEqual(self.invoice.due_date, original_values["due_date"])
+        self.assertEqual(self.invoice.subtotal, original_values["subtotal"])
+        self.assertEqual(self.invoice.tax_amount, original_values["tax_amount"])
+        self.assertEqual(self.invoice.total_amount, original_values["total_amount"])
 
     def test_pdf_generation_works_with_logo_settings(self):
         template_settings = self._save_template_settings(
