@@ -29,6 +29,14 @@ class InvoiceForm(forms.ModelForm):
 
 
 class InvoiceItemForm(forms.ModelForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk is None:
+            self.initial.pop("quantity", None)
+            self.initial.pop("tax_rate", None)
+            self.fields["quantity"].initial = None
+            self.fields["tax_rate"].initial = None
+
     class Meta:
         model = InvoiceItem
         fields = ["description", "quantity", "unit_price", "tax_rate"]

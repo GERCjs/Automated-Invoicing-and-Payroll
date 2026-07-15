@@ -10,6 +10,8 @@ from typing import Any
 from zipfile import BadZipFile
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -166,9 +168,14 @@ CSV_HEADER_ALIASES = {
 }
 
 INVOICE_IMPORT_REQUIRED_HEADERS = {
-    "merchant/customer identity": ["shop_title", "customer_name", "email"],
-    "amount": ["vaniday_share", "vaniday_commission", "total_revenue"],
+    "order reference": ["order_id"],
+    "merchant/customer name": ["shop_title", "customer_name"],
+    "customer email": ["email"],
+    "service description": ["service_name"],
+    "booked date": ["booked_date"],
+    "invoice amount": ["vaniday_share"],
 }
+DUPLICATE_INVOICE_IMPORT_MESSAGE = "This order/service row has already been imported."
 
 
 def _normalize_key(value: str) -> str:
@@ -267,6 +274,120 @@ def _coalesce(*values: str) -> str:
     return ""
 
 
+def _normalize_duplicate_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _normalize_duplicate_datetime(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = _parse_datetime(value)
+        if parsed is None:
+            try:
+                parsed = datetime.fromisoformat(str(value).strip())
+            except (TypeError, ValueError):
+                parsed = None
+    if parsed is None:
+        return ""
+    if timezone.is_aware(parsed):
+        parsed = timezone.localtime(parsed)
+    return parsed.replace(microsecond=0).isoformat()
+
+
+def _normalize_duplicate_amount(value: Any) -> str:
+    amount = _parse_decimal(value)
+    if amount is None:
+        return ""
+    return f"{_to_money(amount):.2f}"
+
+
+def _invoice_source_duplicate_key(
+    *,
+    order_id: Any,
+    customer_id: Any,
+    email: Any,
+    service_name: Any,
+    booked_date: Any,
+    vaniday_share: Any,
+) -> tuple[str, str, str, str, str] | None:
+    normalized_order_id = _normalize_duplicate_text(order_id)
+    normalized_customer = _normalize_duplicate_text(customer_id) or _normalize_duplicate_text(_sanitize_email(str(email or "")))
+    normalized_service = _normalize_duplicate_text(service_name)
+    normalized_booked_date = _normalize_duplicate_datetime(booked_date)
+    normalized_amount = _normalize_duplicate_amount(vaniday_share)
+
+    key_parts = [
+        normalized_order_id,
+        normalized_customer,
+        normalized_service,
+        normalized_booked_date,
+        normalized_amount,
+    ]
+    if not all(key_parts):
+        return None
+    return tuple(key_parts)
+
+
+def _invoice_row_duplicate_key(row: dict[str, Any]) -> tuple[str, str, str, str, str] | None:
+    source = row["source"]
+    return _invoice_source_duplicate_key(
+        order_id=source["order_id"],
+        customer_id=source["customer_id"],
+        email=source["email"],
+        service_name=source["service_name"],
+        booked_date=row["booked_at"],
+        vaniday_share=row["amount"],
+    )
+
+
+def _invoice_source_item_signature(source_row: InvoiceSourceRow) -> tuple[str, str]:
+    description = _build_item_description(
+        source_row.service_name,
+        source_row.order_id,
+        source_row.booked_date,
+        source_row.product_type,
+    )[:255]
+    return description, _normalize_duplicate_amount(source_row.vaniday_share)
+
+
+def _existing_imported_invoice_row_keys() -> set[tuple[str, str, str, str, str]]:
+    duplicate_keys = set()
+    imported_item_signatures = {
+        (description, _normalize_duplicate_amount(line_total))
+        for description, line_total in InvoiceItem.objects.values_list("description", "line_total")
+    }
+    source_rows = InvoiceSourceRow.objects.only(
+        "order_id",
+        "shop_title",
+        "customer_name",
+        "customer_id",
+        "email",
+        "product_type",
+        "service_name",
+        "booked_date",
+        "vaniday_share",
+    )
+    for source_row in source_rows.iterator():
+        if _invoice_source_item_signature(source_row) not in imported_item_signatures:
+            continue
+        if not _coalesce(source_row.shop_title, source_row.customer_name):
+            continue
+        duplicate_key = _invoice_source_duplicate_key(
+            order_id=source_row.order_id,
+            customer_id=source_row.customer_id,
+            email=source_row.email,
+            service_name=source_row.service_name,
+            booked_date=source_row.booked_date,
+            vaniday_share=source_row.vaniday_share,
+        )
+        if duplicate_key is not None:
+            duplicate_keys.add(duplicate_key)
+    return duplicate_keys
+
+
 def _invoice_group_period(booked_date: datetime | None) -> str:
     reference = booked_date.date() if booked_date else timezone.localdate()
     return reference.strftime("%Y-%m")
@@ -284,7 +405,13 @@ def _build_item_description(service_name: str, order_id: str, booked_date: datet
 
 def _sanitize_email(raw_email: str) -> str:
     email = (raw_email or "").strip().lower()
-    return email if "@" in email else ""
+    if not email:
+        return ""
+    try:
+        validate_email(email)
+    except ValidationError:
+        return ""
+    return email
 
 
 def _build_fallback_email(customer_name: str, seller_id: str) -> str:
@@ -312,10 +439,11 @@ def _validate_invoice_headers(headers: list[str]) -> None:
             missing_groups.append(group_label)
 
     if missing_groups:
+        missing_labels = "; ".join(missing_groups)
         raise ValueError(
             "Missing required columns for: "
-            "merchant/customer identity (shop_title, customerName, or email) and "
-            "amount (vanidayShare, vanidayCommission, or Total_Revenue)."
+            f"{missing_labels}. Required upload columns are OrderID, shop_title or customerName, "
+            "email, serviceName, bookedDate, and vanidayShare."
         )
 
 
@@ -358,27 +486,35 @@ def _map_invoice_source_row(source_row: dict[str, Any]) -> dict[str, str]:
 
 
 def _transform_invoice_source_row(index: int, mapped: dict[str, str]) -> dict[str, Any]:
-    customer_name = _coalesce(mapped["shop_title"], mapped["customer_name"], mapped["email"])
+    customer_name = _coalesce(mapped["shop_title"], mapped["customer_name"])
     email_value = _sanitize_email(mapped["email"])
-    amount_value = (
-        _parse_decimal(mapped["vaniday_share"])
-        or _parse_decimal(mapped["vaniday_commission"])
-        or _parse_decimal(mapped["total_revenue"])
-    )
+    amount_value = _parse_decimal(mapped["vaniday_share"])
     quantity_value = _parse_decimal(mapped["qty"]) or Decimal("1.00")
     booked_at = _parse_datetime(mapped["booked_date"])
 
     row_errors = []
+    if not mapped["order_id"]:
+        row_errors.append("Missing OrderID/order reference.")
     if not customer_name:
-        row_errors.append("Missing merchant/customer identity (shop_title, customerName, or email).")
-    if amount_value is None:
-        row_errors.append("Missing numeric amount (vanidayShare, vanidayCommission, or Total_Revenue).")
+        row_errors.append("Missing merchant/customer name (shop_title or customerName).")
+    if not mapped["email"]:
+        row_errors.append("Missing customer email.")
+    elif not email_value:
+        row_errors.append("Customer email format is invalid.")
+    if not mapped["service_name"]:
+        row_errors.append("Missing serviceName/item description.")
+    if not mapped["booked_date"]:
+        row_errors.append("Missing bookedDate.")
+    elif booked_at is None:
+        row_errors.append("bookedDate format is invalid.")
+    if not mapped["vaniday_share"]:
+        row_errors.append("Missing invoice amount (vanidayShare).")
+    elif amount_value is None:
+        row_errors.append("Invoice amount (vanidayShare) must be numeric.")
     elif amount_value < ZERO:
         row_errors.append("Amount must be zero or positive.")
     if quantity_value <= ZERO:
         row_errors.append("Quantity must be greater than zero.")
-    if mapped["booked_date"] and booked_at is None:
-        row_errors.append("bookedDate format is invalid.")
 
     return {
         "row_number": index,
@@ -402,12 +538,15 @@ def _transform_invoice_source_row(index: int, mapped: dict[str, str]) -> dict[st
 def _build_invoice_parse_result(headers: list[str], source_rows: list[tuple[int, dict[str, Any]]]) -> dict[str, Any]:
     _validate_invoice_headers(headers)
 
+    imported_duplicate_keys = _existing_imported_invoice_row_keys()
     normalized_rows: list[dict[str, Any]] = []
     invalid_rows: list[dict[str, Any]] = []
     valid_rows: list[dict[str, Any]] = []
 
     for index, source_row in source_rows:
         transformed = _transform_invoice_source_row(index, _map_invoice_source_row(source_row))
+        if not transformed["errors"] and _invoice_row_duplicate_key(transformed) in imported_duplicate_keys:
+            transformed["errors"].append(DUPLICATE_INVOICE_IMPORT_MESSAGE)
         normalized_rows.append(transformed)
         if transformed["errors"]:
             invalid_rows.append(transformed)
@@ -542,14 +681,26 @@ def import_invoice_rows_from_preview(
     created_customers = 0
     created_invoices = 0
     created_items = 0
+    stored_source_rows = 0
+    existing_duplicate_keys = _existing_imported_invoice_row_keys()
+    importable_valid_rows = [
+        row
+        for row in valid_rows
+        if _invoice_row_duplicate_key(row) not in existing_duplicate_keys
+    ]
 
     grouped_valid_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in valid_rows:
+    for row in importable_valid_rows:
         group_key = f"{row['customer_name']}|{row['email'] or 'no-email'}|{row['group_period']}"
         grouped_valid_rows[group_key].append(row)
 
     with transaction.atomic():
         for row in all_rows:
+            if DUPLICATE_INVOICE_IMPORT_MESSAGE in row["errors"]:
+                continue
+            duplicate_key = _invoice_row_duplicate_key(row)
+            if duplicate_key is not None and duplicate_key in existing_duplicate_keys:
+                continue
             source = row["source"]
             InvoiceSourceRow.objects.create(
                 seller_id=source["seller_id"],
@@ -583,6 +734,7 @@ def import_invoice_rows_from_preview(
                 source_file_name=source_file_name,
                 raw_data=source,
             )
+            stored_source_rows += 1
 
         for grouped_rows in grouped_valid_rows.values():
             sample = grouped_rows[0]
@@ -657,6 +809,6 @@ def import_invoice_rows_from_preview(
         "created_customers": created_customers,
         "created_invoices": created_invoices,
         "created_items": created_items,
-        "saved_rows": len(valid_rows),
-        "stored_source_rows": len(all_rows),
+        "saved_rows": len(importable_valid_rows),
+        "stored_source_rows": stored_source_rows,
     }

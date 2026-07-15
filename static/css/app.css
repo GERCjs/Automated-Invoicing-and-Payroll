@@ -1063,6 +1063,19 @@ textarea.form-control:focus {
     min-height: 1.2rem;
 }
 
+.invoice-item-action-cell {
+    min-width: 96px;
+    white-space: nowrap;
+}
+
+.invoice-item-delete-field {
+    display: none;
+}
+
+.invoice-item-row-deleted {
+    display: none;
+}
+
 .management-dashboard-page .page-title {
     font-size: 2rem;
     line-height: 1.05;

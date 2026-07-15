@@ -37,6 +37,7 @@ from .services import (
     apply_overdue_status,
     parse_invoice_csv,
     parse_invoice_excel,
+    recalculate_invoice_totals,
     refresh_overdue_invoices,
     transition_invoice_status,
 )
@@ -49,6 +50,18 @@ class InvoicingMvpTests(TestCase):
         self.finance_user = User.objects.create_user(username="finance_u", password="TempPass123!")
         self.finance_user.role_profile.role = FINANCE
         self.finance_user.role_profile.save()
+
+        self.admin_user = User.objects.create_user(username="admin_u", password="TempPass123!")
+        self.admin_user.role_profile.role = ADMIN
+        self.admin_user.role_profile.save()
+
+        self.superadmin_user = User.objects.create_user(username="superadmin_u", password="TempPass123!")
+        self.superadmin_user.role_profile.role = SUPERADMIN
+        self.superadmin_user.role_profile.save()
+
+        self.hr_user = User.objects.create_user(username="hr_u", password="TempPass123!")
+        self.hr_user.role_profile.role = HR
+        self.hr_user.role_profile.save()
 
         self.staff_user = User.objects.create_user(username="staff_u", password="TempPass123!")
         self.staff_user.role_profile.role = STAFF
@@ -96,6 +109,35 @@ class InvoicingMvpTests(TestCase):
             tax_rate=Decimal("9.00"),
             line_total=Decimal("218.00"),
         )
+        return invoice
+
+    def _create_invoice_with_items(
+        self,
+        items,
+        *,
+        invoice_number="INV-2099-2101",
+        status=Invoice.STATUS_DRAFT,
+        customer=None,
+    ):
+        customer = customer or self.customer
+        invoice = Invoice.objects.create(
+            invoice_number=invoice_number,
+            customer=customer,
+            status=status,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=10),
+            currency="SGD",
+            created_by=self.finance_user,
+        )
+        for item in items:
+            InvoiceItem.objects.create(
+                invoice=invoice,
+                description=item["description"],
+                quantity=Decimal(item["quantity"]),
+                unit_price=Decimal(item["unit_price"]),
+                tax_rate=Decimal(item.get("tax_rate", "0.00")),
+            )
+        recalculate_invoice_totals(invoice)
         return invoice
 
     def _create_basic_invoice(
@@ -149,6 +191,7 @@ class InvoicingMvpTests(TestCase):
         invoice = Invoice.objects.first()
         self.assertIsNotNone(invoice)
         self.assertTrue(invoice.invoice_number.startswith(f"INV-{issue_date.year}-"))
+        self.assertEqual(invoice.items.count(), 1)
         self.assertEqual(invoice.subtotal, Decimal("200.00"))
         self.assertEqual(invoice.tax_amount, Decimal("18.00"))
         self.assertEqual(invoice.total_amount, Decimal("218.00"))
@@ -215,6 +258,123 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Unit price must be greater than 0.")
         self.assertFalse(Invoice.objects.exists())
+
+    def test_finance_can_create_invoice_with_three_items(self):
+        self.client.login(username="finance_u", password="TempPass123!")
+        issue_date = timezone.localdate()
+        due_date = issue_date + timedelta(days=15)
+
+        response = self.client.post(
+            reverse("invoice-create"),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": issue_date,
+                "due_date": due_date,
+                "currency": "SGD",
+                "notes": "Multi-item invoice",
+                "items-TOTAL_FORMS": "3",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-description": "Service Fee",
+                "items-0-quantity": "2",
+                "items-0-unit_price": "100.00",
+                "items-0-tax_rate": "9.00",
+                "items-1-description": "Consulting",
+                "items-1-quantity": "1",
+                "items-1-unit_price": "50.00",
+                "items-1-tax_rate": "0.00",
+                "items-2-description": "Materials",
+                "items-2-quantity": "3",
+                "items-2-unit_price": "10.00",
+                "items-2-tax_rate": "10.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        invoice = Invoice.objects.get()
+        self.assertEqual(invoice.items.count(), 3)
+        self.assertEqual(invoice.subtotal, Decimal("280.00"))
+        self.assertEqual(invoice.tax_amount, Decimal("21.00"))
+        self.assertEqual(invoice.total_amount, Decimal("301.00"))
+
+    def test_invoice_create_rejects_no_valid_item(self):
+        self.client.login(username="finance_u", password="TempPass123!")
+        issue_date = timezone.localdate()
+        due_date = issue_date + timedelta(days=15)
+
+        response = self.client.post(
+            reverse("invoice-create"),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": issue_date,
+                "due_date": due_date,
+                "currency": "SGD",
+                "notes": "",
+                "items-TOTAL_FORMS": "1",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-description": "",
+                "items-0-quantity": "",
+                "items-0-unit_price": "",
+                "items-0-tax_rate": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required.")
+        self.assertFalse(Invoice.objects.exists())
+
+    def test_empty_extra_invoice_item_row_does_not_create_item(self):
+        self.client.login(username="finance_u", password="TempPass123!")
+        issue_date = timezone.localdate()
+        due_date = issue_date + timedelta(days=15)
+
+        response = self.client.post(
+            reverse("invoice-create"),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": issue_date,
+                "due_date": due_date,
+                "currency": "SGD",
+                "notes": "Blank extra row",
+                "items-TOTAL_FORMS": "2",
+                "items-INITIAL_FORMS": "0",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-description": "Service Fee",
+                "items-0-quantity": "2",
+                "items-0-unit_price": "100.00",
+                "items-0-tax_rate": "9.00",
+                "items-1-description": "",
+                "items-1-quantity": "",
+                "items-1-unit_price": "",
+                "items-1-tax_rate": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        invoice = Invoice.objects.get()
+        self.assertEqual(invoice.items.count(), 1)
+        self.assertEqual(invoice.total_amount, Decimal("218.00"))
+
+    def test_allowed_roles_can_access_manual_invoice_create_form(self):
+        for username in ["finance_u", "admin_u", "superadmin_u"]:
+            with self.subTest(username=username):
+                self.client.login(username=username, password="TempPass123!")
+                response = self.client.get(reverse("invoice-create"))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Add Item")
+                self.client.logout()
+
+    def test_disallowed_roles_cannot_access_manual_invoice_create_form(self):
+        for username in ["customer_u", "hr_u", "staff_u"]:
+            with self.subTest(username=username):
+                self.client.login(username=username, password="TempPass123!")
+                response = self.client.get(reverse("invoice-create"))
+                self.assertEqual(response.status_code, 403)
+                self.client.logout()
 
     def test_finance_can_open_customer_create_page_from_invoice_flow(self):
         self.client.login(username="finance_u", password="TempPass123!")
@@ -839,6 +999,111 @@ class InvoicingMvpTests(TestCase):
             ).exists()
         )
 
+    def test_finance_can_edit_invoice_with_multiple_items(self):
+        invoice = self._create_invoice_with_items(
+            [
+                {"description": "Service Fee", "quantity": "1.00", "unit_price": "100.00", "tax_rate": "9.00"},
+                {"description": "Setup", "quantity": "2.00", "unit_price": "50.00", "tax_rate": "0.00"},
+                {"description": "Materials", "quantity": "3.00", "unit_price": "10.00", "tax_rate": "10.00"},
+            ]
+        )
+        items = list(invoice.items.order_by("id"))
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        get_response = self.client.get(reverse("invoice-edit", args=[invoice.pk]))
+        self.assertEqual(get_response.status_code, 200)
+        self.assertContains(get_response, "Service Fee")
+        self.assertContains(get_response, "Setup")
+        self.assertContains(get_response, "Materials")
+
+        response = self.client.post(
+            reverse("invoice-edit", args=[invoice.pk]),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": invoice.issue_date,
+                "due_date": invoice.due_date,
+                "currency": "SGD",
+                "notes": "Updated multi-item invoice",
+                "items-TOTAL_FORMS": "3",
+                "items-INITIAL_FORMS": "3",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-id": items[0].pk,
+                "items-0-description": "Service Fee",
+                "items-0-quantity": "2",
+                "items-0-unit_price": "100.00",
+                "items-0-tax_rate": "9.00",
+                "items-1-id": items[1].pk,
+                "items-1-description": "Setup",
+                "items-1-quantity": "2",
+                "items-1-unit_price": "50.00",
+                "items-1-tax_rate": "0.00",
+                "items-2-id": items[2].pk,
+                "items-2-description": "Materials",
+                "items-2-quantity": "4",
+                "items-2-unit_price": "10.00",
+                "items-2-tax_rate": "10.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.items.count(), 3)
+        self.assertEqual(invoice.subtotal, Decimal("340.00"))
+        self.assertEqual(invoice.tax_amount, Decimal("22.00"))
+        self.assertEqual(invoice.total_amount, Decimal("362.00"))
+
+    def test_finance_can_remove_one_invoice_item_during_edit(self):
+        invoice = self._create_invoice_with_items(
+            [
+                {"description": "Service Fee", "quantity": "1.00", "unit_price": "100.00", "tax_rate": "9.00"},
+                {"description": "Setup", "quantity": "2.00", "unit_price": "50.00", "tax_rate": "0.00"},
+                {"description": "Materials", "quantity": "3.00", "unit_price": "10.00", "tax_rate": "10.00"},
+            ],
+            invoice_number="INV-2099-2102",
+        )
+        items = list(invoice.items.order_by("id"))
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("invoice-edit", args=[invoice.pk]),
+            data={
+                "customer": self.customer.pk,
+                "issue_date": invoice.issue_date,
+                "due_date": invoice.due_date,
+                "currency": "SGD",
+                "notes": invoice.notes,
+                "items-TOTAL_FORMS": "3",
+                "items-INITIAL_FORMS": "3",
+                "items-MIN_NUM_FORMS": "1",
+                "items-MAX_NUM_FORMS": "1000",
+                "items-0-id": items[0].pk,
+                "items-0-description": "Service Fee",
+                "items-0-quantity": "1",
+                "items-0-unit_price": "100.00",
+                "items-0-tax_rate": "9.00",
+                "items-1-id": items[1].pk,
+                "items-1-description": "Setup",
+                "items-1-quantity": "2",
+                "items-1-unit_price": "50.00",
+                "items-1-tax_rate": "0.00",
+                "items-1-DELETE": "on",
+                "items-2-id": items[2].pk,
+                "items-2-description": "Materials",
+                "items-2-quantity": "3",
+                "items-2-unit_price": "10.00",
+                "items-2-tax_rate": "10.00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.items.count(), 2)
+        self.assertFalse(invoice.items.filter(description="Setup").exists())
+        self.assertEqual(invoice.subtotal, Decimal("130.00"))
+        self.assertEqual(invoice.tax_amount, Decimal("12.00"))
+        self.assertEqual(invoice.total_amount, Decimal("142.00"))
+
     def test_staff_cannot_edit_invoice(self):
         invoice = self._create_invoice_with_item()
         self.client.login(username="staff_u", password="TempPass123!")
@@ -1396,8 +1661,9 @@ class InvoicingMvpTests(TestCase):
 
         self.assertEqual(preview_response.status_code, 200)
         self.assertContains(preview_response, "Validation Issues")
-        self.assertContains(preview_response, "Missing merchant/customer identity")
-        self.assertContains(preview_response, "Missing numeric amount")
+        self.assertContains(preview_response, "Missing merchant/customer name")
+        self.assertContains(preview_response, "Missing customer email")
+        self.assertContains(preview_response, "Missing invoice amount")
 
     def test_staff_cannot_access_invoice_csv_upload(self):
         self.client.login(username="staff_u", password="TempPass123!")
@@ -2591,6 +2857,235 @@ class InvoiceFileUploadTests(TestCase):
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    def _parse_single_csv_row(self, **overrides):
+        row = self._sample_csv_rows()[0].copy()
+        row.update(overrides)
+        return parse_invoice_csv(self._build_csv_upload(rows=[row], filename="single_row.csv"))
+
+    def _assert_single_csv_row_invalid(self, expected_error, **overrides):
+        parsed = self._parse_single_csv_row(**overrides)
+        self.assertEqual(len(parsed["valid_rows"]), 0)
+        self.assertEqual(len(parsed["invalid_rows"]), 1)
+        self.assertIn(expected_error, parsed["invalid_rows"][0]["errors"])
+        return parsed["invalid_rows"][0]
+
+    def _preview_csv_rows(self, rows, filename="duplicate_test.csv"):
+        return self.client.post(
+            reverse("invoice-csv-upload"),
+            data={"action": "preview", "csv_file": self._build_csv_upload(rows=rows, filename=filename)},
+        )
+
+    def _confirm_preview(self, preview_response):
+        import_token = preview_response.context["preview"]["import_token"]
+        return self.client.post(
+            reverse("invoice-csv-upload"),
+            data={"action": "confirm", "import_token": import_token},
+        )
+
+    def _preview_and_confirm_csv_rows(self, rows, filename="duplicate_test.csv"):
+        preview_response = self._preview_csv_rows(rows, filename=filename)
+        self.assertEqual(preview_response.status_code, 200)
+        confirm_response = self._confirm_preview(preview_response)
+        self.assertEqual(confirm_response.status_code, 302)
+        return preview_response, confirm_response
+
+    def test_valid_invoice_upload_row_passes(self):
+        parsed = self._parse_single_csv_row()
+
+        self.assertEqual(len(parsed["valid_rows"]), 1)
+        self.assertEqual(len(parsed["invalid_rows"]), 0)
+        valid_row = parsed["valid_rows"][0]
+        self.assertEqual(valid_row["source"]["order_id"], "ORD-001")
+        self.assertEqual(valid_row["customer_name"], "Acme Salon")
+        self.assertEqual(valid_row["email"], "billing@acme.com")
+        self.assertEqual(valid_row["amount"], "120.00")
+
+    def test_missing_email_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid("Missing customer email.", email="")
+
+    def test_invalid_email_format_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid("Customer email format is invalid.", email="not-an-email")
+
+    def test_missing_customer_or_merchant_name_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid(
+            "Missing merchant/customer name (shop_title or customerName).",
+            shop_title="",
+            customerName="",
+        )
+
+    def test_missing_order_reference_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid("Missing OrderID/order reference.", OrderID="")
+
+    def test_missing_service_name_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid("Missing serviceName/item description.", serviceName="")
+
+    def test_missing_booked_date_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid("Missing bookedDate.", bookedDate="")
+
+    def test_invalid_booked_date_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid("bookedDate format is invalid.", bookedDate="not-a-date")
+
+    def test_missing_invoice_amount_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid("Missing invoice amount (vanidayShare).", vanidayShare="")
+
+    def test_non_numeric_invoice_amount_is_invalid_for_invoice_upload(self):
+        self._assert_single_csv_row_invalid(
+            "Invoice amount (vanidayShare) must be numeric.",
+            vanidayShare="not-a-number",
+        )
+
+    def test_mixed_valid_and_invalid_csv_rows_show_correct_counts(self):
+        rows = self._sample_csv_rows()
+        rows.append(
+            {
+                "seller_id": "S3",
+                "shop_title": "",
+                "OrderID": "ORD-003",
+                "paymentMethod": "Credit Card",
+                "email": "",
+                "customerName": "",
+                "qty": "1",
+                "serviceName": "",
+                "bookedDate": "not-a-date",
+                "vanidayShare": "",
+            }
+        )
+        self.client.login(username="finance_upload", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("invoice-csv-upload"),
+            data={"action": "preview", "csv_file": self._build_csv_upload(rows=rows, filename="mixed_rows.csv")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Preview Summary")
+        self.assertContains(response, "Validation Issues")
+        preview = response.context["preview"]
+        self.assertEqual(preview["total_rows"], 3)
+        self.assertEqual(len(preview["valid_rows"]), 2)
+        self.assertEqual(len(preview["invalid_rows"]), 1)
+        invalid_errors = preview["invalid_rows"][0]["errors"]
+        self.assertIn("Missing customer email.", invalid_errors)
+        self.assertIn("Missing invoice amount (vanidayShare).", invalid_errors)
+
+    def test_reuploading_same_file_marks_rows_as_duplicates(self):
+        self.client.login(username="finance_upload", password="TempPass123!")
+        rows = self._sample_csv_rows()
+
+        self._preview_and_confirm_csv_rows(rows, filename="first_import.csv")
+        first_invoice_count = Invoice.objects.count()
+        first_item_count = InvoiceItem.objects.count()
+
+        second_preview = self._preview_csv_rows(rows, filename="first_import_again.csv")
+
+        self.assertEqual(second_preview.status_code, 200)
+        preview = second_preview.context["preview"]
+        self.assertEqual(len(preview["valid_rows"]), 0)
+        self.assertEqual(len(preview["invalid_rows"]), 2)
+        self.assertContains(second_preview, "This order/service row has already been imported.")
+
+        second_confirm = self._confirm_preview(second_preview)
+
+        self.assertEqual(second_confirm.status_code, 302)
+        self.assertEqual(Invoice.objects.count(), first_invoice_count)
+        self.assertEqual(InvoiceItem.objects.count(), first_item_count)
+        latest_job = ImportJob.objects.latest("id")
+        self.assertEqual(latest_job.saved_rows, 0)
+
+    def test_mixed_valid_invalid_and_duplicate_rows_show_correct_counts(self):
+        self.client.login(username="finance_upload", password="TempPass123!")
+        imported_row = self._sample_csv_rows()[0]
+        new_row = self._sample_csv_rows()[1].copy()
+        invalid_row = self._sample_csv_rows()[0].copy()
+        invalid_row.update({"OrderID": "ORD-INVALID", "email": "", "serviceName": ""})
+        self._preview_and_confirm_csv_rows([imported_row], filename="initial_valid.csv")
+
+        response = self._preview_csv_rows([imported_row, new_row, invalid_row], filename="mixed_duplicate.csv")
+
+        self.assertEqual(response.status_code, 200)
+        preview = response.context["preview"]
+        self.assertEqual(preview["total_rows"], 3)
+        self.assertEqual(len(preview["valid_rows"]), 1)
+        self.assertEqual(len(preview["invalid_rows"]), 2)
+        errors_by_order = {
+            row["source"]["order_id"]: row["errors"]
+            for row in preview["invalid_rows"]
+        }
+        self.assertIn("This order/service row has already been imported.", errors_by_order["ORD-001"])
+        self.assertIn("Missing customer email.", errors_by_order["ORD-INVALID"])
+
+    def test_confirm_import_skips_duplicate_rows_and_imports_new_rows(self):
+        self.client.login(username="finance_upload", password="TempPass123!")
+        imported_row = self._sample_csv_rows()[0]
+        new_row = self._sample_csv_rows()[1]
+        self._preview_and_confirm_csv_rows([imported_row], filename="initial_valid.csv")
+        first_invoice_count = Invoice.objects.count()
+        first_item_count = InvoiceItem.objects.count()
+
+        preview_response = self._preview_csv_rows([imported_row, new_row], filename="duplicate_plus_new.csv")
+        confirm_response = self._confirm_preview(preview_response)
+
+        self.assertEqual(confirm_response.status_code, 302)
+        self.assertEqual(Invoice.objects.count(), first_invoice_count + 1)
+        self.assertEqual(InvoiceItem.objects.count(), first_item_count + 1)
+        self.assertEqual(InvoiceItem.objects.filter(description__icontains="Nail Service").count(), 1)
+        latest_job = ImportJob.objects.latest("id")
+        self.assertEqual(latest_job.saved_rows, 1)
+        self.assertEqual(latest_job.invalid_rows, 1)
+
+    def test_corrected_previously_invalid_row_can_be_imported_later(self):
+        self.client.login(username="finance_upload", password="TempPass123!")
+        valid_row = self._sample_csv_rows()[0]
+        invalid_row = self._sample_csv_rows()[1].copy()
+        invalid_row.update({"shop_title": "", "customerName": ""})
+        self._preview_and_confirm_csv_rows([valid_row, invalid_row], filename="with_invalid.csv")
+        first_invoice_count = Invoice.objects.count()
+        first_item_count = InvoiceItem.objects.count()
+
+        corrected_row = invalid_row.copy()
+        corrected_row.update({"shop_title": "Acme Salon", "customerName": "Acme Customer"})
+        corrected_preview = self._preview_csv_rows([valid_row, corrected_row], filename="corrected_full.csv")
+
+        self.assertEqual(corrected_preview.status_code, 200)
+        preview = corrected_preview.context["preview"]
+        self.assertEqual(len(preview["valid_rows"]), 1)
+        self.assertEqual(len(preview["invalid_rows"]), 1)
+        self.assertEqual(preview["valid_rows"][0]["source"]["order_id"], "ORD-002")
+        self.assertIn("This order/service row has already been imported.", preview["invalid_rows"][0]["errors"])
+
+        confirm_response = self._confirm_preview(corrected_preview)
+
+        self.assertEqual(confirm_response.status_code, 302)
+        self.assertEqual(Invoice.objects.count(), first_invoice_count + 1)
+        self.assertEqual(InvoiceItem.objects.count(), first_item_count + 1)
+        self.assertEqual(InvoiceItem.objects.filter(description__icontains="Nail Service").count(), 1)
+
+    def test_same_order_id_with_different_service_name_can_be_imported(self):
+        self.client.login(username="finance_upload", password="TempPass123!")
+        imported_row = self._sample_csv_rows()[0]
+        separate_service_row = imported_row.copy()
+        separate_service_row["serviceName"] = "Color Treatment"
+        self._preview_and_confirm_csv_rows([imported_row], filename="single_service.csv")
+
+        preview_response = self._preview_csv_rows([separate_service_row], filename="separate_service.csv")
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(len(preview_response.context["preview"]["valid_rows"]), 1)
+        self.assertEqual(len(preview_response.context["preview"]["invalid_rows"]), 0)
+
+    def test_same_order_id_and_service_name_with_different_amount_can_be_imported(self):
+        self.client.login(username="finance_upload", password="TempPass123!")
+        imported_row = self._sample_csv_rows()[0]
+        adjusted_amount_row = imported_row.copy()
+        adjusted_amount_row["vanidayShare"] = "125.00"
+        self._preview_and_confirm_csv_rows([imported_row], filename="original_amount.csv")
+
+        preview_response = self._preview_csv_rows([adjusted_amount_row], filename="adjusted_amount.csv")
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(len(preview_response.context["preview"]["valid_rows"]), 1)
+        self.assertEqual(len(preview_response.context["preview"]["invalid_rows"]), 0)
+
     def test_finance_can_upload_valid_csv_file(self):
         self.client.login(username="finance_upload", password="TempPass123!")
 
@@ -2877,6 +3372,7 @@ class InvoiceFileUploadTests(TestCase):
         self.assertEqual(confirm_response.status_code, 302)
         imported_invoice = Invoice.objects.get(notes__contains="vaniday_batch.xlsx")
         self.assertEqual(imported_invoice.items.count(), 2)
+        self.assertFalse(imported_invoice.items.filter(description__icontains="Bad Row").exists())
         self.assertEqual(imported_invoice.total_amount, Decimal("200.00"))
         self.assertEqual(InvoiceSourceRow.objects.filter(source_file_name="vaniday_batch.xlsx").count(), 3)
         job = ImportJob.objects.latest("id")

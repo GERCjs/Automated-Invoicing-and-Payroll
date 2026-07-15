@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{% if is_edit %}Edit Invoice {{ invoice.invoice_number }}{% else %}Create Invoice{% endif %} | Automated Invoicing & Payroll{% endblock %}
 
@@ -56,7 +57,10 @@
     </div>
 
     <div class="card mb-3">
-        <div class="card-header">Invoice Items</div>
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span>Invoice Items</span>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="addInvoiceItemButton">Add Item</button>
+        </div>
         <div class="card-body">
             {{ formset.management_form }}
             {% if formset.non_form_errors %}
@@ -70,12 +74,12 @@
                             <th>Qty</th>
                             <th>Unit Price</th>
                             <th>GST %</th>
-                            <th>Delete</th>
+                            <th>Action</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="invoiceItemRows">
                         {% for item_form in formset %}
-                        <tr>
+                        <tr class="invoice-item-row" data-invoice-item-row>
                             <td>
                                 {{ item_form.id }}
                                 {{ item_form.description }}
@@ -94,14 +98,30 @@
                                 {{ item_form.tax_rate }}
                                 {% for error in item_form.tax_rate.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
                             </td>
-                            <td>
-                                {{ item_form.DELETE }}
+                            <td class="invoice-item-action-cell">
+                                <button type="button" class="btn btn-outline-secondary btn-sm invoice-item-remove-button" data-remove-invoice-item>Remove</button>
+                                <span class="invoice-item-delete-field">{{ item_form.DELETE }}</span>
                             </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
+            <template id="invoiceItemEmptyFormTemplate">
+                <tr class="invoice-item-row" data-invoice-item-row>
+                    <td>
+                        {{ formset.empty_form.id }}
+                        {{ formset.empty_form.description }}
+                    </td>
+                    <td>{{ formset.empty_form.quantity }}</td>
+                    <td>{{ formset.empty_form.unit_price }}</td>
+                    <td>{{ formset.empty_form.tax_rate }}</td>
+                    <td class="invoice-item-action-cell">
+                        <button type="button" class="btn btn-outline-secondary btn-sm invoice-item-remove-button" data-remove-invoice-item>Remove</button>
+                        <span class="invoice-item-delete-field">{{ formset.empty_form.DELETE }}</span>
+                    </td>
+                </tr>
+            </template>
         </div>
     </div>
 
@@ -110,4 +130,8 @@
         <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Cancel</a>
     </div>
 </form>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/invoice_form.js' %}?v=20260715"></script>
 {% endblock %}
