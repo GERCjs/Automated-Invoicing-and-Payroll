@@ -27,6 +27,26 @@ WEBHOOK_EVENT_REFUND_FAILED = "refund.failed"
 # PayNow is only enabled for SGD payments.
 PAYNOW_ENABLED_CURRENCY = "SGD"
 BANK_TRANSFER_REFERENCE_PREFIX = "BANK"
+FINAL_PAYMENT_STATUSES = {
+    PaymentRecord.STATUS_SUCCEEDED,
+    PaymentRecord.STATUS_REFUNDED,
+}
+
+
+class DuplicatePaymentError(ValueError):
+    def __init__(
+        self,
+        *,
+        invoice: Invoice,
+        payment_record: PaymentRecord,
+        conflicting_payment: PaymentRecord,
+        source: str,
+    ):
+        self.invoice = invoice
+        self.payment_record = payment_record
+        self.conflicting_payment = conflicting_payment
+        self.source = source
+        super().__init__(_duplicate_payment_message(conflicting_payment))
 
 # Events outside this set are safely ignored.
 SUPPORTED_WEBHOOK_EVENTS = {
@@ -153,6 +173,111 @@ def _append_checkout_cancel_reference(cancel_url: str, payment_record: PaymentRe
     return f"{cancel_url}{separator}{urlencode({'payment_reference': payment_record.payment_reference})}"
 
 
+def _lock_invoice(invoice_id: int) -> Invoice:
+    return Invoice.objects.select_for_update().get(pk=invoice_id)
+
+
+def _other_final_payment(invoice: Invoice, payment_record: PaymentRecord) -> PaymentRecord | None:
+    return (
+        PaymentRecord.objects.filter(
+            invoice=invoice,
+            status__in=FINAL_PAYMENT_STATUSES,
+        )
+        .exclude(pk=payment_record.pk)
+        .order_by("created_at")
+        .first()
+    )
+
+
+def _invoice_has_final_payment(invoice: Invoice) -> bool:
+    return PaymentRecord.objects.filter(
+        invoice=invoice,
+        status__in=FINAL_PAYMENT_STATUSES,
+    ).exists()
+
+
+def _duplicate_payment_message(conflicting_payment: PaymentRecord) -> str:
+    return (
+        "Invoice already has a completed payment "
+        f"({conflicting_payment.payment_reference}). Review the existing payment before confirming another one."
+    )
+
+
+def _save_duplicate_stripe_attempt_intent(
+    *,
+    payment_record: PaymentRecord,
+    payment_intent_id: str,
+) -> None:
+    if payment_intent_id and payment_record.external_transaction_id != payment_intent_id:
+        payment_record.external_transaction_id = payment_intent_id
+        payment_record.save(update_fields=["external_transaction_id", "updated_at"])
+
+
+def _log_duplicate_payment_rejected(
+    *,
+    invoice: Invoice,
+    payment_record: PaymentRecord,
+    conflicting_payment: PaymentRecord,
+    source: str,
+    event_type: str = "",
+) -> None:
+    metadata = {
+        "invoice_number": invoice.invoice_number,
+        "payment_reference": payment_record.payment_reference,
+        "payment_provider": payment_record.provider,
+        "payment_status": payment_record.status,
+        "conflicting_payment_reference": conflicting_payment.payment_reference,
+        "conflicting_payment_provider": conflicting_payment.provider,
+        "conflicting_payment_status": conflicting_payment.status,
+        "source": source,
+    }
+    if event_type:
+        metadata["event_type"] = event_type
+    if payment_record.stripe_checkout_session_id:
+        metadata["stripe_checkout_session_id"] = payment_record.stripe_checkout_session_id
+    if payment_record.external_transaction_id:
+        metadata["external_transaction_id"] = payment_record.external_transaction_id
+    log_event(
+        action="payment.duplicate_rejected",
+        user=payment_record.created_by,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata=metadata,
+    )
+
+
+def _ignore_duplicate_stripe_event(
+    *,
+    event_record: StripeWebhookEvent,
+    invoice: Invoice,
+    payment_record: PaymentRecord,
+    conflicting_payment: PaymentRecord,
+    event_type: str,
+) -> None:
+    event_record.status = StripeWebhookEvent.STATUS_IGNORED
+    event_record.error_message = _duplicate_payment_message(conflicting_payment)
+    event_record.payment_record = payment_record
+    event_record.invoice = invoice
+    event_record.processed_at = timezone.now()
+    event_record.save(
+        update_fields=[
+            "status",
+            "error_message",
+            "payment_record",
+            "invoice",
+            "processed_at",
+            "updated_at",
+        ]
+    )
+    _log_duplicate_payment_rejected(
+        invoice=invoice,
+        payment_record=payment_record,
+        conflicting_payment=conflicting_payment,
+        source="stripe_webhook",
+        event_type=event_type,
+    )
+
+
 def get_bank_transfer_details() -> dict[str, str] | None:
     details = PaymentBankDetails.load()
     if not details.is_complete():
@@ -266,58 +391,76 @@ def confirm_bank_transfer_payment(
     confirmation_notes: str = "",
     confirmed_by=None,
 ) -> tuple[PaymentRecord, str, bool]:
-    with transaction.atomic():
-        locked_record = (
-            PaymentRecord.objects.select_related("invoice")
-            .select_for_update()
-            .get(pk=payment_record.pk)
-        )
-        if locked_record.provider != PaymentRecord.PROVIDER_MANUAL:
-            raise ValueError("Only manual bank transfer payments can be confirmed here.")
-        if locked_record.status != PaymentRecord.STATUS_PENDING:
-            raise ValueError("Only pending bank transfer payments can be confirmed.")
-        if Decimal(received_amount) != locked_record.amount:
-            raise ValueError("Amount received must match the pending payment amount.")
-        normalized_bank_reference = (bank_reference or "").strip()
-        if not normalized_bank_reference:
-            raise ValueError("Bank reference is required.")
+    try:
+        with transaction.atomic():
+            locked_record = (
+                PaymentRecord.objects.select_related("invoice")
+                .select_for_update()
+                .get(pk=payment_record.pk)
+            )
+            if locked_record.provider != PaymentRecord.PROVIDER_MANUAL:
+                raise ValueError("Only manual bank transfer payments can be confirmed here.")
+            if locked_record.status != PaymentRecord.STATUS_PENDING:
+                raise ValueError("Only pending bank transfer payments can be confirmed.")
+            if Decimal(received_amount) != locked_record.amount:
+                raise ValueError("Amount received must match the pending payment amount.")
+            normalized_bank_reference = (bank_reference or "").strip()
+            if not normalized_bank_reference:
+                raise ValueError("Bank reference is required.")
 
-        invoice = locked_record.invoice
-        invoice_status_before = invoice.status
-        changed = False
+            invoice = _lock_invoice(locked_record.invoice_id)
+            conflicting_payment = _other_final_payment(invoice, locked_record)
+            if conflicting_payment is not None:
+                raise DuplicatePaymentError(
+                    invoice=invoice,
+                    payment_record=locked_record,
+                    conflicting_payment=conflicting_payment,
+                    source="bank_transfer_confirmation",
+                )
 
-        confirmed_at = timezone.now()
-        locked_record.status = PaymentRecord.STATUS_SUCCEEDED
-        locked_record.paid_at = confirmed_at
-        locked_record.created_by = locked_record.created_by or confirmed_by
-        locked_record.manual_received_amount = received_amount
-        locked_record.manual_received_date = received_date
-        locked_record.manual_bank_reference = normalized_bank_reference
-        locked_record.manual_confirmation_notes = (confirmation_notes or "").strip()
-        locked_record.manual_confirmed_by = confirmed_by
-        locked_record.manual_confirmed_at = confirmed_at
-        locked_record.save(
-            update_fields=[
-                "status",
-                "paid_at",
-                "created_by",
-                "manual_received_amount",
-                "manual_received_date",
-                "manual_bank_reference",
-                "manual_confirmation_notes",
-                "manual_confirmed_by",
-                "manual_confirmed_at",
-                "updated_at",
-            ]
-        )
-        changed = True
+            invoice_status_before = invoice.status
+            changed = False
 
-        if invoice.status != Invoice.STATUS_PAID:
-            invoice.status = Invoice.STATUS_PAID
-            invoice.save(update_fields=["status", "updated_at"])
+            confirmed_at = timezone.now()
+            locked_record.status = PaymentRecord.STATUS_SUCCEEDED
+            locked_record.paid_at = confirmed_at
+            locked_record.created_by = locked_record.created_by or confirmed_by
+            locked_record.manual_received_amount = received_amount
+            locked_record.manual_received_date = received_date
+            locked_record.manual_bank_reference = normalized_bank_reference
+            locked_record.manual_confirmation_notes = (confirmation_notes or "").strip()
+            locked_record.manual_confirmed_by = confirmed_by
+            locked_record.manual_confirmed_at = confirmed_at
+            locked_record.save(
+                update_fields=[
+                    "status",
+                    "paid_at",
+                    "created_by",
+                    "manual_received_amount",
+                    "manual_received_date",
+                    "manual_bank_reference",
+                    "manual_confirmation_notes",
+                    "manual_confirmed_by",
+                    "manual_confirmed_at",
+                    "updated_at",
+                ]
+            )
             changed = True
 
-        return locked_record, invoice_status_before, changed
+            if invoice.status != Invoice.STATUS_PAID:
+                invoice.status = Invoice.STATUS_PAID
+                invoice.save(update_fields=["status", "updated_at"])
+                changed = True
+
+            return locked_record, invoice_status_before, changed
+    except DuplicatePaymentError as exc:
+        _log_duplicate_payment_rejected(
+            invoice=exc.invoice,
+            payment_record=exc.payment_record,
+            conflicting_payment=exc.conflicting_payment,
+            source=exc.source,
+        )
+        raise ValueError(str(exc)) from exc
 
 
 def _resolve_refunded_invoice_status(invoice: Invoice) -> str:
@@ -334,7 +477,7 @@ def _apply_local_refunded_state(payment_record: PaymentRecord) -> None:
             .select_for_update()
             .get(pk=payment_record.pk)
         )
-        invoice = locked_record.invoice
+        invoice = _lock_invoice(locked_record.invoice_id)
         updates = []
         # Mark the payment as refunded if it is not already refunded.
         if locked_record.status != PaymentRecord.STATUS_REFUNDED:
@@ -404,39 +547,62 @@ def create_checkout_for_invoice(
     if invoice.status == Invoice.STATUS_PAID:
         raise ValueError("Invoice is already paid.")
     _require_stripe_secret_key()
-    normalized_currency = _normalize_currency_code(invoice.currency)
+    with transaction.atomic():
+        locked_invoice = _lock_invoice(invoice.id)
+        if locked_invoice.status == Invoice.STATUS_PAID:
+            raise ValueError("Invoice is already paid.")
+        if locked_invoice.status == Invoice.STATUS_REFUNDED:
+            raise ValueError("Invoice has already been refunded.")
+        if _invoice_has_final_payment(locked_invoice):
+            raise ValueError("Invoice already has a completed payment.")
 
-    # Create a pending local payment record before sending the user to Stripe.
-    payment_record = PaymentRecord.objects.create(
-        invoice=invoice,
-        payment_reference=f"PAY-{uuid.uuid4().hex[:12].upper()}",
-        provider=PaymentRecord.PROVIDER_STRIPE,
-        status=PaymentRecord.STATUS_PENDING,
-        amount=invoice.total_amount,
-        currency=normalized_currency,
-        created_by=initiated_by,
-    )
+        existing_payment = (
+            PaymentRecord.objects.filter(
+                invoice=locked_invoice,
+                provider=PaymentRecord.PROVIDER_STRIPE,
+                status=PaymentRecord.STATUS_PENDING,
+                stripe_checkout_session_id__isnull=False,
+            )
+            .exclude(stripe_checkout_session_id="")
+            .order_by("created_at")
+            .first()
+        )
+        if existing_payment is not None:
+            return existing_payment
 
-    # Ask Stripe to create the actual hosted checkout page.
-    session = _build_checkout_session(
-        invoice=invoice,
-        payment_record=payment_record,
-        success_url=success_url,
-        cancel_url=_append_checkout_cancel_reference(cancel_url, payment_record),
-    )
-    # Save Stripe IDs so future redirects/webhooks can find this payment.
-    payment_record.stripe_checkout_session_id = session.id
-    payment_record.external_transaction_id = _normalize_external_id(
-        getattr(session, "payment_intent", None)
-    )
-    payment_record.save(
-        update_fields=[
-            "stripe_checkout_session_id",
-            "external_transaction_id",
-            "updated_at",
-        ]
-    )
-    return payment_record
+        normalized_currency = _normalize_currency_code(locked_invoice.currency)
+
+        # Create a pending local payment record before sending the user to Stripe.
+        payment_record = PaymentRecord.objects.create(
+            invoice=locked_invoice,
+            payment_reference=f"PAY-{uuid.uuid4().hex[:12].upper()}",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=locked_invoice.total_amount,
+            currency=normalized_currency,
+            created_by=initiated_by,
+        )
+
+        # Ask Stripe to create the actual hosted checkout page.
+        session = _build_checkout_session(
+            invoice=locked_invoice,
+            payment_record=payment_record,
+            success_url=success_url,
+            cancel_url=_append_checkout_cancel_reference(cancel_url, payment_record),
+        )
+        # Save Stripe IDs so future redirects/webhooks can find this payment.
+        payment_record.stripe_checkout_session_id = session.id
+        payment_record.external_transaction_id = _normalize_external_id(
+            getattr(session, "payment_intent", None)
+        )
+        payment_record.save(
+            update_fields=[
+                "stripe_checkout_session_id",
+                "external_transaction_id",
+                "updated_at",
+            ]
+        )
+        return payment_record
 
 
 def retrieve_checkout_session(session_id: str) -> Any:
@@ -541,9 +707,27 @@ def finalize_checkout_success_from_redirect(
             )
             return payment_record, False
 
+        confirmed_now = False
         changed = False
-        invoice = payment_record.invoice
+        invoice = _lock_invoice(payment_record.invoice_id)
         update_fields = ["updated_at"]
+        normalized_payment_intent = _normalize_external_id(payment_intent)
+
+        conflicting_payment = _other_final_payment(invoice, payment_record)
+        if conflicting_payment is not None:
+            _save_duplicate_stripe_attempt_intent(
+                payment_record=payment_record,
+                payment_intent_id=normalized_payment_intent,
+            )
+            _log_duplicate_payment_rejected(
+                invoice=invoice,
+                payment_record=payment_record,
+                conflicting_payment=conflicting_payment,
+                source="success_redirect",
+            )
+            return payment_record, False
+        if payment_record.status == PaymentRecord.STATUS_REFUNDED:
+            return payment_record, False
 
         # Idempotent update: set succeeded state only when not already finalized.
         if payment_record.status != PaymentRecord.STATUS_SUCCEEDED or payment_record.paid_at is None:
@@ -551,8 +735,8 @@ def finalize_checkout_success_from_redirect(
             payment_record.paid_at = timezone.now()
             update_fields.extend(["status", "paid_at"])
             changed = True
+            confirmed_now = True
 
-        normalized_payment_intent = _normalize_external_id(payment_intent)
         if (
             normalized_payment_intent
             and payment_record.external_transaction_id != normalized_payment_intent
@@ -602,7 +786,7 @@ def finalize_checkout_success_from_redirect(
                 },
             )
 
-        return payment_record, changed
+        return payment_record, confirmed_now
 
 
 def construct_webhook_event(payload: bytes, stripe_signature: str):
@@ -687,7 +871,7 @@ def _mark_refund_from_event(
             event_record.save(update_fields=["status", "error_message", "processed_at", "updated_at"])
             return
 
-        invoice = payment_record.invoice
+        invoice = _lock_invoice(payment_record.invoice_id)
         invoice_status_before = invoice.status
         if refund_status == "succeeded":
             # Successful refund: mark the payment and invoice as refunded.
@@ -798,7 +982,7 @@ def _mark_success_from_session(
             event_record.save(update_fields=["status", "error_message", "processed_at", "updated_at"])
             return
 
-        invoice = payment_record.invoice
+        invoice = _lock_invoice(payment_record.invoice_id)
         validation_error = _validate_checkout_amount_currency(
             session_object=session_object,
             payment_record=payment_record,
@@ -834,6 +1018,39 @@ def _mark_success_from_session(
             )
             return
         payment_intent_id = _normalize_external_id(session_object.get("payment_intent"))
+        if payment_record.status in FINAL_PAYMENT_STATUSES:
+            event_record.status = StripeWebhookEvent.STATUS_IGNORED
+            event_record.error_message = "Payment record was already finalized."
+            event_record.payment_record = payment_record
+            event_record.invoice = invoice
+            event_record.processed_at = timezone.now()
+            event_record.save(
+                update_fields=[
+                    "status",
+                    "error_message",
+                    "payment_record",
+                    "invoice",
+                    "processed_at",
+                    "updated_at",
+                ]
+            )
+            return
+
+        conflicting_payment = _other_final_payment(invoice, payment_record)
+        if conflicting_payment is not None:
+            _save_duplicate_stripe_attempt_intent(
+                payment_record=payment_record,
+                payment_intent_id=payment_intent_id,
+            )
+            _ignore_duplicate_stripe_event(
+                event_record=event_record,
+                invoice=invoice,
+                payment_record=payment_record,
+                conflicting_payment=conflicting_payment,
+                event_type=event_type,
+            )
+            return
+
         # Mark the local payment as succeeded.
         update_fields = ["status", "paid_at", "updated_at"]
         payment_record.status = PaymentRecord.STATUS_SUCCEEDED

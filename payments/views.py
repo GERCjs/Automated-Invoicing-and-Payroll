@@ -826,6 +826,7 @@ def checkout_success(request):
     invoice = None
     payment_record = None
     payment_status = None
+    confirmed_now = False
 
     if session_id:
         try:
@@ -849,7 +850,7 @@ def checkout_success(request):
             else:
                 metadata = {}
             # Sandbox fallback: finalize status from redirect return when webhook is disabled.
-            payment_record, _ = finalize_checkout_success_from_redirect(
+            payment_record, confirmed_now = finalize_checkout_success_from_redirect(
                 session_id=session_id,
                 payment_status=getattr(session, "payment_status", None),
                 payment_intent=getattr(session, "payment_intent", None),
@@ -864,7 +865,7 @@ def checkout_success(request):
                 ).first()
             if payment_record is not None:
                 invoice = payment_record.invoice
-                if payment_record.status == PaymentRecord.STATUS_SUCCEEDED:
+                if confirmed_now and payment_record.status == PaymentRecord.STATUS_SUCCEEDED:
                     # Send payment success email when the payment is confirmed.
                     _send_success_payment_email(request, payment_record)
 

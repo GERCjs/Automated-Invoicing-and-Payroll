@@ -582,6 +582,60 @@ class StripePaymentsPhaseTests(TestCase):
             ).exists()
         )
 
+    def test_bank_transfer_confirmation_rejects_existing_stripe_success(self):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-DUP",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            manual_customer_amount=self.invoice.total_amount,
+            manual_customer_transfer_date=timezone.localdate(),
+            manual_customer_bank_reference="CUSTOMER-DUP-REF",
+            manual_customer_submitted_by=self.customer_user,
+            manual_customer_submitted_at=timezone.now(),
+        )
+        stripe_payment = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-STRIPE-DUP-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            paid_at=timezone.now(),
+            stripe_checkout_session_id="cs_test_bank_duplicate_1",
+        )
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        self.client.login(username="finance_stripe", password="TempPass123!")
+
+        response = self.client.post(
+            reverse("payment-bank-transfer-confirm", args=[self.invoice.pk]),
+            data={
+                "manual_received_amount": str(self.invoice.total_amount),
+                "manual_received_date": timezone.localdate().isoformat(),
+                "manual_bank_reference": "CUSTOMER-DUP-REF",
+                "manual_confirmation_notes": "Trying to confirm after Stripe.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        payment_record.refresh_from_db()
+        stripe_payment.refresh_from_db()
+        self.invoice.refresh_from_db()
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(stripe_payment.status, PaymentRecord.STATUS_SUCCEEDED)
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.manual_customer_bank_reference, "CUSTOMER-DUP-REF")
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.duplicate_rejected",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
+
     def test_finance_can_confirm_customer_submitted_bank_transfer_notice(self):
         payment_record = PaymentRecord.objects.create(
             invoice=self.invoice,
@@ -807,6 +861,168 @@ class StripePaymentsPhaseTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("Payment Status: Successful", mail.outbox[0].body)
         self.assertIn(self.invoice.invoice_number, mail.outbox[0].body)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    @patch("payments.views.construct_webhook_event")
+    def test_second_stripe_attempt_cannot_finalize_paid_invoice(self, construct_event_mock):
+        first_payment = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-WEBHOOK-DUP-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_duplicate_first",
+        )
+        second_payment = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-WEBHOOK-DUP-002",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_duplicate_second",
+        )
+        first_event = {
+            "id": "evt_test_duplicate_first",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_duplicate_first",
+                    "payment_status": "paid",
+                    "payment_intent": "pi_test_duplicate_first",
+                    "metadata": {"payment_record_id": str(first_payment.id)},
+                }
+            },
+        }
+        second_event = {
+            "id": "evt_test_duplicate_second",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_duplicate_second",
+                    "payment_status": "paid",
+                    "payment_intent": "pi_test_duplicate_second",
+                    "metadata": {"payment_record_id": str(second_payment.id)},
+                }
+            },
+        }
+        construct_event_mock.side_effect = [first_event, second_event]
+
+        first_response = self.client.post(
+            reverse("payment-stripe-webhook"),
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="t=123,v1=abc",
+        )
+        second_response = self.client.post(
+            reverse("payment-stripe-webhook"),
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="t=123,v1=abc",
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.invoice.refresh_from_db()
+        first_payment.refresh_from_db()
+        second_payment.refresh_from_db()
+        second_event_record = StripeWebhookEvent.objects.get(event_id="evt_test_duplicate_second")
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(first_payment.status, PaymentRecord.STATUS_SUCCEEDED)
+        self.assertEqual(second_payment.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(second_payment.external_transaction_id, "pi_test_duplicate_second")
+        self.assertEqual(second_event_record.status, StripeWebhookEvent.STATUS_IGNORED)
+        self.assertEqual(
+            PaymentRecord.objects.filter(
+                invoice=self.invoice,
+                status=PaymentRecord.STATUS_SUCCEEDED,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            EmailDeliveryLog.objects.filter(
+                template_key="stripe_payment_success_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).count(),
+            1,
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="payment.duplicate_rejected",
+                target_type="invoice",
+                target_id=str(self.invoice.id),
+            ).exists()
+        )
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    @patch("payments.views.construct_webhook_event")
+    def test_stripe_webhook_cannot_replace_confirmed_bank_transfer(self, construct_event_mock):
+        manual_payment = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-INV-STRIPE-1001-SUCCEEDED",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            paid_at=timezone.now(),
+            manual_received_amount=self.invoice.total_amount,
+            manual_received_date=timezone.localdate(),
+            manual_bank_reference="BANK-WON-FIRST",
+        )
+        stripe_payment = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-STRIPE-AFTER-BANK",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_after_bank_1",
+        )
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        construct_event_mock.return_value = {
+            "id": "evt_test_after_bank_1",
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_after_bank_1",
+                    "payment_status": "paid",
+                    "payment_intent": "pi_test_after_bank_1",
+                    "metadata": {"payment_record_id": str(stripe_payment.id)},
+                }
+            },
+        }
+
+        response = self.client.post(
+            reverse("payment-stripe-webhook"),
+            data=b"{}",
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE="t=123,v1=abc",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        manual_payment.refresh_from_db()
+        stripe_payment.refresh_from_db()
+        event = StripeWebhookEvent.objects.get(event_id="evt_test_after_bank_1")
+        self.assertEqual(manual_payment.status, PaymentRecord.STATUS_SUCCEEDED)
+        self.assertEqual(stripe_payment.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(stripe_payment.external_transaction_id, "pi_test_after_bank_1")
+        self.assertEqual(event.status, StripeWebhookEvent.STATUS_IGNORED)
+        self.assertEqual(
+            PaymentRecord.objects.filter(
+                invoice=self.invoice,
+                status=PaymentRecord.STATUS_SUCCEEDED,
+            ).count(),
+            1,
+        )
 
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
@@ -1506,6 +1722,54 @@ class StripePaymentsPhaseTests(TestCase):
         DEFAULT_FROM_EMAIL="billing@example.com",
     )
     @patch("payments.views.retrieve_checkout_session")
+    def test_repeated_success_page_does_not_duplicate_payment_email(self, retrieve_session_mock):
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-SUCCESS-REPEAT-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_success_repeat_1",
+        )
+        retrieve_session_mock.return_value = Mock(
+            payment_status="paid",
+            payment_intent="pi_test_success_repeat_1",
+            amount_total=10900,
+            currency="sgd",
+            metadata={},
+        )
+
+        first = self.client.get(
+            reverse("payment-checkout-success"),
+            data={"session_id": payment_record.stripe_checkout_session_id},
+        )
+        second = self.client.get(
+            reverse("payment-checkout-success"),
+            data={"session_id": payment_record.stripe_checkout_session_id},
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.invoice.refresh_from_db()
+        payment_record.refresh_from_db()
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PAID)
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_SUCCEEDED)
+        self.assertEqual(
+            EmailDeliveryLog.objects.filter(
+                template_key="stripe_payment_success_invoice_email_v1",
+                related_object_id=str(self.invoice.id),
+                status=EmailDeliveryLog.STATUS_SENT,
+            ).count(),
+            1,
+        )
+        self.assertEqual(len(mail.outbox), 1)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    @patch("payments.views.retrieve_checkout_session")
     def test_success_page_rejects_amount_mismatch(self, retrieve_session_mock):
         payment_record = PaymentRecord.objects.create(
             invoice=self.invoice,
@@ -1603,6 +1867,99 @@ class StripePaymentsPhaseTests(TestCase):
                 initiated_by=self.customer_user,
             )
         self.assertEqual(PaymentRecord.objects.count(), 0)
+
+    @override_settings(STRIPE_SECRET_KEY="sk_test_guardrails")
+    @patch("payments.services._import_stripe")
+    def test_create_checkout_reuses_existing_pending_stripe_session(self, import_stripe_mock):
+        existing_payment = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-REUSE-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_PENDING,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_reuse_1",
+        )
+        stripe_mock = Mock()
+        import_stripe_mock.return_value = stripe_mock
+
+        payment_record = create_checkout_for_invoice(
+            invoice=self.invoice,
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            initiated_by=self.customer_user,
+        )
+
+        self.assertEqual(payment_record.id, existing_payment.id)
+        stripe_mock.checkout.Session.create.assert_not_called()
+        self.assertEqual(
+            PaymentRecord.objects.filter(
+                invoice=self.invoice,
+                provider=PaymentRecord.PROVIDER_STRIPE,
+            ).count(),
+            1,
+        )
+
+    @override_settings(STRIPE_SECRET_KEY="sk_test_guardrails")
+    @patch("payments.services._import_stripe")
+    def test_failed_and_cancelled_stripe_records_do_not_block_later_checkout(self, import_stripe_mock):
+        PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-FAILED-OLD-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_FAILED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_failed_old_1",
+        )
+        PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-CANCELLED-OLD-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_CANCELLED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            stripe_checkout_session_id="cs_test_cancelled_old_1",
+        )
+        stripe_mock = Mock()
+        stripe_mock.checkout.Session.create.return_value = Mock(
+            id="cs_test_later_valid_1",
+            payment_intent="pi_test_later_valid_1",
+        )
+        import_stripe_mock.return_value = stripe_mock
+
+        payment_record = create_checkout_for_invoice(
+            invoice=self.invoice,
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            initiated_by=self.customer_user,
+        )
+
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PENDING)
+        self.assertEqual(payment_record.stripe_checkout_session_id, "cs_test_later_valid_1")
+        stripe_mock.checkout.Session.create.assert_called_once()
+
+    def test_paid_invoice_cannot_start_another_checkout(self):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-PAID-BLOCK-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            paid_at=timezone.now(),
+            stripe_checkout_session_id="cs_test_paid_block_1",
+        )
+
+        with self.assertRaises(ValueError):
+            create_checkout_for_invoice(
+                invoice=self.invoice,
+                success_url="https://example.com/success",
+                cancel_url="https://example.com/cancel",
+                initiated_by=self.customer_user,
+            )
 
     def test_refund_endpoint_denies_customer_role(self):
         self.client.login(username="customer_stripe", password="TempPass123!")
