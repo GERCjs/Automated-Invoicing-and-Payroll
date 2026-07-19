@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Payslip Template Settings | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Payslip Template Settings</h1>
+                <p class="page-subtitle">Update the company information and branding shown on payslip PDFs.</p>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">PDF Branding</div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.company_display_name.id_for_label }}">Company Display Name</label>
+                        {{ form.company_display_name }}
+                        {% for error in form.company_display_name.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.company_address.id_for_label }}">Company Address</label>
+                        {{ form.company_address }}
+                        {% for error in form.company_address.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ form.company_email.id_for_label }}">Company Email</label>
+                            {{ form.company_email }}
+                            {% for error in form.company_email.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ form.company_phone.id_for_label }}">Company Phone</label>
+                            {{ form.company_phone }}
+                            {% for error in form.company_phone.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-0">
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ form.company_registration_number.id_for_label }}">Registration Number</label>
+                            {{ form.company_registration_number }}
+                            {% for error in form.company_registration_number.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ form.logo_position.id_for_label }}">Logo Position</label>
+                            {{ form.logo_position }}
+                            {% for error in form.logo_position.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-0">
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ form.header_text.id_for_label }}">Optional Header Text</label>
+                            {{ form.header_text }}
+                            {% for error in form.header_text.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ form.footer_text.id_for_label }}">Footer Note</label>
+                            {{ form.footer_text }}
+                            {% for error in form.footer_text.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        </div>
+                    </div>
+                    <div class="mb-3 mt-3">
+                        <label class="form-label" for="{{ form.logo.id_for_label }}">Optional Logo</label>
+                        {{ form.logo }}
+                        <div class="form-text">Accepted file types: PNG or JPEG. Maximum size: 2 MB.</div>
+                        {% for error in form.logo.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        {% if template_settings.has_logo_file %}
+                        <div class="small text-muted mt-2">Current logo: <a href="{{ template_settings.logo.url }}" target="_blank">Open uploaded logo</a></div>
+                        {% endif %}
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="{{ form.logo_size.id_for_label }}">Logo Size</label>
+                            {{ form.logo_size }}
+                            {% for error in form.logo_size.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-primary">Save Settings</button>
+                        <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-secondary">Back to Payroll Dashboard</a>
+                    </div>
+                </form>
+                {% if template_settings.updated_by %}
+                <p class="text-muted small mt-3 mb-0">Last updated by {{ template_settings.updated_by.username }} on {{ template_settings.updated_at|date:"Y-m-d H:i" }}.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

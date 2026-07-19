@@ -1,7 +1,20 @@
 from django import forms
 from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.core.files.uploadedfile import UploadedFile
+from django.db.models.fields.files import FieldFile
+from PIL import Image as PilImage
+from PIL import UnidentifiedImageError
 
-from .models import Employee, PayrollRecord
+from .models import Employee, PayrollRecord, PayrollTemplateSettings
+
+
+def _format_file_size_limit(max_bytes: int) -> str:
+    if max_bytes >= 1024 * 1024:
+        return f"{max_bytes // (1024 * 1024)} MB"
+    if max_bytes >= 1024:
+        return f"{max_bytes // 1024} KB"
+    return f"{max_bytes} bytes"
 
 
 class PayrollUploadForm(forms.Form):
@@ -244,7 +257,9 @@ class EmployeeForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._linked_user = getattr(self.instance, "user", None)
         self.fields["date_of_appointment"].required = True
+        self.fields["bank_name"].widget.attrs["class"] = "form-select"
         if self.instance and self.instance.pk:
             if self.instance.date_of_birth:
                 self.initial["date_of_birth"] = self.instance.date_of_birth.strftime("%d-%m-%Y")
@@ -280,3 +295,96 @@ class EmployeeForm(forms.ModelForm):
         if commit:
             employee.save()
         return employee
+
+
+class PayrollTemplateSettingsForm(forms.ModelForm):
+    logo = forms.FileField(
+        required=False,
+        widget=forms.ClearableFileInput(attrs={"class": "form-control", "accept": ".png,.jpg,.jpeg"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        self.stale_logo_missing = False
+        super().__init__(*args, **kwargs)
+
+    class Meta:
+        model = PayrollTemplateSettings
+        fields = [
+            "company_display_name",
+            "company_address",
+            "company_email",
+            "company_phone",
+            "company_registration_number",
+            "header_text",
+            "footer_text",
+            "logo",
+            "logo_size",
+            "logo_position",
+        ]
+        widgets = {
+            "company_display_name": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "Company name shown on payslip PDFs"}
+            ),
+            "company_address": forms.Textarea(
+                attrs={"class": "form-control", "rows": 4, "placeholder": "Company address shown on payslip PDFs"}
+            ),
+            "company_email": forms.EmailInput(
+                attrs={"class": "form-control", "placeholder": "hr@example.com"}
+            ),
+            "company_phone": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "+65 6000 0000"}
+            ),
+            "company_registration_number": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "Company registration number"}
+            ),
+            "header_text": forms.Textarea(
+                attrs={"class": "form-control", "rows": 2, "placeholder": "Optional subtitle text below the payslip title"}
+            ),
+            "footer_text": forms.Textarea(
+                attrs={"class": "form-control", "rows": 3, "placeholder": "Optional footer note shown at the bottom of payslip PDFs"}
+            ),
+            "logo_size": forms.Select(attrs={"class": "form-select"}),
+            "logo_position": forms.Select(attrs={"class": "form-select"}),
+        }
+
+    def clean_logo(self):
+        logo = self.cleaned_data.get("logo")
+        if logo is False or not logo:
+            return logo
+
+        if isinstance(logo, FieldFile):
+            if not logo.name:
+                return logo
+            try:
+                logo_exists = logo.storage.exists(logo.name)
+            except (NotImplementedError, OSError, ValueError):
+                logo_exists = False
+            if not logo_exists:
+                self.stale_logo_missing = True
+                return False
+            return logo
+
+        if not isinstance(logo, UploadedFile):
+            return logo
+
+        max_bytes = int(getattr(settings, "PAYROLL_TEMPLATE_LOGO_MAX_UPLOAD_BYTES", 2097152))
+        if logo.size > max_bytes:
+            raise forms.ValidationError(f"Logo exceeds the maximum file size of {_format_file_size_limit(max_bytes)}.")
+
+        file_name = (getattr(logo, "name", "") or "").strip().lower()
+        if not file_name.endswith((".png", ".jpg", ".jpeg")):
+            raise forms.ValidationError("Upload a PNG or JPEG image.")
+
+        try:
+            image = PilImage.open(logo)
+            image_format = (image.format or "").upper()
+            image.verify()
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise forms.ValidationError("Upload a PNG or JPEG image.")
+        finally:
+            logo.seek(0)
+
+        if image_format not in {"PNG", "JPEG"}:
+            raise forms.ValidationError("Upload a PNG or JPEG image.")
+
+        return logo

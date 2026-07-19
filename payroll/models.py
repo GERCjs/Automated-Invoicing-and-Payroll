@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import FileExtensionValidator
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import F, Q
@@ -333,3 +334,81 @@ class PayrollRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.employee_id} - {self.employee_name}"
+
+
+class PayrollTemplateSettings(models.Model):
+    LOGO_SIZE_SMALL = "small"
+    LOGO_SIZE_MEDIUM = "medium"
+    LOGO_SIZE_LARGE = "large"
+    LOGO_SIZE_CHOICES = [
+        (LOGO_SIZE_SMALL, "Small"),
+        (LOGO_SIZE_MEDIUM, "Medium"),
+        (LOGO_SIZE_LARGE, "Large"),
+    ]
+
+    LOGO_POSITION_LEFT = "left"
+    LOGO_POSITION_CENTRE = "centre"
+    LOGO_POSITION_RIGHT = "right"
+    LOGO_POSITION_CHOICES = [
+        (LOGO_POSITION_LEFT, "Left"),
+        (LOGO_POSITION_CENTRE, "Centre"),
+        (LOGO_POSITION_RIGHT, "Right"),
+    ]
+
+    company_display_name = models.CharField(max_length=255, blank=True, default="")
+    company_address = models.TextField(blank=True, default="")
+    company_email = models.EmailField(blank=True, default="")
+    company_phone = models.CharField(max_length=50, blank=True, default="")
+    company_registration_number = models.CharField(max_length=100, blank=True, default="")
+    header_text = models.TextField(blank=True, default="")
+    footer_text = models.TextField(blank=True, default="")
+    logo = models.ImageField(
+        upload_to="payroll_branding/logos/",
+        blank=True,
+        default="",
+        validators=[FileExtensionValidator(allowed_extensions=["png", "jpg", "jpeg"])],
+    )
+    logo_size = models.CharField(
+        max_length=10,
+        choices=LOGO_SIZE_CHOICES,
+        default=LOGO_SIZE_MEDIUM,
+    )
+    logo_position = models.CharField(
+        max_length=10,
+        choices=LOGO_POSITION_CHOICES,
+        default=LOGO_POSITION_LEFT,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payroll_template_settings_updates",
+        db_constraint=False,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "payroll_template_settings"
+        verbose_name = "Payroll template settings"
+        verbose_name_plural = "Payroll template settings"
+
+    def __str__(self) -> str:
+        return "Payroll template settings"
+
+    def has_logo_file(self) -> bool:
+        if not self.logo or not self.logo.name:
+            return False
+        try:
+            return self.logo.storage.exists(self.logo.name)
+        except (NotImplementedError, OSError, ValueError):
+            return False
+
+    @classmethod
+    def load(cls):
+        settings_obj, _ = cls.objects.get_or_create(pk=1)
+        return settings_obj
+
+    @classmethod
+    def current(cls):
+        return cls.objects.order_by("-updated_at", "-pk").first()

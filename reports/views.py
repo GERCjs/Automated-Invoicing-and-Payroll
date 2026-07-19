@@ -1,4 +1,5 @@
 from urllib.parse import urlencode
+from datetime import date
 
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import get_user_model
@@ -74,6 +75,22 @@ def _recent_month_starts(today, total_months=6):
             month += 12
             year -= 1
         month_starts.append(month_start.replace(year=year, month=month, day=1))
+    return month_starts
+
+
+def _month_starts_from_anchor(anchor_month, end_month):
+    start_month = anchor_month.replace(day=1)
+    final_month = end_month.replace(day=1)
+    month_starts = []
+    current_month = start_month
+
+    while current_month <= final_month:
+        month_starts.append(current_month)
+        if current_month.month == 12:
+            current_month = current_month.replace(year=current_month.year + 1, month=1, day=1)
+        else:
+            current_month = current_month.replace(month=current_month.month + 1, day=1)
+
     return month_starts
 
 
@@ -1251,7 +1268,8 @@ def payroll_report(request):
     employee_cpf_total_month = _safe_sum(month_records, "cpf_contribution")
     employees_paid_month = month_records.values("employee_id").distinct().count()
 
-    month_starts = _recent_month_starts(today, total_months=6)
+    trend_anchor_month = date(2026, 1, 1)
+    month_starts = _month_starts_from_anchor(trend_anchor_month, month_start)
     payroll_monthly_labels = [month.strftime("%b %Y") for month in month_starts]
     month_keys = [month.strftime("%Y-%m") for month in month_starts]
 

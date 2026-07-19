@@ -466,6 +466,12 @@ textarea.form-control {
     padding: 0.58rem 0.78rem;
 }
 
+.form-select {
+    padding-right: 2.4rem;
+    background-position: right 0.8rem center;
+    background-size: 16px 12px;
+}
+
 .form-control:focus,
 .form-select:focus,
 textarea.form-control:focus {
@@ -798,21 +804,21 @@ textarea.form-control:focus {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.employee-dashboard-page .employee-status-panels {
+.payroll-dashboard-page .employee-status-panels {
     display: grid;
     gap: 0.9rem;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 0 1.15rem 1.15rem;
 }
 
-.employee-dashboard-page .employee-payment-panels {
+.payroll-dashboard-page .employee-payment-panels {
     display: grid;
     gap: 0.9rem;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     padding: 0 1.15rem 1.15rem;
 }
 
-.employee-dashboard-page .employee-payment-panel {
+.payroll-dashboard-page .employee-payment-panel {
     background: #fafbfd;
     border: 1px solid var(--portal-border);
     border-radius: 12px;
@@ -820,25 +826,26 @@ textarea.form-control:focus {
     flex-direction: column;
     min-height: 220px;
     overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
-.employee-dashboard-page .employee-payment-panel-giro {
+.payroll-dashboard-page .employee-payment-panel-giro {
     border-top: 4px solid #0d6efd;
 }
 
-.employee-dashboard-page .employee-payment-panel-cash {
+.payroll-dashboard-page .employee-payment-panel-cash {
     border-top: 4px solid #198754;
 }
 
-.employee-dashboard-page .employee-payment-panel-cheque {
+.payroll-dashboard-page .employee-payment-panel-cheque {
     border-top: 4px solid #f59f00;
 }
 
-.employee-dashboard-page .employee-payment-panel-unset {
+.payroll-dashboard-page .employee-payment-panel-unset {
     border-top: 4px solid #6c757d;
 }
 
-.employee-dashboard-page .employee-payment-panel-head {
+.payroll-dashboard-page .employee-payment-panel-head {
     align-items: flex-start;
     display: flex;
     gap: 0.75rem;
@@ -846,7 +853,7 @@ textarea.form-control:focus {
     padding: 0.95rem 1rem 0.8rem;
 }
 
-.employee-dashboard-page .employee-payment-panel-title {
+.payroll-dashboard-page .employee-payment-panel-title {
     color: var(--portal-muted);
     font-size: 0.82rem;
     font-weight: 800;
@@ -854,7 +861,7 @@ textarea.form-control:focus {
     text-transform: uppercase;
 }
 
-.employee-dashboard-page .employee-payment-panel-count {
+.payroll-dashboard-page .employee-payment-panel-count {
     color: var(--portal-heading);
     font-size: 1.6rem;
     font-weight: 700;
@@ -862,7 +869,7 @@ textarea.form-control:focus {
     margin-top: 0.25rem;
 }
 
-.employee-dashboard-page .employee-payment-list {
+.payroll-dashboard-page .employee-payment-list {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -871,7 +878,7 @@ textarea.form-control:focus {
     padding: 0 1rem 1rem;
 }
 
-.employee-dashboard-page .employee-payment-person {
+.payroll-dashboard-page .employee-payment-person {
     background: #ffffff;
     border: 1px solid #dde4ec;
     border-radius: 10px;
@@ -881,31 +888,33 @@ textarea.form-control:focus {
     padding: 0.7rem 0.8rem;
 }
 
-.employee-dashboard-page .employee-payment-person:hover,
-.employee-dashboard-page .employee-payment-person:focus {
+.payroll-dashboard-page .employee-payment-person:hover,
+.payroll-dashboard-page .employee-payment-person:focus {
     background: #f8fafc;
     border-color: #b8c4d3;
     color: #1f2937;
+    box-shadow: 0 8px 18px rgba(23, 31, 45, 0.08);
 }
 
-.employee-dashboard-page .employee-payment-person-name {
+.payroll-dashboard-page .employee-payment-person-name {
     color: #1f2937;
     font-size: 0.92rem;
     font-weight: 700;
 }
 
-.employee-dashboard-page .employee-payment-person-meta {
+.payroll-dashboard-page .employee-payment-person-meta {
     color: #64748b;
     font-size: 0.82rem;
+    line-height: 1.45;
 }
 
-.employee-dashboard-page .employee-payment-empty {
+.payroll-dashboard-page .employee-payment-empty {
     color: #64748b;
     font-size: 0.9rem;
     padding: 0.3rem 0.1rem;
 }
 
-.employee-dashboard-page .employee-status-panel {
+.payroll-dashboard-page .employee-status-panel {
     background: #fafbfd;
     border: 1px solid var(--portal-border);
     border-radius: 12px;
@@ -913,17 +922,18 @@ textarea.form-control:focus {
     flex-direction: column;
     min-height: 220px;
     overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
-.employee-dashboard-page .employee-status-panel-active {
+.payroll-dashboard-page .employee-status-panel-active {
     border-top: 4px solid #198754;
 }
 
-.employee-dashboard-page .employee-status-panel-inactive {
+.payroll-dashboard-page .employee-status-panel-inactive {
     border-top: 4px solid #6c757d;
 }
 
-.employee-dashboard-page .employee-status-panel-head {
+.payroll-dashboard-page .employee-status-panel-head {
     align-items: flex-start;
     display: flex;
     gap: 0.75rem;
@@ -931,7 +941,7 @@ textarea.form-control:focus {
     padding: 0.95rem 1rem 0.8rem;
 }
 
-.employee-dashboard-page .employee-status-panel-title {
+.payroll-dashboard-page .employee-status-panel-title {
     color: var(--portal-muted);
     font-size: 0.82rem;
     font-weight: 800;
@@ -939,7 +949,7 @@ textarea.form-control:focus {
     text-transform: uppercase;
 }
 
-.employee-dashboard-page .employee-status-panel-count {
+.payroll-dashboard-page .employee-status-panel-count {
     color: var(--portal-heading);
     font-size: 1.6rem;
     font-weight: 700;
@@ -947,7 +957,7 @@ textarea.form-control:focus {
     margin-top: 0.25rem;
 }
 
-.employee-dashboard-page .employee-status-list {
+.payroll-dashboard-page .employee-status-list {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -956,7 +966,7 @@ textarea.form-control:focus {
     padding: 0 1rem 1rem;
 }
 
-.employee-dashboard-page .employee-status-person {
+.payroll-dashboard-page .employee-status-person {
     background: #ffffff;
     border: 1px solid #dde4ec;
     border-radius: 10px;
@@ -966,25 +976,27 @@ textarea.form-control:focus {
     padding: 0.7rem 0.8rem;
 }
 
-.employee-dashboard-page .employee-status-person:hover,
-.employee-dashboard-page .employee-status-person:focus {
+.payroll-dashboard-page .employee-status-person:hover,
+.payroll-dashboard-page .employee-status-person:focus {
     background: #f8fafc;
     border-color: #b8c4d3;
     color: #1f2937;
+    box-shadow: 0 8px 18px rgba(23, 31, 45, 0.08);
 }
 
-.employee-dashboard-page .employee-status-person-name {
+.payroll-dashboard-page .employee-status-person-name {
     color: #1f2937;
     font-size: 0.92rem;
     font-weight: 700;
 }
 
-.employee-dashboard-page .employee-status-person-meta {
+.payroll-dashboard-page .employee-status-person-meta {
     color: #64748b;
     font-size: 0.82rem;
+    line-height: 1.45;
 }
 
-.employee-dashboard-page .employee-status-empty {
+.payroll-dashboard-page .employee-status-empty {
     color: #64748b;
     font-size: 0.9rem;
     padding: 0.3rem 0.1rem;
@@ -993,6 +1005,27 @@ textarea.form-control:focus {
 .invoice-report-filters .form-control,
 .invoice-report-filters .form-select {
     min-height: 46px;
+}
+
+.employee-list-container {
+    max-width: 1520px;
+}
+
+.employee-list-page .card-body {
+    padding: 1.25rem 1.35rem;
+}
+
+.employee-list-page .table-clean th:last-child,
+.employee-list-page .table-clean td:last-child {
+    min-width: 190px;
+}
+
+.employee-list-page .employee-action-group {
+    min-width: 170px;
+}
+
+.employee-list-page .employee-action-group form {
+    margin: 0;
 }
 
 .report-kpi-card .card-body {
@@ -1402,6 +1435,144 @@ textarea.form-control:focus {
 
 .invoice-dashboard-page .invoice-dashboard-actions .btn {
     min-height: 44px;
+}
+
+.payroll-dashboard-page .payroll-dashboard-actions {
+    align-items: stretch;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(260px, 0.9fr);
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel {
+    background: #ffffff;
+    border: 1px solid var(--portal-border);
+    border-radius: 18px;
+    box-shadow: var(--portal-shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    min-width: 0;
+    padding: 1rem 1.05rem 1.05rem;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-payroll {
+    background:
+        linear-gradient(180deg, rgba(255, 127, 115, 0.12) 0%, rgba(255, 255, 255, 0) 100%),
+        #ffffff;
+    border-color: #f0c1bb;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-employee {
+    background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.05) 0%, rgba(255, 255, 255, 0) 100%),
+        #ffffff;
+    border-color: #d6dee8;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-filter {
+    background:
+        linear-gradient(180deg, rgba(51, 65, 85, 0.05) 0%, rgba(255, 255, 255, 0) 100%),
+        #ffffff;
+    border-color: #d9e2ec;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-eyebrow {
+    color: #7c5a55;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-employee .payroll-dashboard-action-eyebrow {
+    color: #526174;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-filter .payroll-dashboard-action-eyebrow {
+    color: #5f6f83;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-title {
+    color: var(--portal-heading);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-group {
+    display: grid;
+    gap: 0.65rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.payroll-dashboard-page .payroll-dashboard-actions .btn {
+    align-items: center;
+    border-radius: 12px;
+    display: inline-flex;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 0;
+    padding: 0.7rem 1rem;
+    text-align: center;
+    white-space: normal;
+}
+
+.payroll-dashboard-page .payroll-dashboard-filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+
+.payroll-dashboard-page .payroll-dashboard-filter-field .form-label {
+    font-size: 0.8rem;
+}
+
+.payroll-dashboard-page .payroll-dashboard-filter-form .form-control {
+    min-height: 40px;
+    padding: 0.5rem 0.72rem;
+}
+
+.payroll-dashboard-page .payroll-dashboard-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.payroll-dashboard-page .payroll-dashboard-filter-actions .btn {
+    min-height: 38px;
+    padding: 0.48rem 0.85rem;
+    white-space: nowrap;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-payroll .btn-outline-dark {
+    border-color: #d9c6c2;
+    color: #5b4743;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-payroll .btn-outline-dark:hover,
+.payroll-dashboard-page .payroll-dashboard-action-panel-payroll .btn-outline-dark:focus {
+    background: #fff5f3;
+    border-color: #cfa39b;
+    color: #473632;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-employee .btn-outline-dark {
+    border-color: #cfd7e3;
+    color: #344154;
+}
+
+.payroll-dashboard-page .payroll-dashboard-action-panel-employee .btn-outline-dark:hover,
+.payroll-dashboard-page .payroll-dashboard-action-panel-employee .btn-outline-dark:focus {
+    background: #f7fafc;
+    border-color: #adb8c7;
+    color: #1f2937;
 }
 
 .invoice-dashboard-page .report-attention-table .table th,
@@ -1853,6 +2024,19 @@ textarea.form-control:focus {
         justify-content: flex-start;
     }
 
+    .payroll-dashboard-page .payroll-dashboard-actions {
+        grid-template-columns: 1fr;
+        width: 100%;
+    }
+
+    .payroll-dashboard-page .payroll-dashboard-action-group {
+        grid-template-columns: 1fr;
+    }
+
+    .payroll-dashboard-page .payroll-dashboard-actions .btn {
+        justify-content: flex-start;
+    }
+
     .report-summary-strip,
     .report-detail-links-list,
     .report-chart-summary {
@@ -1863,12 +2047,12 @@ textarea.form-control:focus {
         grid-template-columns: 1fr;
     }
 
-    .employee-dashboard-page .employee-status-panels {
+    .payroll-dashboard-page .employee-status-panels {
         grid-template-columns: 1fr;
         padding: 0 1rem 1rem;
     }
 
-    .employee-dashboard-page .employee-payment-panels {
+    .payroll-dashboard-page .employee-payment-panels {
         grid-template-columns: 1fr;
         padding: 0 1rem 1rem;
     }

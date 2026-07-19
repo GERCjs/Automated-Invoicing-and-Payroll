@@ -16,40 +16,46 @@
                 <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
             </div>
         </div>
-        <div class="report-header-actions invoice-dashboard-actions">
-            <a href="{% url 'employee-create' %}" class="btn btn-outline-dark">Add New Employee</a>
-            <a href="{% url 'payroll-create' %}" class="btn btn-primary">Create Payslip Record</a>
-            <a href="{% url 'employee-upload-preview' %}" class="btn btn-outline-dark">Bulk Add Employees</a>
-            <a href="{% url 'payroll-upload-preview' %}" class="btn btn-outline-primary">Bulk Add Payslips</a>
-            <a href="{% url 'payroll-list' %}{{ payroll_list_query }}" class="btn btn-outline-dark">View Payroll List</a>
-            <a href="{% url 'employee-list' %}" class="btn btn-outline-dark">View Employee List</a>
-            <a href="{% url 'payroll-report' %}{{ payroll_report_query }}" class="btn btn-outline-secondary">Payroll / Payslip Report</a>
-        </div>
-    </section>
-
-    <section class="report-section">
-        <div class="card">
-            <div class="card-body">
-                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                    <h2 class="section-heading mb-0">Filters</h2>
-                    <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
+        <div class="report-header-actions payroll-dashboard-actions">
+            <div class="payroll-dashboard-action-panel payroll-dashboard-action-panel-payroll">
+                <div class="payroll-dashboard-action-panel-head">
+                    <span class="payroll-dashboard-action-eyebrow">Payroll</span>
                 </div>
-                <form method="get" class="row g-3 align-items-end invoice-report-filters">
-                    <div class="col-12 col-md-4 col-lg-3">
-                        <label for="payrollDashboardMonth" class="form-label">Payroll Month</label>
+                <div class="payroll-dashboard-action-group">
+                    <a href="{% url 'payroll-create' %}" class="btn btn-primary">Create Payslip Record</a>
+                    <a href="{% url 'payroll-upload-preview' %}" class="btn btn-outline-primary">Bulk Add Payslips</a>
+                    <a href="{% url 'payroll-list' %}{{ payroll_list_query }}" class="btn btn-outline-dark">View Payroll List</a>
+                    <a href="{% url 'payroll-report' %}{{ payroll_report_query }}" class="btn btn-outline-secondary">Payroll / Payslip Report</a>
+                </div>
+            </div>
+            <div class="payroll-dashboard-action-panel payroll-dashboard-action-panel-employee">
+                <div class="payroll-dashboard-action-panel-head">
+                    <span class="payroll-dashboard-action-eyebrow">Employees</span>
+                </div>
+                <div class="payroll-dashboard-action-group">
+                    <a href="{% url 'employee-create' %}" class="btn btn-outline-dark">Add New Employee</a>
+                    <a href="{% url 'employee-upload-preview' %}" class="btn btn-outline-dark">Bulk Add Employees</a>
+                    <a href="{% url 'employee-list' %}" class="btn btn-outline-dark">View Employee List</a>
+                </div>
+            </div>
+            <div class="payroll-dashboard-action-panel payroll-dashboard-action-panel-filter">
+                <div class="payroll-dashboard-action-panel-head">
+                    <span class="payroll-dashboard-action-eyebrow">Filters</span>
+                </div>
+                <form method="get" class="payroll-dashboard-filter-form">
+                    <div class="payroll-dashboard-filter-field">
+                        <label for="payrollDashboardMonth" class="form-label mb-1">Payroll Month</label>
                         <input
                             id="payrollDashboardMonth"
                             type="month"
                             name="month"
                             value="{{ selected_month }}"
-                            class="form-control"
+                            class="form-control form-control-sm"
                         >
                     </div>
-                    <div class="col-12">
-                        <div class="d-flex flex-wrap gap-2">
-                            <button type="submit" class="btn btn-primary">Apply Filters</button>
-                            <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-secondary">Clear Filters</a>
-                        </div>
+                    <div class="payroll-dashboard-filter-actions">
+                        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                        <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-secondary btn-sm">Clear</a>
                     </div>
                 </form>
             </div>
@@ -57,8 +63,21 @@
     </section>
 
     <section class="report-section">
-        <h2 class="section-heading mb-3">Payroll Snapshot</h2>
-        <div class="row g-3 report-kpi-grid">
+        <div class="report-summary-strip payroll-dashboard-summary-strip">
+            {% for item in secondary_summary_items %}
+            <div class="report-summary-card">
+                <div class="report-summary-label">{{ item.label }}</div>
+                <div class="report-summary-value">{{ item.value }}</div>
+                <div class="report-summary-note">{{ item.note }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="report-section">
+        <h2 class="section-heading mb-1">Payroll Overview</h2>
+        <p class="page-subtitle mb-3">Snapshot and charts for payroll cost, salary mix, and month-to-month payroll movement.</p>
+        <div class="row g-3 report-kpi-grid mb-4">
             <div class="col-12 col-md-6 col-xl-4">
                 <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
                     <div class="card-body">
@@ -90,11 +109,81 @@
                 </div>
             </div>
         </div>
+        <div class="row g-3 mb-4">
+            <div class="col-lg-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Payroll Cost Trend</div>
+                    <div class="report-chart-body">
+                        <canvas id="payrollDashboardTrendChart" class="report-chart-canvas" aria-label="Payroll cost trend chart" role="img"></canvas>
+                        <div id="payrollDashboardTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Shows payroll cost from January 2026 onward using basic salary and allowances so the team can track month-to-month changes without losing the early baseline.</div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Payroll Mix Snapshot</div>
+                    <div class="report-chart-body">
+                        <canvas id="payrollDashboardMixChart" class="report-chart-canvas" aria-label="Payroll mix chart" role="img"></canvas>
+                        <div id="payrollDashboardMixChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Compares salary, allowances, CPF deduction, and net salary totals for the selected payroll month.</div>
+                </div>
+            </div>
+        </div>
     </section>
 
     <section class="report-section">
-        <h2 class="section-heading mb-3">Employee Snapshot</h2>
-        <div class="row g-3 report-kpi-grid">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Recent Payroll Records Requiring Action</span>
+                <span class="text-muted small">{{ reporting_period_label }}</span>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_action_records %}
+                <div class="table-responsive report-attention-table">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Payment Date</th>
+                                <th class="text-end">Deductions</th>
+                                <th class="text-end">Net Salary</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in recent_action_records %}
+                            <tr>
+                                <td>
+                                    <div>{{ item.record.employee_name }}</div>
+                                    <div class="text-muted small">{{ item.record.employee_id }}</div>
+                                </td>
+                                <td>{{ item.record.payment_date|date:"d M Y" }}</td>
+                                <td class="text-end">S${{ item.record.deductions|floatformat:2|intcomma }}</td>
+                                <td class="text-end">S${{ item.record.net_salary|floatformat:2|intcomma }}</td>
+                                <td class="text-end">
+                                    <div class="invoice-dashboard-table-actions">
+                                        <a href="{% url 'payroll-detail' item.record.pk %}" class="report-link">View Record</a>
+                                        <a href="{% url 'payslip-pdf-download' item.record.pk %}" class="report-link">View Payslip</a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state m-3">No payroll records require action for the current dashboard view.</div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <h2 class="section-heading mb-1">Employee Overview</h2>
+        <p class="page-subtitle mb-3">Snapshot and charts for employee status, payment setup, and hiring activity.</p>
+        <div class="row g-3 report-kpi-grid mb-4">
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
                     <div class="card-body">
@@ -132,22 +221,6 @@
                 </div>
             </div>
         </div>
-    </section>
-
-    <section class="report-section">
-        <div class="report-summary-strip payroll-dashboard-summary-strip">
-            {% for item in secondary_summary_items %}
-            <div class="report-summary-card">
-                <div class="report-summary-label">{{ item.label }}</div>
-                <div class="report-summary-value">{{ item.value }}</div>
-                <div class="report-summary-note">{{ item.note }}</div>
-            </div>
-            {% endfor %}
-        </div>
-    </section>
-
-    <section class="report-section">
-        <h2 class="section-heading mb-3">Employee Monitoring</h2>
         <div class="row g-3 mb-4">
             <div class="col-lg-6">
                 <div class="report-chart-card">
@@ -299,79 +372,6 @@
             </div>
         </div>
     </section>
-
-    <section class="report-section">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <span>Recent Payroll Records Requiring Action</span>
-                <span class="text-muted small">{{ reporting_period_label }}</span>
-            </div>
-            <div class="card-body p-0">
-                {% if recent_action_records %}
-                <div class="table-responsive report-attention-table">
-                    <table class="table table-clean table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th>Employee</th>
-                                <th>Payment Date</th>
-                                <th class="text-end">Deductions</th>
-                                <th class="text-end">Net Salary</th>
-                                <th class="text-end">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in recent_action_records %}
-                            <tr>
-                                <td>
-                                    <div>{{ item.record.employee_name }}</div>
-                                    <div class="text-muted small">{{ item.record.employee_id }}</div>
-                                </td>
-                                <td>{{ item.record.payment_date|date:"d M Y" }}</td>
-                                <td class="text-end">S${{ item.record.deductions|floatformat:2|intcomma }}</td>
-                                <td class="text-end">S${{ item.record.net_salary|floatformat:2|intcomma }}</td>
-                                <td class="text-end">
-                                    <div class="invoice-dashboard-table-actions">
-                                        <a href="{% url 'payroll-detail' item.record.pk %}" class="report-link">View Record</a>
-                                        <a href="{% url 'payslip-pdf-download' item.record.pk %}" class="report-link">View Payslip</a>
-                                    </div>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <div class="report-empty-state m-3">No payroll records require action for the current dashboard view.</div>
-                {% endif %}
-            </div>
-        </div>
-    </section>
-
-    <section class="report-section">
-        <h2 class="section-heading mb-3">Analytical Charts</h2>
-        <div class="row g-3 mb-4">
-            <div class="col-lg-6">
-                <div class="report-chart-card">
-                    <div class="report-chart-header">Payroll Cost Trend</div>
-                    <div class="report-chart-body">
-                        <canvas id="payrollDashboardTrendChart" class="report-chart-canvas" aria-label="Payroll cost trend chart" role="img"></canvas>
-                        <div id="payrollDashboardTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-                    </div>
-                    <div class="px-3 pb-3 text-muted small">Shows payroll cost from January 2026 onward using basic salary and allowances so the team can track month-to-month changes without losing the early baseline.</div>
-                </div>
-            </div>
-            <div class="col-lg-6">
-                <div class="report-chart-card">
-                    <div class="report-chart-header">Payroll Mix Snapshot</div>
-                    <div class="report-chart-body">
-                        <canvas id="payrollDashboardMixChart" class="report-chart-canvas" aria-label="Payroll mix chart" role="img"></canvas>
-                        <div id="payrollDashboardMixChartEmpty" class="report-chart-empty d-none">No data available yet</div>
-                    </div>
-                    <div class="px-3 pb-3 text-muted small">Compares salary, allowances, CPF deduction, and net salary totals for the selected payroll month.</div>
-                </div>
-            </div>
-        </div>
-    </section>
 </div>
 
 {{ payroll_trend_labels|json_script:"payroll-dashboard-trend-labels" }}
@@ -385,7 +385,7 @@
 {{ hiring_trend_labels|json_script:"employee-hiring-trend-labels" }}
 {{ hiring_trend_values|json_script:"employee-hiring-trend-values" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
-<script src="{% static 'js/report_charts.js' %}"></script>
+<script src="{% static 'js/report_charts.js' %}?v=20260719a"></script>
 <script>
     (function () {
         var paymentMethodLabels = window.ReportCharts.parseJsonScript("employee-payment-method-labels", []);

@@ -178,7 +178,7 @@
                         <canvas id="payrollCostTrendChart" class="report-chart-canvas" aria-label="Monthly payroll cost trend chart" role="img"></canvas>
                         <div id="payrollCostTrendChartEmpty" class="report-chart-empty d-none">No payroll trend data is available yet.</div>
                     </div>
-                    <div class="px-3 text-muted small">Shows payroll cost across the last 6 months using salary and allowance totals.</div>
+                    <div class="px-3 text-muted small">Shows payroll cost from January 2026 onward using salary and allowance totals.</div>
                     {% if payroll_chart_summary.has_data %}
                     <div class="report-chart-summary">
                         <div class="report-chart-stat">
@@ -295,7 +295,7 @@
 {{ employee_cpf_total_month|json_script:"payroll-employee-cpf-data" }}
 {{ employer_cpf_total_month|json_script:"payroll-employer-cpf-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
-<script src="{% static 'js/report_charts.js' %}"></script>
+<script src="{% static 'js/report_charts.js' %}?v=20260719a"></script>
 <script>
     (function () {
         var payrollMonthlyLabels = window.ReportCharts.parseJsonScript("payroll-monthly-labels-data", []);

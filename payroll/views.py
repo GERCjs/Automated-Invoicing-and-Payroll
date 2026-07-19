@@ -29,8 +29,8 @@ from core.audit import get_client_ip, log_event
 from core.models import AuditLog
 from notifications.models import EmailDeliveryLog
 
-from .forms import EmployeeForm, EmployeeUploadForm, PayrollRecordForm, PayrollUploadForm
-from .models import Employee, PayrollRecord
+from .forms import EmployeeForm, EmployeeUploadForm, PayrollRecordForm, PayrollTemplateSettingsForm, PayrollUploadForm
+from .models import Employee, PayrollRecord, PayrollTemplateSettings
 from .services import (
     PAYROLL_UPLOAD_COLUMN_LABELS,
     TEMPLATE_HEADERS,
@@ -68,6 +68,20 @@ def _build_chart_summary(labels, values):
         "peak_label": peak_label,
         "peak_value": peak_value,
     }
+
+
+def _truncate_pdf_text(value, canvas_obj, max_width, font_name="Helvetica", font_size=11):
+    text = (value or "").strip()
+    if not text:
+        return "-"
+    if canvas_obj.stringWidth(text, font_name, font_size) <= max_width:
+        return text
+
+    ellipsis = "..."
+    shortened = text
+    while shortened and canvas_obj.stringWidth(f"{shortened}{ellipsis}", font_name, font_size) > max_width:
+        shortened = shortened[:-1]
+    return f"{shortened}{ellipsis}" if shortened else ellipsis
 
 
 def _recent_month_starts(today, total_months=6):
@@ -1139,6 +1153,52 @@ def employee_dashboard(request):
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
+def payroll_template_settings(request):
+    template_settings = PayrollTemplateSettings.load()
+    if request.method != "POST":
+        return render(
+            request,
+            "payroll/payroll_template_settings.html",
+            {
+                "form": PayrollTemplateSettingsForm(instance=template_settings),
+                "template_settings": template_settings,
+            },
+        )
+
+    form = PayrollTemplateSettingsForm(request.POST, request.FILES, instance=template_settings)
+    if form.is_valid():
+        changed_fields = list(form.changed_data)
+        if getattr(form, "stale_logo_missing", False) and "logo" not in changed_fields:
+            changed_fields.append("logo")
+        if changed_fields:
+            settings_obj = form.save(commit=False)
+            settings_obj.updated_by = request.user
+            settings_obj.save()
+            log_event(
+                action="payroll.template_settings.updated",
+                user=request.user,
+                target_type="payroll_template_settings",
+                target_id=str(settings_obj.id),
+                metadata={"changed_fields": changed_fields},
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Payroll template settings updated.")
+        else:
+            messages.info(request, "No payroll template setting changes to save.")
+        return redirect("payroll-template-settings")
+
+    return render(
+        request,
+        "payroll/payroll_template_settings.html",
+        {
+            "form": form,
+            "template_settings": template_settings,
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
 def employee_list(request):
     search_query = request.GET.get("q", "").strip()
     selected_status = request.GET.get("status", "").strip()
@@ -1732,6 +1792,16 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     total_deductions = deductions + cpf_contribution
     employer_cpf_contribution = _calculate_employer_cpf_for_record(payslip_record)
     month_year = payslip_record.payment_date.strftime("%B %Y")
+    template_settings = PayrollTemplateSettings.load()
+    company_display_name = (template_settings.company_display_name or "").strip() or "Vaniday Pte Ltd"
+    company_address = (template_settings.company_address or "").strip()
+    company_email = (template_settings.company_email or "").strip()
+    company_phone = (template_settings.company_phone or "").strip()
+    company_registration_number = (template_settings.company_registration_number or "").strip()
+    header_text = (template_settings.header_text or "").strip() or "Automated Invoicing & Payroll"
+    footer_text = (template_settings.footer_text or "").strip() or (
+        "This is a computer-generated payslip. For payroll enquiries, please contact HR."
+    )
     border_color = colors.HexColor("#243041")
     divider_color = colors.HexColor("#CBD5E1")
     muted_text = colors.HexColor("#5B6677")
@@ -1745,19 +1815,43 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     pdf.setStrokeColor(colors.white)
     pdf.setLineWidth(0)
     pdf.roundRect(margin, top - header_h, width, header_h, 4 * mm, stroke=0, fill=0)
-    logo_dir = settings.BASE_DIR / "media" / "invoice_branding" / "logos"
-    logo_files = sorted(path for path in logo_dir.iterdir() if path.is_file()) if logo_dir.exists() else []
-    logo_path = logo_files[0] if logo_files else None
+    logo_path = None
+    if template_settings.has_logo_file():
+        try:
+            logo_path = template_settings.logo.path
+        except (NotImplementedError, OSError, ValueError):
+            logo_path = None
+
+    logo_size_map = {
+        PayrollTemplateSettings.LOGO_SIZE_SMALL: 10 * mm,
+        PayrollTemplateSettings.LOGO_SIZE_MEDIUM: 14 * mm,
+        PayrollTemplateSettings.LOGO_SIZE_LARGE: 18 * mm,
+    }
+    logo_height = logo_size_map.get(template_settings.logo_size, 14 * mm)
     text_x = margin + 4 * mm
+    title_y = top - 10 * mm
+    subtitle_y = top - 15.8 * mm
+    employee_title_y = top - 22.5 * mm
+    centered_title = template_settings.logo_position == PayrollTemplateSettings.LOGO_POSITION_CENTRE
     if logo_path is not None:
         try:
             logo_reader = ImageReader(str(logo_path))
             image_width, image_height = logo_reader.getSize()
-            logo_height = 14 * mm
             scale_ratio = logo_height / float(image_height)
             logo_width = image_width * scale_ratio
-            logo_x = margin + 4 * mm
-            logo_y = top - 16 * mm
+            if template_settings.logo_position == PayrollTemplateSettings.LOGO_POSITION_RIGHT:
+                logo_x = margin + width - logo_width - (4 * mm)
+                logo_y = top - 16 * mm
+            elif template_settings.logo_position == PayrollTemplateSettings.LOGO_POSITION_CENTRE:
+                logo_x = margin + (width - logo_width) / 2
+                logo_y = top - 15 * mm
+                title_y = top - 20.5 * mm
+                subtitle_y = top - 26.3 * mm
+                employee_title_y = top - 33 * mm
+            else:
+                logo_x = margin + 4 * mm
+                logo_y = top - 16 * mm
+                text_x = logo_x + logo_width + (5 * mm)
             pdf.drawImage(
                 logo_reader,
                 logo_x,
@@ -1767,36 +1861,86 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
                 preserveAspectRatio=True,
                 mask="auto",
             )
-            text_x = logo_x + logo_width + (5 * mm)
         except Exception:
             text_x = margin + 4 * mm
     pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(text_x, top - 10 * mm, "Vaniday Pte Ltd - Payslip")
+    if centered_title:
+        pdf.drawCentredString(margin + (width / 2), title_y, f"{company_display_name} - Payslip")
+    else:
+        pdf.drawString(text_x, title_y, f"{company_display_name} - Payslip")
     pdf.setFillColor(muted_text)
     pdf.setFont("Helvetica", 8.5)
-    pdf.drawString(text_x, top - 15.8 * mm, "Automated Invoicing & Payroll")
+    if centered_title:
+        pdf.drawCentredString(margin + (width / 2), subtitle_y, header_text)
+    else:
+        pdf.drawString(text_x, subtitle_y, header_text)
     pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica-Bold", 13.5)
-    pdf.drawString(text_x, top - 22.5 * mm, f"{payslip_record.employee_name} for {month_year}")
+    if centered_title:
+        pdf.drawCentredString(margin + (width / 2), employee_title_y, f"{payslip_record.employee_name} for {month_year}")
+    else:
+        pdf.drawString(text_x, employee_title_y, f"{payslip_record.employee_name} for {month_year}")
 
     # Employee block
     info_top = top - header_h
-    info_h = 24 * mm
+    info_h = 40 * mm
     pdf.setFillColor(accent_fill)
     pdf.roundRect(margin, info_top - info_h, width, info_h, 3 * mm, stroke=0, fill=1)
     label_x = margin + 4 * mm
     value_x = margin + 32 * mm
+    company_label_x = margin + (width / 2) + 4 * mm
+    company_value_x = company_label_x + 24 * mm
+    company_value_width = (margin + width) - company_value_x - (4 * mm)
+    employee_value_x = value_x - (8 * mm)
+    info_value_x = company_value_x - (8 * mm)
+    company_value_row_x = company_value_x - (4 * mm)
+    company_address_value_x = company_value_x - (6 * mm)
     employee_y = info_top - 8.5 * mm
-    payment_y = info_top - 17 * mm
+    phone_y = info_top - 17 * mm
+    payment_y = info_top - 22 * mm
+    company_y = info_top - 25.5 * mm
+    address_y = info_top - 34 * mm
     pdf.setFillColor(muted_text)
     pdf.setFont("Helvetica-Bold", 11)
     pdf.drawString(label_x, employee_y, "Employee:")
     pdf.drawString(label_x, payment_y, "Payment Date:")
+    pdf.drawString(company_label_x, employee_y, "Contact:")
+    pdf.drawString(company_label_x, company_y, "Company:")
+    pdf.drawString(company_label_x, address_y, "Address:")
     pdf.setFillColor(heading_text)
     pdf.setFont("Helvetica", 11)
-    pdf.drawString(value_x, employee_y, payslip_record.employee_name)
+    pdf.drawString(employee_value_x, employee_y, payslip_record.employee_name)
     pdf.drawString(value_x, payment_y, payslip_record.payment_date.strftime("%d-%m-%Y"))
+    company_label = company_display_name
+    if company_registration_number:
+        company_label = f"{company_display_name} ({company_registration_number})"
+    email_label = company_email or "-"
+    phone_label = company_phone or "-"
+    address_lines = [line.strip() for line in company_address.replace("\r", "").split("\n") if line.strip()]
+    if not address_lines and company_address:
+        address_lines = [company_address]
+    address_label = " | ".join(address_lines[:2]) if address_lines else "-"
+    pdf.drawString(
+        info_value_x,
+        employee_y,
+        _truncate_pdf_text(email_label, pdf, company_value_width, font_name="Helvetica", font_size=11),
+    )
+    pdf.drawString(
+        info_value_x,
+        phone_y,
+        _truncate_pdf_text(phone_label, pdf, company_value_width, font_name="Helvetica", font_size=11),
+    )
+    pdf.drawString(
+        company_value_row_x,
+        company_y,
+        _truncate_pdf_text(company_label, pdf, company_value_width, font_name="Helvetica", font_size=11),
+    )
+    pdf.drawString(
+        company_address_value_x,
+        address_y,
+        _truncate_pdf_text(address_label, pdf, company_value_width, font_name="Helvetica", font_size=11),
+    )
 
     # Table
     table_top = info_top - info_h - 4 * mm
@@ -1883,7 +2027,7 @@ def _build_payslip_pdf(payslip_record: PayrollRecord) -> bytes:
     pdf.drawString(
         margin + 18 * mm,
         note_top - 6.5 * mm,
-        "This is a computer-generated payslip. For payroll enquiries, please contact HR.",
+        footer_text[:130],
     )
 
     pdf.showPage()
