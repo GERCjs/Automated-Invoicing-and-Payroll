@@ -2,24 +2,27 @@
 {% load static %}
 {% load humanize %}
 
-{% block title %}Payroll Dashboard{% endblock %}
+{% block title %}Payroll Officer Dashboard{% endblock %}
 {% block page_container_class %}container-xl management-dashboard-container{% endblock %}
 
 {% block content %}
 <div class="report-page management-dashboard-page payroll-dashboard-page">
     <section class="report-header report-section">
         <div>
-            <h1 class="page-title">Payroll Dashboard</h1>
-            <p class="page-subtitle">Use this dashboard to manage monthly payroll work, review delivery issues, and act on payroll records that still need attention.</p>
+            <h1 class="page-title">{{ dashboard_title }}</h1>
+            <p class="page-subtitle">Use this dashboard to manage payroll work, monitor employee readiness, review payout setup, and act on records that still need attention.</p>
             <div class="report-header-meta">
                 <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
                 <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
             </div>
         </div>
         <div class="report-header-actions invoice-dashboard-actions">
+            <a href="{% url 'employee-create' %}" class="btn btn-outline-dark">Add New Employee</a>
             <a href="{% url 'payroll-create' %}" class="btn btn-primary">Create Payslip Record</a>
+            <a href="{% url 'employee-upload-preview' %}" class="btn btn-outline-dark">Bulk Add Employees</a>
             <a href="{% url 'payroll-upload-preview' %}" class="btn btn-outline-primary">Bulk Add Payslips</a>
             <a href="{% url 'payroll-list' %}{{ payroll_list_query }}" class="btn btn-outline-dark">View Payroll List</a>
+            <a href="{% url 'employee-list' %}" class="btn btn-outline-dark">View Employee List</a>
             <a href="{% url 'payroll-report' %}{{ payroll_report_query }}" class="btn btn-outline-secondary">Payroll / Payslip Report</a>
         </div>
     </section>
@@ -54,6 +57,7 @@
     </section>
 
     <section class="report-section">
+        <h2 class="section-heading mb-3">Payroll Snapshot</h2>
         <div class="row g-3 report-kpi-grid">
             <div class="col-12 col-md-6 col-xl-4">
                 <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
@@ -89,6 +93,48 @@
     </section>
 
     <section class="report-section">
+        <h2 class="section-heading mb-3">Employee Snapshot</h2>
+        <div class="row g-3 report-kpi-grid">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Active Employees</div>
+                        <div class="report-kpi-value">{{ active_employee_count }}</div>
+                        <div class="small text-muted">Employees currently marked active and available for payroll processing.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">New Employees This Month</div>
+                        <div class="report-kpi-value">{{ new_employee_count }}</div>
+                        <div class="small text-muted">Employees with a hire date inside the selected reporting month.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Missing Payment Setup</div>
+                        <div class="report-kpi-value">{{ missing_payment_setup_count }}</div>
+                        <div class="small text-muted">Active employees missing payment method or essential bank payout details.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Employees Without Payroll This Month</div>
+                        <div class="report-kpi-value">{{ employees_without_payroll_count }}</div>
+                        <div class="small text-muted">Active employees who do not yet have a payroll record in the selected month.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
         <div class="report-summary-strip payroll-dashboard-summary-strip">
             {% for item in secondary_summary_items %}
             <div class="report-summary-card">
@@ -97,6 +143,160 @@
                 <div class="report-summary-note">{{ item.note }}</div>
             </div>
             {% endfor %}
+        </div>
+    </section>
+
+    <section class="report-section">
+        <h2 class="section-heading mb-3">Employee Monitoring</h2>
+        <div class="row g-3 mb-4">
+            <div class="col-lg-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Payment Method Distribution</div>
+                    <div class="report-chart-body">
+                        <canvas id="employeePaymentMethodChart" class="report-chart-canvas" aria-label="Employee payment method chart" role="img"></canvas>
+                        <div id="employeePaymentMethodChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="employee-payment-panels">
+                        <div class="employee-payment-panel employee-payment-panel-giro">
+                            <div class="employee-payment-panel-head">
+                                <div>
+                                    <div class="employee-payment-panel-title">GIRO</div>
+                                    <div class="employee-payment-panel-count">{{ payment_method_values.0 }}</div>
+                                </div>
+                                <a href="{% url 'employee-list' %}?payment_method=giro" class="report-link">View all</a>
+                            </div>
+                            <div class="employee-payment-list">
+                                {% for employee in giro_employees %}
+                                <a href="{% url 'employee-detail' employee.pk %}" class="employee-payment-person">
+                                    <span class="employee-payment-person-name">{{ employee.first_name }} {{ employee.last_name }}</span>
+                                    <span class="employee-payment-person-meta">{{ employee.employee_code }}{% if employee.job_title %} | {{ employee.job_title }}{% endif %}</span>
+                                </a>
+                                {% empty %}
+                                <div class="employee-payment-empty">No employees are using GIRO.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="employee-payment-panel employee-payment-panel-cash">
+                            <div class="employee-payment-panel-head">
+                                <div>
+                                    <div class="employee-payment-panel-title">Cash</div>
+                                    <div class="employee-payment-panel-count">{{ payment_method_values.1 }}</div>
+                                </div>
+                                <a href="{% url 'employee-list' %}?payment_method=cash" class="report-link">View all</a>
+                            </div>
+                            <div class="employee-payment-list">
+                                {% for employee in cash_employees %}
+                                <a href="{% url 'employee-detail' employee.pk %}" class="employee-payment-person">
+                                    <span class="employee-payment-person-name">{{ employee.first_name }} {{ employee.last_name }}</span>
+                                    <span class="employee-payment-person-meta">{{ employee.employee_code }}{% if employee.job_title %} | {{ employee.job_title }}{% endif %}</span>
+                                </a>
+                                {% empty %}
+                                <div class="employee-payment-empty">No employees are using cash.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="employee-payment-panel employee-payment-panel-cheque">
+                            <div class="employee-payment-panel-head">
+                                <div>
+                                    <div class="employee-payment-panel-title">Cheque</div>
+                                    <div class="employee-payment-panel-count">{{ payment_method_values.2 }}</div>
+                                </div>
+                                <a href="{% url 'employee-list' %}?payment_method=cheque" class="report-link">View all</a>
+                            </div>
+                            <div class="employee-payment-list">
+                                {% for employee in cheque_employees %}
+                                <a href="{% url 'employee-detail' employee.pk %}" class="employee-payment-person">
+                                    <span class="employee-payment-person-name">{{ employee.first_name }} {{ employee.last_name }}</span>
+                                    <span class="employee-payment-person-meta">{{ employee.employee_code }}{% if employee.job_title %} | {{ employee.job_title }}{% endif %}</span>
+                                </a>
+                                {% empty %}
+                                <div class="employee-payment-empty">No employees are using cheque.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="employee-payment-panel employee-payment-panel-unset">
+                            <div class="employee-payment-panel-head">
+                                <div>
+                                    <div class="employee-payment-panel-title">Not Set</div>
+                                    <div class="employee-payment-panel-count">{{ payment_method_values.3 }}</div>
+                                </div>
+                                <a href="{% url 'employee-list' %}?payment_method=unset" class="report-link">View all</a>
+                            </div>
+                            <div class="employee-payment-list">
+                                {% for employee in unset_payment_employees %}
+                                <a href="{% url 'employee-detail' employee.pk %}" class="employee-payment-person">
+                                    <span class="employee-payment-person-name">{{ employee.first_name }} {{ employee.last_name }}</span>
+                                    <span class="employee-payment-person-meta">{{ employee.employee_code }}{% if employee.job_title %} | {{ employee.job_title }}{% endif %}</span>
+                                </a>
+                                {% empty %}
+                                <div class="employee-payment-empty">All employees have a payment method set.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Shows every employee grouped by payment method, so you can see exactly who is paid by GIRO, cash, cheque, or still has no method selected.</div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Employee Status Overview</div>
+                    <div class="report-chart-body">
+                        <canvas id="employeeStatusChart" class="report-chart-canvas" aria-label="Employee status overview chart" role="img"></canvas>
+                        <div id="employeeStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="employee-status-panels">
+                        <div class="employee-status-panel employee-status-panel-active">
+                            <div class="employee-status-panel-head">
+                                <div>
+                                    <div class="employee-status-panel-title">Active Employees</div>
+                                    <div class="employee-status-panel-count">{{ active_employee_count }}</div>
+                                </div>
+                                <a href="{% url 'employee-list' %}?status=active" class="report-link">View all</a>
+                            </div>
+                            <div class="employee-status-list">
+                                {% for employee in active_employees %}
+                                <a href="{% url 'employee-detail' employee.pk %}" class="employee-status-person">
+                                    <span class="employee-status-person-name">{{ employee.first_name }} {{ employee.last_name }}</span>
+                                    <span class="employee-status-person-meta">{{ employee.employee_code }}{% if employee.job_title %} | {{ employee.job_title }}{% endif %}</span>
+                                </a>
+                                {% empty %}
+                                <div class="employee-status-empty">No active employees found.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="employee-status-panel employee-status-panel-inactive">
+                            <div class="employee-status-panel-head">
+                                <div>
+                                    <div class="employee-status-panel-title">Inactive Employees</div>
+                                    <div class="employee-status-panel-count">{{ employee_status_values.1 }}</div>
+                                </div>
+                                <a href="{% url 'employee-list' %}?status=inactive" class="report-link">View all</a>
+                            </div>
+                            <div class="employee-status-list">
+                                {% for employee in inactive_employees %}
+                                <a href="{% url 'employee-detail' employee.pk %}" class="employee-status-person">
+                                    <span class="employee-status-person-name">{{ employee.first_name }} {{ employee.last_name }}</span>
+                                    <span class="employee-status-person-meta">{{ employee.employee_code }}{% if employee.job_title %} | {{ employee.job_title }}{% endif %}</span>
+                                </a>
+                                {% empty %}
+                                <div class="employee-status-empty">No inactive employees found.</div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Shows the current active and inactive counts, and lists exactly which employees fall into each status.</div>
+                </div>
+            </div>
+            <div class="col-12">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Hiring Trend</div>
+                    <div class="report-chart-body">
+                        <canvas id="employeeHiringTrendChart" class="report-chart-canvas" aria-label="Employee hiring trend chart" role="img"></canvas>
+                        <div id="employeeHiringTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Shows employee hires across the last six months so HR can monitor workforce growth.</div>
+                </div>
+            </div>
         </div>
     </section>
 
@@ -157,7 +357,7 @@
                         <canvas id="payrollDashboardTrendChart" class="report-chart-canvas" aria-label="Payroll cost trend chart" role="img"></canvas>
                         <div id="payrollDashboardTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
                     </div>
-                    <div class="px-3 pb-3 text-muted small">Shows six months of payroll cost using basic salary and allowances so the team can spot cost spikes early.</div>
+                    <div class="px-3 pb-3 text-muted small">Shows payroll cost from January 2026 onward using basic salary and allowances so the team can track month-to-month changes without losing the early baseline.</div>
                 </div>
             </div>
             <div class="col-lg-6">
@@ -178,10 +378,134 @@
 {{ payroll_trend_values|json_script:"payroll-dashboard-trend-values" }}
 {{ pay_mix_labels|json_script:"payroll-dashboard-mix-labels" }}
 {{ pay_mix_values|json_script:"payroll-dashboard-mix-values" }}
+{{ payment_method_labels|json_script:"employee-payment-method-labels" }}
+{{ payment_method_values|json_script:"employee-payment-method-values" }}
+{{ employee_status_labels|json_script:"employee-status-labels" }}
+{{ employee_status_values|json_script:"employee-status-values" }}
+{{ hiring_trend_labels|json_script:"employee-hiring-trend-labels" }}
+{{ hiring_trend_values|json_script:"employee-hiring-trend-values" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
 <script src="{% static 'js/report_charts.js' %}"></script>
 <script>
     (function () {
+        var paymentMethodLabels = window.ReportCharts.parseJsonScript("employee-payment-method-labels", []);
+        var paymentMethodValues = window.ReportCharts.parseJsonScript("employee-payment-method-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "employeePaymentMethodChart",
+            emptyStateId: "employeePaymentMethodChartEmpty",
+            type: "bar",
+            labels: paymentMethodLabels,
+            datasets: [
+                {
+                    label: "Payment Methods",
+                    data: paymentMethodValues,
+                    backgroundColor: ["#0d6efd", "#198754", "#f59f00", "#adb5bd"],
+                    borderColor: ["#0d6efd", "#198754", "#f59f00", "#adb5bd"],
+                    borderWidth: 1,
+                    borderRadius: 10,
+                    barThickness: 24
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        },
+                        grid: {
+                            color: "rgba(148, 163, 184, 0.2)"
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                }
+            },
+            emptyText: "No employee payment method data is available yet."
+        });
+
+        var statusLabels = window.ReportCharts.parseJsonScript("employee-status-labels", []);
+        var statusValues = window.ReportCharts.parseJsonScript("employee-status-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "employeeStatusChart",
+            emptyStateId: "employeeStatusChartEmpty",
+            type: "bar",
+            labels: statusLabels,
+            datasets: [
+                {
+                    label: "Employee Status",
+                    data: statusValues,
+                    backgroundColor: ["#198754", "#6c757d"],
+                    borderColor: ["#198754", "#6c757d"],
+                    borderWidth: 1,
+                    borderRadius: 10,
+                    barThickness: 28
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                indexAxis: "y",
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        },
+                        grid: {
+                            color: "rgba(148, 163, 184, 0.2)"
+                        }
+                    },
+                    y: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                }
+            },
+            emptyText: "No employee status data is available yet."
+        });
+
+        var hiringLabels = window.ReportCharts.parseJsonScript("employee-hiring-trend-labels", []);
+        var hiringValues = window.ReportCharts.parseJsonScript("employee-hiring-trend-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "employeeHiringTrendChart",
+            emptyStateId: "employeeHiringTrendChartEmpty",
+            type: "bar",
+            labels: hiringLabels,
+            datasets: [
+                {
+                    label: "New Employees",
+                    data: hiringValues,
+                    backgroundColor: "#20c997",
+                    borderColor: "#20c997",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            },
+            emptyText: "No hiring trend data is available yet."
+        });
+
         var trendLabels = window.ReportCharts.parseJsonScript("payroll-dashboard-trend-labels", []);
         var trendValues = window.ReportCharts.parseJsonScript("payroll-dashboard-trend-values", []);
         window.ReportCharts.renderChart({

@@ -83,6 +83,22 @@ def _recent_month_starts(today, total_months=6):
     return month_starts
 
 
+def _month_starts_from_anchor(anchor_month, end_month):
+    start_month = anchor_month.replace(day=1)
+    final_month = end_month.replace(day=1)
+    month_starts = []
+    current_month = start_month
+
+    while current_month <= final_month:
+        month_starts.append(current_month)
+        if current_month.month == 12:
+            current_month = current_month.replace(year=current_month.year + 1, month=1, day=1)
+        else:
+            current_month = current_month.replace(month=current_month.month + 1, day=1)
+
+    return month_starts
+
+
 def _parse_iso_date(raw_value: str):
     value = (raw_value or "").strip()
     if not value:
@@ -315,7 +331,8 @@ def payroll_dashboard(request):
         else:
             delivery_status_totals["action_required"] += 1
 
-    month_starts = _recent_month_starts(month_start, total_months=6)
+    trend_anchor_month = date(2026, 1, 1)
+    month_starts = _month_starts_from_anchor(trend_anchor_month, month_start)
     payroll_trend_labels = [month.strftime("%b %Y") for month in month_starts]
     month_keys = [month.strftime("%Y-%m") for month in month_starts]
     monthly_rows = list(
@@ -371,6 +388,54 @@ def payroll_dashboard(request):
     missing_payroll_records = active_employees.exclude(employee_code__in=paid_employee_codes).order_by("employee_code")
     missing_payroll_records_count = missing_payroll_records.count()
     missing_payroll_sample_codes = list(missing_payroll_records.values_list("employee_code", flat=True)[:3])
+
+    employees = Employee.objects.all()
+    inactive_employees = employees.filter(status=Employee.STATUS_INACTIVE)
+    new_employees_this_month = employees.filter(hire_date__gte=month_start, hire_date__lte=month_end)
+    missing_payment_setup = active_employees.filter(
+        Q(payment_method="")
+        | Q(bank_name="")
+        | Q(bank_account_number="")
+    )
+
+    payment_method_counts = {
+        row["payment_method"] or "unset": row["total"]
+        for row in employees.values("payment_method").annotate(total=Count("id"))
+    }
+    payment_method_labels = ["GIRO", "Cash", "Cheque", "Not Set"]
+    payment_method_values = [
+        payment_method_counts.get(Employee.PAYMENT_METHOD_GIRO, 0),
+        payment_method_counts.get(Employee.PAYMENT_METHOD_CASH, 0),
+        payment_method_counts.get(Employee.PAYMENT_METHOD_CHEQUE, 0),
+        payment_method_counts.get("unset", 0),
+    ]
+    giro_employees = employees.filter(payment_method=Employee.PAYMENT_METHOD_GIRO)
+    cash_employees = employees.filter(payment_method=Employee.PAYMENT_METHOD_CASH)
+    cheque_employees = employees.filter(payment_method=Employee.PAYMENT_METHOD_CHEQUE)
+    unset_payment_employees = employees.filter(Q(payment_method="") | Q(payment_method__isnull=True))
+
+    employee_status_labels = ["Active", "Inactive"]
+    employee_status_values = [
+        active_employees.count(),
+        inactive_employees.count(),
+    ]
+
+    hiring_month_starts = _recent_month_starts(month_start, total_months=6)
+    hiring_trend_labels = [month.strftime("%b %Y") for month in hiring_month_starts]
+    hiring_month_keys = [month.strftime("%Y-%m") for month in hiring_month_starts]
+    hiring_rows = list(
+        employees.annotate(month=TruncMonth("hire_date"))
+        .values("month")
+        .annotate(total=Count("id"))
+        .order_by("month")
+    )
+    hiring_map = {}
+    for row in hiring_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        hiring_map[month_value.strftime("%Y-%m")] = int(row.get("total") or 0)
+    hiring_trend_values = [hiring_map.get(month_key, 0) for month_key in hiring_month_keys]
 
     recent_payslip_records = list(month_records.only(
         "employee_name",
@@ -465,16 +530,33 @@ def payroll_dashboard(request):
             "selected_month": selected_month,
             "reporting_period_label": reporting_period_label,
             "report_generated_at": report_generated_at,
+            "dashboard_title": "Payroll Officer Dashboard",
             "total_records": total_records,
             "total_net_salary": total_net_salary,
             "total_payroll_cost": total_payroll_cost,
             "total_cpf": total_cpf,
             "employees_paid": employees_paid,
+            "active_employee_count": active_employees.count(),
+            "new_employee_count": new_employees_this_month.count(),
+            "missing_payment_setup_count": missing_payment_setup.count(),
+            "employees_without_payroll_count": missing_payroll_records_count,
             "payroll_trend_labels": payroll_trend_labels,
             "payroll_trend_values": payroll_trend_values,
             "payroll_chart_summary": payroll_chart_summary,
             "pay_mix_labels": pay_mix_labels,
             "pay_mix_values": pay_mix_values,
+            "payment_method_labels": payment_method_labels,
+            "payment_method_values": payment_method_values,
+            "giro_employees": giro_employees.order_by("first_name", "last_name", "employee_code"),
+            "cash_employees": cash_employees.order_by("first_name", "last_name", "employee_code"),
+            "cheque_employees": cheque_employees.order_by("first_name", "last_name", "employee_code"),
+            "unset_payment_employees": unset_payment_employees.order_by("first_name", "last_name", "employee_code"),
+            "employee_status_labels": employee_status_labels,
+            "employee_status_values": employee_status_values,
+            "active_employees": active_employees.order_by("first_name", "last_name", "employee_code"),
+            "inactive_employees": inactive_employees.order_by("first_name", "last_name", "employee_code"),
+            "hiring_trend_labels": hiring_trend_labels,
+            "hiring_trend_values": hiring_trend_values,
             "delivery_status_totals": delivery_status_totals,
             "secondary_summary_items": secondary_summary_items,
             "attention_items": attention_items,
@@ -1048,119 +1130,33 @@ def payroll_template_download(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def employee_dashboard(request):
-    today = timezone.localdate()
-    selected_month, month_start, month_end = _parse_month_filter(request.GET.get("month"))
-    if not selected_month:
-        month_start = today.replace(day=1)
-        if month_start.month == 12:
-            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
-        else:
-            next_month = month_start.replace(month=month_start.month + 1, day=1)
-        month_end = next_month - timezone.timedelta(days=1)
-        selected_month = month_start.strftime("%Y-%m")
-
-    report_generated_at = timezone.now()
-    employees = Employee.objects.all()
-    active_employees = employees.filter(status=Employee.STATUS_ACTIVE)
-    new_employees_this_month = employees.filter(hire_date__gte=month_start, hire_date__lte=month_end)
-    missing_payment_setup = active_employees.filter(
-        Q(payment_method="")
-        | Q(bank_name="")
-        | Q(bank_account_number="")
-    )
-    paid_employee_codes = list(
-        PayrollRecord.objects.filter(payment_date__gte=month_start, payment_date__lte=month_end)
-        .values_list("employee_id", flat=True)
-        .distinct()
-    )
-    employees_without_payroll = active_employees.exclude(employee_code__in=paid_employee_codes)
-
-    payment_method_counts = {
-        row["payment_method"] or "unset": row["total"]
-        for row in employees.values("payment_method").annotate(total=Count("id"))
-    }
-    summary_items = [
-        {
-            "label": "GIRO Employees",
-            "value": str(payment_method_counts.get(Employee.PAYMENT_METHOD_GIRO, 0)),
-            "note": "Employees currently configured for GIRO salary payouts.",
-        },
-        {
-            "label": "Cash Employees",
-            "value": str(payment_method_counts.get(Employee.PAYMENT_METHOD_CASH, 0)),
-            "note": "Employees marked for manual cash payout processing.",
-        },
-        {
-            "label": "Cheque Employees",
-            "value": str(payment_method_counts.get(Employee.PAYMENT_METHOD_CHEQUE, 0)),
-            "note": "Employees configured to receive payroll by cheque.",
-        },
-        {
-            "label": "Linked Staff Accounts",
-            "value": str(employees.filter(user__isnull=False).count()),
-            "note": "Employee records that are already linked to a user account.",
-        },
-    ]
-
-    payment_method_labels = ["GIRO", "Cash", "Cheque", "Not Set"]
-    payment_method_values = [
-        payment_method_counts.get(Employee.PAYMENT_METHOD_GIRO, 0),
-        payment_method_counts.get(Employee.PAYMENT_METHOD_CASH, 0),
-        payment_method_counts.get(Employee.PAYMENT_METHOD_CHEQUE, 0),
-        payment_method_counts.get("unset", 0),
-    ]
-
-    employee_status_labels = ["Active", "Inactive"]
-    employee_status_values = [
-        active_employees.count(),
-        employees.filter(status=Employee.STATUS_INACTIVE).count(),
-    ]
-
-    month_starts = _recent_month_starts(month_start, total_months=6)
-    hiring_trend_labels = [month.strftime("%b %Y") for month in month_starts]
-    month_keys = [month.strftime("%Y-%m") for month in month_starts]
-    hiring_rows = list(
-        employees.annotate(month=TruncMonth("hire_date"))
-        .values("month")
-        .annotate(total=Count("id"))
-        .order_by("month")
-    )
-    hiring_map = {}
-    for row in hiring_rows:
-        month_value = row.get("month")
-        if not month_value:
-            continue
-        hiring_map[month_value.strftime("%Y-%m")] = int(row.get("total") or 0)
-    hiring_trend_values = [hiring_map.get(month_key, 0) for month_key in month_keys]
-
-    return render(
-        request,
-        "payroll/employee_dashboard.html",
-        {
-            "selected_month": selected_month,
-            "report_generated_at": report_generated_at,
-            "reporting_period_label": month_start.strftime("%B %Y"),
-            "active_employee_count": active_employees.count(),
-            "new_employee_count": new_employees_this_month.count(),
-            "missing_payment_setup_count": missing_payment_setup.count(),
-            "employees_without_payroll_count": employees_without_payroll.count(),
-            "summary_items": summary_items,
-            "payment_method_labels": payment_method_labels,
-            "payment_method_values": payment_method_values,
-            "employee_status_labels": employee_status_labels,
-            "employee_status_values": employee_status_values,
-            "hiring_trend_labels": hiring_trend_labels,
-            "hiring_trend_values": hiring_trend_values,
-            "employee_list_query": "",
-        },
-    )
+    month_query = (request.GET.get("month") or "").strip()
+    dashboard_url = reverse("payroll-dashboard")
+    if month_query:
+        return redirect(f"{dashboard_url}?month={month_query}")
+    return redirect("payroll-dashboard")
 
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def employee_list(request):
     search_query = request.GET.get("q", "").strip()
+    selected_status = request.GET.get("status", "").strip()
+    selected_payment_method = request.GET.get("payment_method", "").strip()
     employees = Employee.objects.all()
+    if selected_status in {Employee.STATUS_ACTIVE, Employee.STATUS_INACTIVE}:
+        employees = employees.filter(status=selected_status)
+    valid_payment_methods = {
+        Employee.PAYMENT_METHOD_GIRO,
+        Employee.PAYMENT_METHOD_CASH,
+        Employee.PAYMENT_METHOD_CHEQUE,
+        "unset",
+    }
+    if selected_payment_method in valid_payment_methods:
+        if selected_payment_method == "unset":
+            employees = employees.filter(Q(payment_method="") | Q(payment_method__isnull=True))
+        else:
+            employees = employees.filter(payment_method=selected_payment_method)
     if search_query:
         employees = employees.filter(
             Q(employee_code__icontains=search_query)
@@ -1171,7 +1167,19 @@ def employee_list(request):
     return render(
         request,
         "payroll/employee_list.html",
-        {"employees": employees, "search_query": search_query, "result_count": employees.count()},
+        {
+            "employees": employees,
+            "search_query": search_query,
+            "result_count": employees.count(),
+            "selected_status": selected_status,
+            "selected_payment_method": selected_payment_method,
+            "active_status_value": Employee.STATUS_ACTIVE,
+            "inactive_status_value": Employee.STATUS_INACTIVE,
+            "giro_payment_value": Employee.PAYMENT_METHOD_GIRO,
+            "cash_payment_value": Employee.PAYMENT_METHOD_CASH,
+            "cheque_payment_value": Employee.PAYMENT_METHOD_CHEQUE,
+            "unset_payment_value": "unset",
+        },
     )
 
 

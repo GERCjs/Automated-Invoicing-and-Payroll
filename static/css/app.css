@@ -798,6 +798,198 @@ textarea.form-control:focus {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.employee-dashboard-page .employee-status-panels {
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0 1.15rem 1.15rem;
+}
+
+.employee-dashboard-page .employee-payment-panels {
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0 1.15rem 1.15rem;
+}
+
+.employee-dashboard-page .employee-payment-panel {
+    background: #fafbfd;
+    border: 1px solid var(--portal-border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    min-height: 220px;
+    overflow: hidden;
+}
+
+.employee-dashboard-page .employee-payment-panel-giro {
+    border-top: 4px solid #0d6efd;
+}
+
+.employee-dashboard-page .employee-payment-panel-cash {
+    border-top: 4px solid #198754;
+}
+
+.employee-dashboard-page .employee-payment-panel-cheque {
+    border-top: 4px solid #f59f00;
+}
+
+.employee-dashboard-page .employee-payment-panel-unset {
+    border-top: 4px solid #6c757d;
+}
+
+.employee-dashboard-page .employee-payment-panel-head {
+    align-items: flex-start;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    padding: 0.95rem 1rem 0.8rem;
+}
+
+.employee-dashboard-page .employee-payment-panel-title {
+    color: var(--portal-muted);
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.employee-dashboard-page .employee-payment-panel-count {
+    color: var(--portal-heading);
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-top: 0.25rem;
+}
+
+.employee-dashboard-page .employee-payment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 0 1rem 1rem;
+}
+
+.employee-dashboard-page .employee-payment-person {
+    background: #ffffff;
+    border: 1px solid #dde4ec;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    padding: 0.7rem 0.8rem;
+}
+
+.employee-dashboard-page .employee-payment-person:hover,
+.employee-dashboard-page .employee-payment-person:focus {
+    background: #f8fafc;
+    border-color: #b8c4d3;
+    color: #1f2937;
+}
+
+.employee-dashboard-page .employee-payment-person-name {
+    color: #1f2937;
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.employee-dashboard-page .employee-payment-person-meta {
+    color: #64748b;
+    font-size: 0.82rem;
+}
+
+.employee-dashboard-page .employee-payment-empty {
+    color: #64748b;
+    font-size: 0.9rem;
+    padding: 0.3rem 0.1rem;
+}
+
+.employee-dashboard-page .employee-status-panel {
+    background: #fafbfd;
+    border: 1px solid var(--portal-border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    min-height: 220px;
+    overflow: hidden;
+}
+
+.employee-dashboard-page .employee-status-panel-active {
+    border-top: 4px solid #198754;
+}
+
+.employee-dashboard-page .employee-status-panel-inactive {
+    border-top: 4px solid #6c757d;
+}
+
+.employee-dashboard-page .employee-status-panel-head {
+    align-items: flex-start;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    padding: 0.95rem 1rem 0.8rem;
+}
+
+.employee-dashboard-page .employee-status-panel-title {
+    color: var(--portal-muted);
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.employee-dashboard-page .employee-status-panel-count {
+    color: var(--portal-heading);
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-top: 0.25rem;
+}
+
+.employee-dashboard-page .employee-status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 0 1rem 1rem;
+}
+
+.employee-dashboard-page .employee-status-person {
+    background: #ffffff;
+    border: 1px solid #dde4ec;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.18rem;
+    padding: 0.7rem 0.8rem;
+}
+
+.employee-dashboard-page .employee-status-person:hover,
+.employee-dashboard-page .employee-status-person:focus {
+    background: #f8fafc;
+    border-color: #b8c4d3;
+    color: #1f2937;
+}
+
+.employee-dashboard-page .employee-status-person-name {
+    color: #1f2937;
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.employee-dashboard-page .employee-status-person-meta {
+    color: #64748b;
+    font-size: 0.82rem;
+}
+
+.employee-dashboard-page .employee-status-empty {
+    color: #64748b;
+    font-size: 0.9rem;
+    padding: 0.3rem 0.1rem;
+}
+
 .invoice-report-filters .form-control,
 .invoice-report-filters .form-select {
     min-height: 46px;
@@ -1669,6 +1861,16 @@ textarea.form-control:focus {
 
     .payment-report-page .payment-report-chart-summary {
         grid-template-columns: 1fr;
+    }
+
+    .employee-dashboard-page .employee-status-panels {
+        grid-template-columns: 1fr;
+        padding: 0 1rem 1rem;
+    }
+
+    .employee-dashboard-page .employee-payment-panels {
+        grid-template-columns: 1fr;
+        padding: 0 1rem 1rem;
     }
 
     .management-dashboard-page .page-title {

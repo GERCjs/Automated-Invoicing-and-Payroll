@@ -692,7 +692,7 @@ class CoreCollectionReportingTests(TestCase):
             (
                 hr_user,
                 reverse("payroll-dashboard"),
-                ["Payroll Dashboard", "Support Tickets"],
+                ["Payroll Officer Dashboard", "Support Tickets"],
                 ["Management Dashboard", "Admin Console"],
                 [
                     f'href="{reverse("invoice-dashboard")}"',
