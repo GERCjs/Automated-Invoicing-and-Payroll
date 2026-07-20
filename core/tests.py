@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from imports.models import ImportJob
-from invoicing.models import Customer, Invoice
+from invoicing.models import Customer, Invoice, InvoiceItem
 from notifications.models import EmailDeliveryLog
 from payments.models import PaymentRecord
 from payroll.models import Employee, PayrollRecord
@@ -37,6 +37,11 @@ class CorePhaseOneTests(TestCase):
 
     def test_dashboard_requires_authentication(self):
         response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
+
+    def test_ceo_dashboard_requires_authentication(self):
+        response = self.client.get(reverse("ceo-dashboard"))
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("login"), response.url)
 
@@ -419,6 +424,220 @@ class CoreCollectionReportingTests(TestCase):
         self.assertNotContains(response, "->")
         self.assertNotContains(response, ">Open<")
 
+    def test_ceo_dashboard_renders_company_health_profile(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("ceo-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/ceo_dashboard.html")
+        self.assertContains(response, "ceo-health-dashboard")
+        self.assertContains(response, "ceo-health-kpi-grid")
+        self.assertContains(response, "CEO Dashboard")
+        self.assertContains(response, "Company Health Profile")
+        self.assertContains(response, "Total Sales")
+        self.assertContains(response, "Sales This Month")
+        self.assertContains(response, "Active Customers")
+        self.assertContains(response, "Outstanding Sales to Collect")
+        self.assertContains(response, "Monthly Sales Trend")
+        self.assertContains(response, "Top 5 High Spenders")
+        self.assertContains(response, "Top Selling Services / Products")
+        self.assertNotContains(response, "Management Attention")
+        self.assertNotContains(response, "Operational Risk Items")
+
+    def test_ceo_dashboard_builds_company_health_metrics_from_paid_sales(self):
+        today = timezone.localdate()
+        previous_month_start = self._month_start(1)
+        previous_payment_day = previous_month_start + timedelta(days=6)
+        customer_two = Customer.objects.create(name="Second Buyer", email="second-buyer@example.com")
+        inactive_customer = Customer.objects.create(
+            name="Inactive Buyer",
+            email="inactive-buyer@example.com",
+            status=Customer.STATUS_INACTIVE,
+        )
+
+        def create_invoice(invoice_number, customer, status, total_amount, issue_date=None):
+            issue_date = issue_date or today
+            return Invoice.objects.create(
+                invoice_number=invoice_number,
+                customer=customer,
+                status=status,
+                issue_date=issue_date,
+                due_date=issue_date + timedelta(days=7),
+                currency="SGD",
+                subtotal=total_amount,
+                tax_amount=Decimal("0.00"),
+                total_amount=total_amount,
+            )
+
+        current_invoice = create_invoice(
+            "INV-CEO-CURRENT",
+            self.customer,
+            Invoice.STATUS_PAID,
+            Decimal("200.00"),
+        )
+        previous_invoice = create_invoice(
+            "INV-CEO-PREVIOUS",
+            self.customer,
+            Invoice.STATUS_PAID,
+            Decimal("80.00"),
+            issue_date=previous_payment_day,
+        )
+        second_invoice = create_invoice(
+            "INV-CEO-SECOND",
+            customer_two,
+            Invoice.STATUS_PAID,
+            Decimal("120.00"),
+        )
+        partial_invoice = create_invoice(
+            "INV-CEO-PARTIAL",
+            customer_two,
+            Invoice.STATUS_PARTIALLY_REFUNDED,
+            Decimal("30.00"),
+        )
+        outstanding_invoice = create_invoice(
+            "INV-CEO-OUTSTANDING",
+            inactive_customer,
+            Invoice.STATUS_SENT,
+            Decimal("55.00"),
+        )
+        overdue_invoice = create_invoice(
+            "INV-CEO-OVERDUE",
+            inactive_customer,
+            Invoice.STATUS_OVERDUE,
+            Decimal("70.00"),
+            issue_date=today - timedelta(days=20),
+        )
+        draft_invoice = create_invoice(
+            "INV-CEO-DRAFT",
+            self.customer,
+            Invoice.STATUS_DRAFT,
+            Decimal("500.00"),
+        )
+        failed_invoice = create_invoice(
+            "INV-CEO-FAILED",
+            self.customer,
+            Invoice.STATUS_PAID,
+            Decimal("999.00"),
+        )
+        no_paid_at_invoice = create_invoice(
+            "INV-CEO-NO-PAID-AT",
+            self.customer,
+            Invoice.STATUS_PAID,
+            Decimal("111.00"),
+        )
+
+        InvoiceItem.objects.create(
+            invoice=current_invoice,
+            description="Hair Cut | OrderID: HC-1",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("120.00"),
+            line_total=Decimal("120.00"),
+        )
+        InvoiceItem.objects.create(
+            invoice=current_invoice,
+            description="Massage",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("80.00"),
+            line_total=Decimal("80.00"),
+        )
+        InvoiceItem.objects.create(
+            invoice=previous_invoice,
+            description="Hair Cut | OrderID: HC-2",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("80.00"),
+            line_total=Decimal("80.00"),
+        )
+        InvoiceItem.objects.create(
+            invoice=second_invoice,
+            description="Facial",
+            quantity=Decimal("2.00"),
+            unit_price=Decimal("60.00"),
+            line_total=Decimal("120.00"),
+        )
+        InvoiceItem.objects.create(
+            invoice=partial_invoice,
+            description="Hair Cut | OrderID: HC-3",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("30.00"),
+            line_total=Decimal("30.00"),
+        )
+        InvoiceItem.objects.create(
+            invoice=draft_invoice,
+            description="Draft Package",
+            quantity=Decimal("1.00"),
+            unit_price=Decimal("500.00"),
+            line_total=Decimal("500.00"),
+        )
+
+        payment_rows = (
+            (current_invoice, "PAY-CEO-CURRENT", PaymentRecord.STATUS_SUCCEEDED, Decimal("200.00"), today),
+            (previous_invoice, "PAY-CEO-PREVIOUS", PaymentRecord.STATUS_SUCCEEDED, Decimal("80.00"), previous_payment_day),
+            (second_invoice, "PAY-CEO-SECOND", PaymentRecord.STATUS_SUCCEEDED, Decimal("120.00"), today),
+            (partial_invoice, "PAY-CEO-PARTIAL", PaymentRecord.STATUS_PARTIALLY_REFUNDED, Decimal("30.00"), today),
+            (failed_invoice, "PAY-CEO-FAILED", PaymentRecord.STATUS_FAILED, Decimal("999.00"), today),
+            (failed_invoice, "PAY-CEO-CANCELLED", PaymentRecord.STATUS_CANCELLED, Decimal("888.00"), today),
+            (failed_invoice, "PAY-CEO-PENDING", PaymentRecord.STATUS_PENDING, Decimal("777.00"), today),
+            (failed_invoice, "PAY-CEO-REFUNDED", PaymentRecord.STATUS_REFUNDED, Decimal("666.00"), today),
+            (no_paid_at_invoice, "PAY-CEO-NO-PAID-AT", PaymentRecord.STATUS_SUCCEEDED, Decimal("111.00"), None),
+        )
+        for invoice, reference, status, amount, paid_day in payment_rows:
+            PaymentRecord.objects.create(
+                invoice=invoice,
+                payment_reference=reference,
+                provider=PaymentRecord.PROVIDER_STRIPE,
+                status=status,
+                amount=amount,
+                currency="SGD",
+                paid_at=self._aware_datetime(paid_day) if paid_day else None,
+            )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("ceo-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_sales"], Decimal("430.00"))
+        self.assertEqual(response.context["sales_this_month"], Decimal("350.00"))
+        self.assertEqual(response.context["sales_previous_month"], Decimal("80.00"))
+        self.assertEqual(response.context["active_customer_total"], 2)
+        self.assertEqual(response.context["buying_customer_total"], 2)
+        self.assertEqual(response.context["repeat_buyer_total"], 2)
+        self.assertEqual(response.context["new_customer_count_this_month"], 3)
+        self.assertEqual(response.context["outstanding_sales_to_collect"], Decimal("125.00"))
+        self.assertEqual(response.context["average_paid_invoice_value"], Decimal("107.50"))
+        self.assertEqual(response.context["top_spending_customers"][0]["name"], self.customer.name)
+        self.assertEqual(response.context["top_spending_customers"][0]["total_spent"], Decimal("280.00"))
+        self.assertEqual(response.context["top_spending_customers"][1]["name"], customer_two.name)
+        self.assertEqual(response.context["top_spending_customers"][1]["total_spent"], Decimal("150.00"))
+        self.assertEqual(response.context["top_service_items"][0]["name"], "Hair Cut")
+        self.assertEqual(response.context["top_service_items"][0]["sales"], Decimal("230.00"))
+        self.assertEqual(response.context["top_service_items"][1]["name"], "Facial")
+        self.assertEqual(response.context["top_service_items"][1]["sales"], Decimal("120.00"))
+        self.assertEqual(response.context["top_service_or_product"], "Hair Cut")
+        self.assertEqual(response.context["monthly_sales_values"][-1], 350.0)
+        self.assertIn(80.0, response.context["monthly_sales_values"])
+        self.assertNotIn(500.0, response.context["monthly_sales_values"])
+        self.assertNotIn(999.0, response.context["monthly_sales_values"])
+
+    def test_ceo_dashboard_empty_state_uses_zeroes_and_no_placeholders(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("ceo-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_sales"], Decimal("0.00"))
+        self.assertEqual(response.context["sales_this_month"], Decimal("0.00"))
+        self.assertEqual(response.context["outstanding_sales_to_collect"], Decimal("0.00"))
+        self.assertEqual(response.context["top_spending_customers"], [])
+        self.assertEqual(response.context["top_service_items"], [])
+        self.assertFalse(response.context["monthly_sales_chart_summary"]["has_data"])
+        self.assertContains(response, "S$0.00")
+        self.assertContains(response, "No paying customers yet.")
+        self.assertContains(response, "No paid service or product sales yet.")
+        self.assertContains(response, "No monthly sales data is available yet.")
+        self.assertNotContains(response, "S$None")
+        self.assertNotContains(response, ">None<")
+
     def test_management_dashboard_shows_ranked_attention_rows_with_correct_links(self):
         overdue_invoice = Invoice.objects.create(
             invoice_number="INV-CORE-2003",
@@ -536,6 +755,36 @@ class CoreCollectionReportingTests(TestCase):
         )
         self.client.force_login(staff_user)
         staff_response = self.client.get(reverse("dashboard"))
+        self.assertEqual(staff_response.status_code, 302)
+        self.assertEqual(staff_response.url, reverse("my-payslips"))
+
+    def test_ceo_dashboard_is_reserved_for_management_roles(self):
+        superadmin = User.objects.create_superuser(
+            username="core_ceo_super",
+            email="core_ceo_super@example.com",
+            password="TempPass123!",
+        )
+        self.client.force_login(superadmin)
+        super_response = self.client.get(reverse("ceo-dashboard"))
+        self.assertEqual(super_response.status_code, 200)
+        self.assertContains(super_response, "CEO Dashboard")
+        self.assertContains(super_response, "Total Sales")
+        self.client.logout()
+
+        staff_user = User.objects.create_user(username="core_ceo_staff", password="TempPass123!")
+        staff_user.role_profile.role = STAFF
+        staff_user.role_profile.save(update_fields=["role", "updated_at"])
+        Employee.objects.create(
+            user=staff_user,
+            employee_code="STF-900005",
+            first_name="Core",
+            last_name="CeoStaff",
+            email="core_ceo_staff@example.com",
+            hire_date=timezone.localdate(),
+            base_salary=Decimal("2500.00"),
+        )
+        self.client.force_login(staff_user)
+        staff_response = self.client.get(reverse("ceo-dashboard"))
         self.assertEqual(staff_response.status_code, 302)
         self.assertEqual(staff_response.url, reverse("my-payslips"))
 
@@ -671,14 +920,14 @@ class CoreCollectionReportingTests(TestCase):
             (
                 superadmin_user,
                 reverse("dashboard"),
-                ["Management Dashboard", "Invoicing", "Reports", "Admin Console"],
+                ["Management Dashboard", "CEO Dashboard", "Invoicing", "Reports", "Admin Console"],
                 ["My Payslips", "My Invoices", "Finance Dashboard"],
                 [],
             ),
             (
                 admin_user,
                 reverse("dashboard"),
-                ["Management Dashboard", "Invoicing", "Reports", "Admin Console"],
+                ["Management Dashboard", "CEO Dashboard", "Invoicing", "Reports", "Admin Console"],
                 ["My Payslips", "My Invoices", "Finance Dashboard"],
                 [],
             ),
@@ -686,14 +935,14 @@ class CoreCollectionReportingTests(TestCase):
                 finance_user,
                 reverse("invoice-dashboard"),
                 ["Invoicing", "Reports", "Support Tickets"],
-                ["Management Dashboard", "Admin Console", "My Payslips", "Finance Dashboard"],
+                ["Management Dashboard", "CEO Dashboard", "Admin Console", "My Payslips", "Finance Dashboard"],
                 [],
             ),
             (
                 hr_user,
                 reverse("payroll-dashboard"),
                 ["Payroll Officer Dashboard", "Support Tickets"],
-                ["Management Dashboard", "Admin Console"],
+                ["Management Dashboard", "CEO Dashboard", "Admin Console"],
                 [
                     f'href="{reverse("invoice-dashboard")}"',
                     f'href="{reverse("invoice-list")}"',
@@ -707,7 +956,7 @@ class CoreCollectionReportingTests(TestCase):
                 staff_user,
                 reverse("my-payslips"),
                 ["My Payslips"],
-                ["Management Dashboard", "Admin Console", "Support Tickets"],
+                ["Management Dashboard", "CEO Dashboard", "Admin Console", "Support Tickets"],
                 [
                     f'href="{reverse("invoice-dashboard")}"',
                     f'href="{reverse("invoice-list")}"',
@@ -721,7 +970,7 @@ class CoreCollectionReportingTests(TestCase):
                 customer_user,
                 reverse("customer-invoice-dashboard"),
                 ["My Invoices"],
-                ["Management Dashboard", "Admin Console", "Support Tickets"],
+                ["Management Dashboard", "CEO Dashboard", "Admin Console", "Support Tickets"],
                 [
                     f'href="{reverse("invoice-dashboard")}"',
                     f'href="{reverse("invoice-list")}"',

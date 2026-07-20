@@ -1,9 +1,10 @@
+from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import DatabaseError
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -12,7 +13,7 @@ from django.utils import timezone
 from accounts.permissions import get_role_landing_route_name, get_user_role, role_required
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, SUPERADMIN
 from imports.models import ImportJob, ImportRowError
-from invoicing.models import Customer, Invoice
+from invoicing.models import Customer, Invoice, InvoiceItem
 from notifications.models import EmailDeliveryLog
 from payments.models import PaymentRecord
 from payments.services import successful_payments_queryset
@@ -192,6 +193,16 @@ def _currency_string(value):
     return f"S${float(value or 0):,.2f}"
 
 
+def _money_decimal(value):
+    return Decimal(value or 0).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _average_money(total, count):
+    if not count:
+        return Decimal("0.00")
+    return (Decimal(total or 0) / Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def _currency_delta_note(current, previous, comparison_label):
     delta = (current or 0) - (previous or 0)
     if delta > 0:
@@ -227,6 +238,211 @@ def _build_chart_summary(month_labels, values):
         "six_month_total": total_value,
         "peak_label": peak_label,
         "peak_value": peak_value,
+    }
+
+
+def _normalize_service_item_name(description):
+    base_name = (description or "").split("|", 1)[0].strip()
+    return base_name or "Unlabelled Service / Product"
+
+
+def _build_ceo_service_items(successful_payments):
+    paid_invoice_ids = successful_payments.values_list("invoice_id", flat=True).distinct()
+    item_rows = _safe_list(
+        InvoiceItem.objects.filter(invoice_id__in=paid_invoice_ids).values(
+            "description",
+            "quantity",
+            "line_total",
+        )
+    )
+    service_totals = {}
+    for row in item_rows:
+        name = _normalize_service_item_name(row.get("description"))
+        summary = service_totals.setdefault(
+            name,
+            {
+                "name": name,
+                "quantity": Decimal("0.00"),
+                "sales": Decimal("0.00"),
+            },
+        )
+        summary["quantity"] += Decimal(row.get("quantity") or 0)
+        summary["sales"] += Decimal(row.get("line_total") or 0)
+
+    return sorted(
+        service_totals.values(),
+        key=lambda item: (-item["sales"], item["name"]),
+    )[:5]
+
+
+def _build_ceo_dashboard_context():
+    today = timezone.localdate()
+    current_month_start = today.replace(day=1)
+    previous_month_end = current_month_start - timezone.timedelta(days=1)
+    previous_month_start = previous_month_end.replace(day=1)
+    previous_month_label = previous_month_start.strftime("%B %Y")
+    reporting_period_label = current_month_start.strftime("%B %Y")
+    report_generated_at = timezone.localtime()
+
+    successful_payments = successful_payments_queryset().select_related("invoice", "invoice__customer")
+    total_sales = _money_decimal(_safe_sum(successful_payments, "amount"))
+    sales_this_month = _money_decimal(
+        _safe_sum(
+            successful_payments.filter(paid_at__date__gte=current_month_start, paid_at__date__lte=today),
+            "amount",
+        )
+    )
+    sales_previous_month = _money_decimal(
+        _safe_sum(
+            successful_payments.filter(
+                paid_at__date__gte=previous_month_start,
+                paid_at__date__lte=previous_month_end,
+            ),
+            "amount",
+        )
+    )
+    paid_payment_count = _safe_count(successful_payments)
+
+    month_starts = _recent_month_starts(today, total_months=6)
+    month_labels = [month.strftime("%b %Y") for month in month_starts]
+    month_keys = [month.strftime("%Y-%m") for month in month_starts]
+    payment_month_rows = _safe_list(
+        successful_payments.annotate(month=TruncMonth("paid_at"))
+        .values("month")
+        .annotate(total=Sum("amount"))
+        .order_by("month")
+    )
+    sales_by_month = {}
+    for row in payment_month_rows:
+        month_value = row.get("month")
+        if not month_value:
+            continue
+        sales_by_month[month_value.strftime("%Y-%m")] = _to_float(row.get("total"))
+    monthly_sales_values = [sales_by_month.get(month_key, 0.0) for month_key in month_keys]
+    monthly_sales_chart_summary = _build_chart_summary(month_labels, monthly_sales_values)
+
+    outstanding_invoice_statuses = [
+        Invoice.STATUS_SENT,
+        Invoice.STATUS_VIEWED,
+        Invoice.STATUS_OVERDUE,
+    ]
+    outstanding_invoices = Invoice.objects.filter(status__in=outstanding_invoice_statuses)
+    outstanding_sales_to_collect = _money_decimal(_safe_sum(outstanding_invoices, "total_amount"))
+    outstanding_invoice_count = _safe_count(outstanding_invoices)
+
+    active_customer_total = _safe_count(Customer.objects.filter(status=Customer.STATUS_ACTIVE))
+    buying_customer_total = _safe_count(successful_payments.values("invoice__customer_id").distinct())
+    repeat_buyer_total = _safe_count(
+        successful_payments.values("invoice__customer_id")
+        .annotate(paid_invoice_count=Count("invoice_id", distinct=True))
+        .filter(paid_invoice_count__gte=2)
+    )
+    new_customer_count_this_month = _safe_count(
+        Customer.objects.filter(created_at__date__gte=current_month_start, created_at__date__lte=today)
+    )
+    average_paid_invoice_value = _average_money(total_sales, paid_payment_count)
+
+    top_spending_customer_rows = _safe_list(
+        successful_payments.values(
+            "invoice__customer_id",
+            "invoice__customer__name",
+            "invoice__customer__email",
+        )
+        .annotate(
+            total_spent=Sum("amount"),
+            invoice_count=Count("invoice_id", distinct=True),
+            last_payment_at=Max("paid_at"),
+        )
+        .order_by("-total_spent", "invoice__customer__name")[:5]
+    )
+    top_spending_customers = []
+    for row in top_spending_customer_rows:
+        customer_id = row.get("invoice__customer_id")
+        top_spending_customers.append(
+            {
+                "customer_id": customer_id,
+                "name": row.get("invoice__customer__name") or "Unknown Customer",
+                "email": row.get("invoice__customer__email") or "",
+                "invoice_count": row.get("invoice_count") or 0,
+                "total_spent": _money_decimal(row.get("total_spent")),
+                "last_payment_at": row.get("last_payment_at"),
+                "report_query": _query_string({"customer": customer_id}),
+            }
+        )
+
+    top_service_items = _build_ceo_service_items(successful_payments)
+    top_service_or_product = top_service_items[0]["name"] if top_service_items else "No paid services yet"
+    top_service_labels = [item["name"] for item in top_service_items]
+    top_service_values = [_to_float(item["sales"]) for item in top_service_items]
+
+    ceo_summary_items = [
+        {
+            "label": "Average Paid Invoice Value",
+            "value": _currency_string(average_paid_invoice_value),
+            "note": f"Across {paid_payment_count} paid payment(s).",
+        },
+        {
+            "label": "Repeat Buyers",
+            "value": str(repeat_buyer_total),
+            "note": "Customers with two or more paid invoices.",
+        },
+        {
+            "label": "New Customers This Month",
+            "value": str(new_customer_count_this_month),
+            "note": f"New customer records created in {reporting_period_label}.",
+        },
+        {
+            "label": "Top Service / Product",
+            "value": top_service_or_product,
+            "note": "Based on paid invoice item sales.",
+        },
+    ]
+
+    related_report_links = [
+        {
+            "label": "Invoice / Customer Report",
+            "url": reverse("invoice-customer-report"),
+        },
+        {
+            "label": "Payment Report",
+            "url": reverse("payment-stripe-report"),
+        },
+        {
+            "label": "Invoice Dashboard",
+            "url": reverse("invoice-dashboard"),
+        },
+    ]
+
+    return {
+        "total_sales": total_sales,
+        "sales_this_month": sales_this_month,
+        "sales_previous_month": sales_previous_month,
+        "sales_comparison_note": _currency_delta_note(
+            sales_this_month,
+            sales_previous_month,
+            previous_month_label,
+        ),
+        "active_customer_total": active_customer_total,
+        "buying_customer_total": buying_customer_total,
+        "repeat_buyer_total": repeat_buyer_total,
+        "new_customer_count_this_month": new_customer_count_this_month,
+        "outstanding_sales_to_collect": outstanding_sales_to_collect,
+        "outstanding_invoice_count": outstanding_invoice_count,
+        "average_paid_invoice_value": average_paid_invoice_value,
+        "paid_payment_count": paid_payment_count,
+        "top_spending_customers": top_spending_customers,
+        "top_service_items": top_service_items,
+        "top_service_or_product": top_service_or_product,
+        "top_service_labels": top_service_labels,
+        "top_service_values": top_service_values,
+        "monthly_sales_labels": month_labels,
+        "monthly_sales_values": monthly_sales_values,
+        "monthly_sales_chart_summary": monthly_sales_chart_summary,
+        "reporting_period_label": reporting_period_label,
+        "report_generated_at": report_generated_at,
+        "previous_month_label": previous_month_label,
+        "ceo_summary_items": ceo_summary_items,
+        "related_report_links": related_report_links,
     }
 
 
@@ -589,6 +805,18 @@ def dashboard(request):
             "payroll_chart_summary": payroll_chart_summary,
         },
     )
+
+
+@login_required
+def ceo_dashboard(request):
+    role = get_user_role(request.user)
+    if role not in {SUPERADMIN, ADMIN}:
+        landing_route_name = get_role_landing_route_name(request.user)
+        if landing_route_name == "dashboard":
+            raise PermissionDenied("You do not have permission to access this page.")
+        return redirect(landing_route_name)
+
+    return render(request, "core/ceo_dashboard.html", _build_ceo_dashboard_context())
 
 
 @login_required
