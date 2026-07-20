@@ -3,14 +3,16 @@
 {% block title %}Announcement Email | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Announcement Email</h1>
-        <p class="page-subtitle">Send announcements to selected internal and customer role groups.</p>
-    </div>
-</div>
 <div class="row justify-content-center">
     <div class="col-lg-8">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Announcement Email</h1>
+                <p class="page-subtitle">Send announcements to selected internal and customer role groups.</p>
+            </div>
+            <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
+        </div>
+
         <div class="card">
             <div class="card-header">Announcement Email</div>
             <div class="card-body">
@@ -39,7 +41,6 @@
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">Send Announcement</button>
-                        <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Cancel</a>
                     </div>
                 </form>
             </div>

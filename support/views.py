@@ -152,6 +152,7 @@ def _build_ticket_list_context(
         "page_subtitle": page_subtitle,
         "show_requester_details": show_requester_details,
         "show_assignment": show_assignment,
+        "back_url": _ticket_list_back_url_for(request.user),
         **selected_filters,
     }
 
@@ -286,6 +287,21 @@ def _internal_ticket_back_url_for(user):
     if get_user_role(user) == FINANCE:
         return reverse("finance-support-ticket-list")
     return reverse("support-ticket-list")
+
+
+def _ticket_list_back_url_for(user):
+    role = get_user_role(user)
+    if role in {SUPERADMIN, ADMIN}:
+        return reverse("admin-dashboard")
+    if role == FINANCE:
+        return reverse("invoice-dashboard")
+    if role == HR:
+        return reverse("payroll-dashboard")
+    if role == CUSTOMER:
+        return reverse("customer-invoice-dashboard")
+    if role == STAFF:
+        return reverse("my-payslips")
+    return ""
 
 
 @login_required

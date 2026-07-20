@@ -833,7 +833,7 @@ def payment_reminder_settings_update(request):
             ip_address=get_client_ip(request),
         )
         messages.success(request, "Payment reminder settings updated.")
-        return redirect("admin-dashboard")
+        return redirect("payment-reminder-settings-update")
     return render(
         request,
         "accounts/payment_reminder_settings.html",
@@ -887,13 +887,13 @@ def mass_email_send(request):
     reminder_settings = PaymentReminderSettings.load()
     if not reminder_settings.mass_email_enabled:
         messages.error(request, "Announcement email sending is disabled in reminder settings.")
-        return redirect("admin-dashboard")
+        return redirect("mass-email-send")
     if form.is_valid():
         selected_roles = form.cleaned_data["recipients"]
         recipient_emails, skipped_count = _collect_announcement_recipient_emails(selected_roles)
         if not recipient_emails:
             messages.error(request, "No users with usable email addresses matched the selected roles.")
-            return redirect("admin-dashboard")
+            return redirect("mass-email-send")
 
         sent_count = 0
         failed_count = 0
@@ -933,7 +933,7 @@ def mass_email_send(request):
             messages.error(request, summary)
         else:
             messages.success(request, summary)
-        return redirect("admin-dashboard")
+        return redirect("mass-email-send")
     return render(request, "accounts/mass_email.html", {"form": form})
 
 

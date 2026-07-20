@@ -841,7 +841,7 @@ class AccountsPhaseOneTests(TestCase):
                 "mass_email_enabled": "on",
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse("payment-reminder-settings-update"))
 
         reminder_settings = PaymentReminderSettings.load()
         self.assertTrue(reminder_settings.before_due_reminders_enabled)

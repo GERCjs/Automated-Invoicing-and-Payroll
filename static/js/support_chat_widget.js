@@ -5,7 +5,8 @@
     }
 
     const panel = widget.querySelector("#support-chat-panel");
-    const toggles = widget.querySelectorAll("[data-support-chat-toggle]");
+    const launcher = widget.querySelector(".support-chat-launcher");
+    const closeButton = widget.querySelector(".support-chat-close");
     const form = widget.querySelector("[data-support-chat-form]");
     const messages = widget.querySelector("[data-support-chat-messages]");
     const messageInput = widget.querySelector("[data-support-chat-input]");
@@ -17,19 +18,52 @@
     const optionsScript = widget.querySelector("#support-chat-options");
     const chatOptions = optionsScript ? JSON.parse(optionsScript.textContent) : { options: [], references: [] };
     const responseTargetDays = Number(chatOptions.responseTargetDays || 0);
+    const initialMessagesHtml = messages.innerHTML;
     let activeOption = null;
+    let awaitingMoreHelp = false;
+    let chatEnded = false;
+    let hasUserInteracted = false;
+
     const generalAnswers = [
         {
             keywords: ["pay invoice", "make payment", "how to pay", "payment method", "bank transfer", "card payment"],
             answer: "Open My Invoices, choose the invoice, then use the payment instructions or available payment action on that invoice page.",
         },
         {
+            keywords: ["download invoice", "invoice pdf", "save invoice"],
+            answer: "Open My Invoices, choose the invoice, then use Download PDF on the invoice page.",
+        },
+        {
             keywords: ["view invoice", "find invoice", "my invoice", "invoice history"],
             answer: "Open My Invoices to see pending, overdue, and paid invoices linked to your account.",
         },
         {
+            keywords: ["calculate invoice", "invoice calculated", "invoice total", "invoice amount", "amount due", "gst", "tax"],
+            answer: "Invoice totals are based on the invoice line items, quantities, unit prices, and any GST or tax shown on the invoice. If a specific invoice amount looks wrong, choose Invoice amount is wrong and select that invoice.",
+        },
+        {
             keywords: ["view payslip", "my payslip", "payslip history", "payroll record"],
             answer: "Open My Payslips to view the payroll records linked to your staff account.",
+        },
+        {
+            keywords: ["download payslip", "payslip pdf", "save payslip"],
+            answer: "Open My Payslips and use Download PDF beside the payslip you need.",
+        },
+        {
+            keywords: ["calculate my pay", "how do you calculate my pay", "pay calculated", "salary calculated", "net salary", "gross salary", "deduction", "deductions", "cpf", "allowance", "allowances", "commission"],
+            answer: "Your pay is calculated from the payroll record: basic salary plus allowances or commissions, minus deductions and employee CPF. Open My Payslips for the exact breakdown. If a specific payslip looks wrong, choose My payslip looks wrong and select that payslip.",
+        },
+        {
+            keywords: ["reset password", "change password", "forgot password", "update password"],
+            answer: "Use the account password reset or ask Admin if you cannot access your account. If you still cannot log in, choose I need account help so Admin can follow up.",
+        },
+        {
+            keywords: ["what is cpf", "cpf meaning", "employee cpf"],
+            answer: "CPF is the employee contribution deducted from payroll according to the payroll record. Your payslip shows the CPF amount used for that pay period.",
+        },
+        {
+            keywords: ["why overdue", "overdue invoice", "payment reminder", "reminder email"],
+            answer: "Reminder emails are sent based on the saved reminder rules. An invoice is treated as overdue when the due date has passed and payment has not been recorded.",
         },
         {
             keywords: ["ticket status", "support status", "my support", "support request", "request history"],
@@ -97,36 +131,189 @@
         messageInput.placeholder = "Write a message...";
     }
 
-    function showTopicOptions(prompt) {
-        appendQuickReplies(prompt, chatOptions.options || [], (option) => {
-            activeOption = option;
-            categoryInput.value = option.category || "";
-            issueInput.value = option.label || "";
-            referenceInput.value = "";
-            appendMessage(option.label, "user");
+    function resetChat() {
+        form.reset();
+        messageInput.style.height = "";
+        resetConversationMetadata();
+        awaitingMoreHelp = false;
+        chatEnded = false;
+        hasUserInteracted = false;
+        submitButton.disabled = false;
+        submitButton.textContent = "Send";
+        messages.innerHTML = initialMessagesHtml;
+        showTopicOptions("Choose a topic so we can route this correctly.");
+    }
 
-            const references = option.referenceKind ? chatOptions.references || [] : [];
-            if (references.length) {
-                appendQuickReplies(option.prompt || "Which record is this about?", references, (reference) => {
-                    invoiceIdInput.value = reference.id || "";
-                    referenceInput.value = reference.value || "";
-                    appendMessage(reference.label, "user");
-                    appendMessage(option.detailPrompt || "Tell us more about the issue.", "bot");
-                    messageInput.placeholder = option.detailPrompt || "Write a message...";
-                    messageInput.focus();
-                });
-                return;
+    function setOpen(isOpen) {
+        panel.hidden = !isOpen;
+        [launcher, closeButton].forEach((toggle) => {
+            if (toggle) {
+                toggle.setAttribute("aria-expanded", String(isOpen));
             }
-
-            const noReferencePrompt = option.referenceKind === "invoice"
-                ? "I could not find a linked invoice to attach here. Open the invoice from My Invoices and use Ask About This Invoice."
-                : option.referenceKind
-                    ? "I could not find linked records to show here."
-                    : option.prompt || "Tell us more about the issue.";
-            appendMessage(noReferencePrompt, "bot");
-            messageInput.placeholder = option.detailPrompt || "Write a message...";
-            messageInput.focus();
         });
+        if (isOpen) {
+            messageInput.focus();
+        }
+    }
+
+    function closeChatWithConfirmation() {
+        if (panel.hidden) {
+            return;
+        }
+        if (!hasUserInteracted) {
+            setOpen(false);
+            return;
+        }
+        const shouldExit = window.confirm("Exit chat? Your current chat will restart.");
+        if (!shouldExit) {
+            return;
+        }
+        resetChat();
+        setOpen(false);
+    }
+
+    function endChat() {
+        resetConversationMetadata();
+        awaitingMoreHelp = false;
+        chatEnded = true;
+        appendMessage("Okay, ending this chat. You can reopen it anytime.", "bot");
+        window.setTimeout(() => {
+            resetChat();
+            setOpen(false);
+        }, 900);
+    }
+
+    function showMoreHelpPrompt(prompt) {
+        awaitingMoreHelp = true;
+        resetConversationMetadata();
+        appendQuickReplies(
+            prompt,
+            [
+                { label: "Yes, I need help", value: "yes" },
+                { label: "No, end chat", value: "no" },
+            ],
+            (reply) => {
+                hasUserInteracted = true;
+                appendMessage(reply.label, "user");
+                if (reply.value === "no") {
+                    endChat();
+                    return;
+                }
+                awaitingMoreHelp = false;
+                showTopicOptions("Choose a topic so we can route this correctly.");
+                messageInput.focus();
+            }
+        );
+    }
+
+    function startOption(option, config) {
+        const options = config || {};
+        activeOption = option;
+        categoryInput.value = option.category || "";
+        issueInput.value = option.label || "";
+        invoiceIdInput.value = "";
+        referenceInput.value = "";
+        awaitingMoreHelp = false;
+        hasUserInteracted = true;
+
+        if (options.appendUserChoice !== false) {
+            appendMessage(option.label, "user");
+        }
+
+        const references = option.referenceKind ? chatOptions.references || [] : [];
+        if (references.length) {
+            appendQuickReplies(option.prompt || "Which record is this about?", references, (reference) => {
+                invoiceIdInput.value = reference.id || "";
+                referenceInput.value = reference.value || "";
+                hasUserInteracted = true;
+                appendMessage(reference.label, "user");
+                appendMessage(option.detailPrompt || "Tell us more about the issue.", "bot");
+                messageInput.placeholder = option.detailPrompt || "Write a message...";
+                messageInput.focus();
+            });
+            return;
+        }
+
+        const noReferencePrompt = option.referenceKind === "invoice"
+            ? "I could not find a linked invoice to attach here. Open the invoice from My Invoices and use Ask About This Invoice."
+            : option.referenceKind
+                ? "I could not find linked records to show here."
+                : option.prompt || "Tell us more about the issue.";
+        appendMessage(noReferencePrompt, "bot");
+        messageInput.placeholder = option.detailPrompt || "Write a message...";
+        messageInput.focus();
+    }
+
+    function showTopicOptions(prompt) {
+        awaitingMoreHelp = false;
+        appendQuickReplies(prompt, chatOptions.options || [], (option) => {
+            startOption(option);
+        });
+    }
+
+    function normalizeMessage(message) {
+        return message.toLowerCase().replace(/[.!?]/g, "").trim();
+    }
+
+    function isNegativeResponse(message) {
+        return [
+            "no",
+            "nope",
+            "nah",
+            "no thanks",
+            "no thank you",
+            "nothing else",
+            "that's all",
+            "thats all",
+        ].includes(normalizeMessage(message));
+    }
+
+    function isAffirmativeResponse(message) {
+        return [
+            "yes",
+            "yeah",
+            "yup",
+            "sure",
+            "ok",
+            "okay",
+            "i need help",
+        ].includes(normalizeMessage(message));
+    }
+
+    function includesAny(normalized, keywords) {
+        return keywords.some((keyword) => normalized.includes(keyword));
+    }
+
+    function optionByLabel(label) {
+        return (chatOptions.options || []).find((option) => option.label === label) || null;
+    }
+
+    function inferOptionFromMessage(message) {
+        const normalized = message.toLowerCase();
+        const accountKeywords = ["account", "login", "log in", "password", "profile", "access"];
+        if (includesAny(normalized, accountKeywords)) {
+            return optionByLabel("I need account help");
+        }
+
+        if (chatOptions.role === "staff") {
+            if (includesAny(normalized, ["did not receive", "didn't receive", "not paid", "missing pay", "salary missing", "pay missing", "never receive pay"])) {
+                return optionByLabel("I did not receive my pay");
+            }
+            if (includesAny(normalized, ["payslip", "pay slip", "salary", "payroll", "cpf", "deduction", "allowance", "commission", "net salary", "gross salary", "pay amount"])) {
+                return optionByLabel("My payslip looks wrong");
+            }
+        }
+
+        if (chatOptions.role === "customer") {
+            if (includesAny(normalized, ["payment", "paid", "pay", "card", "stripe", "receipt", "refund", "failed payment", "payment failed"])) {
+                return optionByLabel("I have a payment issue");
+            }
+            if (includesAny(normalized, ["invoice", "bill", "amount", "total", "gst", "tax", "charge", "overcharged", "wrong amount"])) {
+                return optionByLabel("Invoice amount is wrong");
+            }
+        }
+
+        return null;
     }
 
     function findGeneralAnswer(message) {
@@ -137,21 +324,95 @@
         return matchedAnswer ? matchedAnswer.answer : "";
     }
 
-    function setOpen(isOpen) {
-        panel.hidden = !isOpen;
-        toggles.forEach((toggle) => {
-            toggle.setAttribute("aria-expanded", String(isOpen));
-        });
-        if (isOpen) {
-            messageInput.focus();
-        }
+    function looksLikeSupportIssue(message) {
+        const normalized = message.toLowerCase();
+        return [
+            "wrong",
+            "error",
+            "issue",
+            "problem",
+            "failed",
+            "cannot",
+            "can't",
+            "unable",
+            "missing",
+            "incorrect",
+            "did not receive",
+            "didn't receive",
+        ].some((keyword) => normalized.includes(keyword));
     }
 
-    toggles.forEach((toggle) => {
-        toggle.addEventListener("click", () => {
-            setOpen(panel.hidden);
+    function clearComposer() {
+        form.reset();
+        messageInput.style.height = "";
+        messageInput.focus();
+    }
+
+    function handleNonTicketMessage(message) {
+        hasUserInteracted = true;
+        appendMessage(message, "user");
+
+        if (isNegativeResponse(message)) {
+            clearComposer();
+            endChat();
+            return;
+        }
+
+        if (awaitingMoreHelp && isAffirmativeResponse(message)) {
+            awaitingMoreHelp = false;
+            clearComposer();
+            showTopicOptions("Choose a topic so we can route this correctly.");
+            return;
+        }
+
+        if (looksLikeSupportIssue(message)) {
+            const inferredIssueOption = inferOptionFromMessage(message);
+            clearComposer();
+            if (inferredIssueOption) {
+                startOption(inferredIssueOption, { appendUserChoice: false });
+                return;
+            }
+            appendMessage("It sounds like this may need an officer to check. Please choose a topic first so we can route it correctly.", "bot");
+            showTopicOptions("Choose a topic so we can route this correctly.");
+            return;
+        }
+
+        const generalAnswer = findGeneralAnswer(message);
+        if (generalAnswer) {
+            appendMessage(generalAnswer, "bot");
+            clearComposer();
+            showMoreHelpPrompt("Do you need help with anything else?");
+            return;
+        }
+
+        const inferredOption = inferOptionFromMessage(message);
+        if (inferredOption) {
+            clearComposer();
+            startOption(inferredOption, { appendUserChoice: false });
+            return;
+        }
+
+        appendMessage("I can answer common questions here. For account-specific issues, choose a topic first so the request is routed to the correct officer.", "bot");
+        clearComposer();
+        showTopicOptions("Choose a topic so we can route this correctly.");
+    }
+
+    if (launcher) {
+        launcher.addEventListener("click", () => {
+            if (panel.hidden) {
+                if (chatEnded) {
+                    resetChat();
+                }
+                setOpen(true);
+                return;
+            }
+            closeChatWithConfirmation();
         });
-    });
+    }
+
+    if (closeButton) {
+        closeButton.addEventListener("click", closeChatWithConfirmation);
+    }
 
     messageInput.addEventListener("input", () => {
         messageInput.style.height = "auto";
@@ -174,16 +435,10 @@
             appendMessage("Please type a message before sending.", "bot");
             return;
         }
+        hasUserInteracted = true;
 
-        const generalAnswer = activeOption ? "" : findGeneralAnswer(message);
-        if (generalAnswer) {
-            appendMessage(message, "user");
-            appendMessage(generalAnswer, "bot");
-            form.reset();
-            messageInput.style.height = "";
-            resetConversationMetadata();
-            showTopicOptions("Do you need to submit a support request?");
-            messageInput.focus();
+        if (!activeOption || awaitingMoreHelp || isNegativeResponse(message)) {
+            handleNonTicketMessage(message);
             return;
         }
 
@@ -205,11 +460,9 @@
                 return;
             }
             appendMessage(payload.message, "bot");
-            form.reset();
-            messageInput.style.height = "";
+            clearComposer();
             resetConversationMetadata();
-            showTopicOptions("Need help with anything else?");
-            messageInput.focus();
+            showMoreHelpPrompt("Need help with anything else?");
         } catch (error) {
             appendMessage("The request could not be sent right now. Please try again in a moment.", "bot");
         } finally {
@@ -218,6 +471,5 @@
         }
     });
 
-    resetConversationMetadata();
-    showTopicOptions("Choose a topic so we can route this correctly.");
+    resetChat();
 })();
