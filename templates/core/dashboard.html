@@ -11,7 +11,6 @@
     <section class="report-header report-section">
         <div>
             <h1 class="page-title">Management Dashboard</h1>
-            <p class="page-subtitle">CEO view of cash collection, issued receivables, operational risk, and drill-down reports.</p>
             <div class="report-header-meta">
                 <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
                 <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
@@ -24,57 +23,6 @@
         </div>
     </section>
 
-    <section class="report-section">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-            <h2 class="section-heading mb-0">CEO Health Snapshot</h2>
-            <span class="text-muted small">Payroll details stay in the Payroll Report.</span>
-        </div>
-        <div class="row g-3 report-kpi-grid">
-            <div class="col-12 col-md-6 col-xl">
-                <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
-                    <div class="card-body">
-                        <div class="report-kpi-label">Collected This Month</div>
-                        <div class="report-kpi-value">S${{ collected_this_month|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">{{ collection_comparison_note }} {{ successful_payment_count_this_month }} successful payment(s).</div>
-                        <a href="{% url 'payment-stripe-report' %}" class="report-link mt-auto">View Payment Report &rarr;</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl">
-                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
-                    <div class="card-body">
-                        <div class="report-kpi-label">Issued Outstanding</div>
-                        <div class="report-kpi-value">S${{ invoice_outstanding|floatformat:2|intcomma }}</div>
-                        <div class="small text-muted">Sent, viewed, and overdue invoices waiting for customer payment.</div>
-                        <a href="{% url 'invoice-customer-report' %}" class="report-link mt-auto">View Finance Report &rarr;</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-12 col-md-6 col-xl">
-                <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
-                    <div class="card-body">
-                        <div class="report-kpi-label">Operational Risk Items</div>
-                        <div class="report-kpi-value">{{ operational_risk_count }}</div>
-                        <div class="small text-muted">{{ payment_issue_count }} payment, {{ suspicious_activity_count }} security, {{ import_issue_total }} import.</div>
-                        <a href="#management-attention" class="report-link mt-auto">Review Attention List &rarr;</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <section class="report-section">
-        <div class="report-summary-strip">
-            {% for item in secondary_summary_items %}
-            <div class="report-summary-card">
-                <div class="report-summary-label">{{ item.label }}</div>
-                <div class="report-summary-value">{{ item.value }}</div>
-                <div class="report-summary-note">{{ item.note }}</div>
-                <a href="{{ item.link_url }}" class="report-link">{{ item.link_label }} &rarr;</a>
-            </div>
-            {% endfor %}
-        </div>
-    </section>
 
     <section class="report-section">
         <div class="card">
