@@ -8,6 +8,7 @@ from django.core.mail import send_mail
 from django.core.mail import EmailMultiAlternatives
 from django.db import transaction
 from django.db.models import Q
+from django.db.models import Sum
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
@@ -29,6 +30,7 @@ STRIPE_PAYMENT_SUCCESS_EMAIL_TEMPLATE_KEY = "stripe_payment_success_invoice_emai
 STRIPE_PAYMENT_FAILED_EMAIL_TEMPLATE_KEY = "stripe_payment_failed_invoice_email_v1"
 STRIPE_REFUND_SUCCESS_EMAIL_TEMPLATE_KEY = "stripe_refund_success_invoice_email_v1"
 STRIPE_REFUND_FAILED_EMAIL_TEMPLATE_KEY = "stripe_refund_failed_invoice_email_v1"
+BANK_TRANSFER_REFUND_SUCCESS_EMAIL_TEMPLATE_KEY = "bank_transfer_refund_success_invoice_email_v1"
 BANK_TRANSFER_PAYMENT_SUCCESS_EMAIL_TEMPLATE_KEY = "bank_transfer_payment_success_invoice_email_v1"
 
 
@@ -77,9 +79,32 @@ def _build_stripe_payment_email_context(
 
 
 def _calculate_amount_due(invoice: Invoice) -> Decimal:
-    if invoice.status == Invoice.STATUS_PAID:
+    if invoice.status in {
+        Invoice.STATUS_PAID,
+        Invoice.STATUS_PARTIALLY_REFUNDED,
+        Invoice.STATUS_REFUNDED,
+    }:
         return Decimal("0.00")
     return invoice.total_amount
+
+
+def _find_existing_sent_refund_email(
+    *,
+    template_key: str,
+    invoice: Invoice,
+    payment_refund,
+) -> EmailDeliveryLog | None:
+    sent_logs = EmailDeliveryLog.objects.filter(
+        template_key=template_key,
+        status=EmailDeliveryLog.STATUS_SENT,
+        related_object_type="invoice",
+        related_object_id=str(invoice.id),
+    ).order_by("-attempted_at")
+    for sent_log in sent_logs:
+        metadata = sent_log.metadata or {}
+        if metadata.get("payment_refund_id") == str(payment_refund.id):
+            return sent_log
+    return None
 
 
 def send_invoice_email(
@@ -492,12 +517,39 @@ def _build_stripe_refund_email_context(
     refund_status: str,
     failure_reason: str = "",
 ) -> dict:
+    from payments.models import PaymentRefund
+
+    if isinstance(payment_record, PaymentRefund):
+        payment_refund = payment_record
+        payment_record = payment_refund.payment_record
+        refund_amount = payment_refund.amount
+        customer_message = payment_refund.customer_message
+        payment_method_label = payment_refund.get_method_display()
+    else:
+        payment_refund = None
+        refund_amount = payment_record.amount
+        customer_message = ""
+        payment_method_label = payment_record.get_provider_display()
+    total_refunded_amount = (
+        PaymentRefund.objects.filter(
+            invoice=invoice,
+            status=PaymentRefund.STATUS_SUCCEEDED,
+        ).aggregate(total=Sum("amount"))["total"]
+        or Decimal("0.00")
+    )
+    remaining_paid_amount = max(Decimal(payment_record.amount) - total_refunded_amount, Decimal("0.00"))
     return {
         "invoice": invoice,
         "invoice_items": invoice.items.all(),
         "invoice_status_label": invoice.get_status_display(),
         "customer": invoice.customer,
         "payment_record": payment_record,
+        "payment_refund": payment_refund,
+        "refund_amount": refund_amount,
+        "total_refunded_amount": total_refunded_amount,
+        "remaining_paid_amount": remaining_paid_amount,
+        "customer_message": customer_message,
+        "payment_method_label": payment_method_label,
         "refund_status": refund_status,
         "failure_reason": failure_reason,
         "company_name": settings.COMPANY_NAME,
@@ -506,6 +558,115 @@ def _build_stripe_refund_email_context(
         "amount_due": _calculate_amount_due(invoice),
         "public_invoice_url": public_invoice_url,
     }
+
+
+def send_payment_refund_success_email(
+    *,
+    invoice: Invoice,
+    payment_refund,
+    public_invoice_url: str,
+    triggered_by=None,
+) -> tuple[bool, EmailDeliveryLog]:
+    template_key = (
+        BANK_TRANSFER_REFUND_SUCCESS_EMAIL_TEMPLATE_KEY
+        if payment_refund.method == "bank_transfer"
+        else STRIPE_REFUND_SUCCESS_EMAIL_TEMPLATE_KEY
+    )
+    existing_log = _find_existing_sent_refund_email(
+        template_key=template_key,
+        invoice=invoice,
+        payment_refund=payment_refund,
+    )
+    if existing_log is not None:
+        return True, existing_log
+
+    recipient = (invoice.customer.email or "").strip().lower()
+    context = _build_stripe_refund_email_context(
+        invoice=invoice,
+        payment_record=payment_refund,
+        public_invoice_url=public_invoice_url,
+        refund_status="successful",
+    )
+    subject = render_to_string("payments/emails/stripe_refund_success_subject.txt", context).strip()
+    text_body = render_to_string("payments/emails/stripe_refund_success_body.txt", context)
+    html_body = render_to_string("payments/emails/stripe_refund_success_body.html", context)
+
+    log = EmailDeliveryLog.objects.create(
+        recipient_email=recipient,
+        subject=subject,
+        template_key=template_key,
+        status=EmailDeliveryLog.STATUS_PENDING,
+        related_object_type="invoice",
+        related_object_id=str(invoice.id),
+        triggered_by=triggered_by,
+        metadata={
+            "invoice_number": invoice.invoice_number,
+            "invoice_status_before_send": invoice.status,
+            "customer_name": invoice.customer.name,
+            "payment_record_id": str(payment_refund.payment_record_id),
+            "payment_refund_id": str(payment_refund.id),
+            "payment_reference": payment_refund.payment_record.payment_reference,
+            "refund_status": "successful",
+            "refund_amount": str(payment_refund.amount),
+            "payment_method": payment_refund.method,
+            "stripe_refund_id": payment_refund.stripe_refund_id,
+            "bank_reference": payment_refund.bank_reference,
+            "public_invoice_url": public_invoice_url,
+        },
+    )
+
+    if not recipient:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = "Customer email is missing on invoice customer record."
+        log.save(update_fields=["status", "error_message"])
+        return False, log
+
+    try:
+        pdf_bytes = generate_invoice_pdf(invoice)
+    except Exception as exc:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = f"Invoice PDF could not be generated: {exc}"
+        metadata = dict(log.metadata or {})
+        metadata.update({"pdf_attachment_added": False, "pdf_attachment_error": str(exc)})
+        log.metadata = metadata
+        log.save(update_fields=["status", "error_message", "metadata"])
+        return False, log
+
+    message = EmailMultiAlternatives(
+        subject=subject,
+        body=text_body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[recipient],
+    )
+    message.attach_alternative(html_body, "text/html")
+    message.attach(
+        filename=f"{invoice.invoice_number}.pdf",
+        content=pdf_bytes,
+        mimetype="application/pdf",
+    )
+
+    try:
+        sent_count = message.send()
+        if sent_count < 1:
+            raise RuntimeError("Email backend returned zero deliveries.")
+    except Exception as exc:
+        log.status = EmailDeliveryLog.STATUS_FAILED
+        log.error_message = str(exc)
+        log.save(update_fields=["status", "error_message"])
+        return False, log
+
+    log.status = EmailDeliveryLog.STATUS_SENT
+    log.sent_at = timezone.now()
+    metadata = dict(log.metadata or {})
+    metadata.update(
+        {
+            "invoice_status_after_send": invoice.status,
+            "pdf_attachment_added": True,
+        }
+    )
+    log.metadata = metadata
+    log.save(update_fields=["status", "sent_at", "metadata"])
+    return True, log
 
 
 def send_stripe_refund_success_email(

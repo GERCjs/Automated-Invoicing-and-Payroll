@@ -22,8 +22,9 @@ from notifications.services import (
     send_stripe_refund_success_email,
 )
 
-from .models import PaymentBankDetails, PaymentRecord, StripeWebhookEvent
-from .services import create_checkout_for_invoice, create_full_refund_for_payment
+from .forms import PaymentRefundForm
+from .models import PaymentBankDetails, PaymentRecord, PaymentRefund, StripeWebhookEvent
+from .services import create_checkout_for_invoice, create_full_refund_for_payment, create_refund_for_payment
 
 User = get_user_model()
 
@@ -2090,6 +2091,155 @@ class StripePaymentsPhaseTests(TestCase):
         self.invoice.refresh_from_db()
         self.assertEqual(payment_record.status, PaymentRecord.STATUS_REFUNDED)
         self.assertEqual(self.invoice.status, Invoice.STATUS_REFUNDED)
+
+    @override_settings(STRIPE_SECRET_KEY="sk_test_guardrails")
+    @patch("payments.services._import_stripe")
+    def test_create_partial_stripe_refund_records_ledger_and_updates_status(self, import_stripe_mock):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-PARTIAL-STRIPE-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            external_transaction_id="pi_partial_refund_001",
+            paid_at=timezone.now(),
+        )
+        stripe_mock = Mock()
+        stripe_mock.Refund.create.return_value = Mock(
+            id="re_partial_001",
+            status="succeeded",
+            payment_intent="pi_partial_refund_001",
+        )
+        import_stripe_mock.return_value = stripe_mock
+
+        refund = create_refund_for_payment(
+            payment_record=payment_record,
+            amount=Decimal("25.50"),
+            customer_message="Partial refund for a cancelled service.",
+            initiated_by=self.finance_user,
+        )
+
+        payment_record.refresh_from_db()
+        self.invoice.refresh_from_db()
+        self.assertEqual(refund.status, PaymentRefund.STATUS_SUCCEEDED)
+        self.assertEqual(refund.amount, Decimal("25.50"))
+        self.assertEqual(refund.customer_message, "Partial refund for a cancelled service.")
+        self.assertEqual(refund.stripe_refund_id, "re_partial_001")
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PARTIALLY_REFUNDED)
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PARTIALLY_REFUNDED)
+        stripe_mock.Refund.create.assert_called_once()
+        self.assertEqual(stripe_mock.Refund.create.call_args.kwargs["amount"], 2550)
+
+    def test_create_manual_bank_transfer_refund_requires_reference_and_updates_status(self):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="BANK-PARTIAL-001",
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            paid_at=timezone.now(),
+            manual_bank_reference="BANK-IN-001",
+        )
+
+        refund = create_refund_for_payment(
+            payment_record=payment_record,
+            amount=Decimal("40.00"),
+            customer_message="Refunding the unused appointment slot.",
+            bank_reference="BANK-OUT-001",
+            initiated_by=self.finance_user,
+        )
+
+        payment_record.refresh_from_db()
+        self.invoice.refresh_from_db()
+        self.assertEqual(refund.status, PaymentRefund.STATUS_SUCCEEDED)
+        self.assertEqual(refund.method, PaymentRefund.METHOD_BANK_TRANSFER)
+        self.assertEqual(refund.bank_reference, "BANK-OUT-001")
+        self.assertEqual(payment_record.status, PaymentRecord.STATUS_PARTIALLY_REFUNDED)
+        self.assertEqual(self.invoice.status, Invoice.STATUS_PARTIALLY_REFUNDED)
+
+    def test_refund_form_rejects_amount_above_remaining_and_requires_message(self):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-PARTIAL-FORM-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            external_transaction_id="pi_partial_form_001",
+            paid_at=timezone.now(),
+        )
+        PaymentRefund.objects.create(
+            invoice=self.invoice,
+            payment_record=payment_record,
+            amount=Decimal("100.00"),
+            currency=self.invoice.currency,
+            method=PaymentRefund.METHOD_STRIPE,
+            status=PaymentRefund.STATUS_SUCCEEDED,
+            customer_message="Earlier refund.",
+        )
+
+        form = PaymentRefundForm(
+            data={"amount": "10.00", "customer_message": ""},
+            payment_record=payment_record,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("amount", form.errors)
+        self.assertIn("customer_message", form.errors)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="billing@example.com",
+    )
+    @patch("payments.views.create_refund_for_payment")
+    def test_refund_endpoint_sends_customer_message_email(self, refund_mock):
+        self.invoice.status = Invoice.STATUS_PAID
+        self.invoice.save(update_fields=["status", "updated_at"])
+        payment_record = PaymentRecord.objects.create(
+            invoice=self.invoice,
+            payment_reference="PAY-PARTIAL-ENDPOINT-001",
+            provider=PaymentRecord.PROVIDER_STRIPE,
+            status=PaymentRecord.STATUS_SUCCEEDED,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            external_transaction_id="pi_partial_endpoint_001",
+            paid_at=timezone.now(),
+        )
+        refund_mock.side_effect = lambda **kwargs: PaymentRefund.objects.create(
+            invoice=payment_record.invoice,
+            payment_record=payment_record,
+            amount=kwargs["amount"],
+            currency=payment_record.currency,
+            method=PaymentRefund.METHOD_STRIPE,
+            status=PaymentRefund.STATUS_SUCCEEDED,
+            customer_message=kwargs["customer_message"],
+            created_by=kwargs["initiated_by"],
+            processed_by=kwargs["initiated_by"],
+            processed_at=timezone.now(),
+        )
+
+        self.client.login(username="finance_stripe", password="TempPass123!")
+        response = self.client.post(
+            reverse("payment-refund-invoice", args=[self.invoice.pk]),
+            data={
+                "amount": "25.50",
+                "customer_message": "Partial refund for a cancelled service.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        refund_mock.assert_called_once()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Partial refund for a cancelled service.", mail.outbox[0].body)
+        self.assertIn("Refunded Amount: SGD 25.50", mail.outbox[0].body)
 
     @override_settings(STRIPE_SECRET_KEY="sk_test_guardrails")
     @patch("payments.services._import_stripe")

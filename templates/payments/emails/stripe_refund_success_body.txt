@@ -9,8 +9,16 @@ Issue Date: {{ invoice.issue_date }}
 Due Date: {{ invoice.due_date }}
 Total Amount: {{ invoice.currency }} {{ invoice.total_amount }}
 Amount Due: {{ invoice.currency }} {{ amount_due }}
-Refunded Amount: {{ payment_record.currency }} {{ payment_record.amount }}
+Refunded Amount: {{ payment_record.currency }} {{ refund_amount }}
+Total Refunded So Far: {{ payment_record.currency }} {{ total_refunded_amount }}
+Remaining Paid Amount: {{ payment_record.currency }} {{ remaining_paid_amount }}
+Payment Method: {{ payment_method_label }}
 Payment Reference: {{ payment_record.payment_reference }}
+{% if payment_refund and payment_refund.stripe_refund_id %}Stripe Refund ID: {{ payment_refund.stripe_refund_id }}
+{% endif %}{% if payment_refund and payment_refund.bank_reference %}Bank Refund Reference: {{ payment_refund.bank_reference }}
+{% endif %}
+Reason:
+{{ customer_message|default:"Full refund completed." }}
 
 View your invoice online:
 {{ public_invoice_url }}

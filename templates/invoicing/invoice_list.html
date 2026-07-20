@@ -56,6 +56,7 @@
             {% if selected_filter %}
             <input type="hidden" name="status" value="{{ selected_filter }}">
             {% endif %}
+            <input type="hidden" name="per_page" value="{{ per_page }}">
             <div class="col-lg-5 col-md-12">
                 <input
                     id="invoiceListSearch"
@@ -119,7 +120,20 @@
             <div class="fw-semibold">Invoice Results</div>
             <div class="small text-muted">Batch email supports Draft, Pending Payment, Viewed, and Overdue invoices on this page.</div>
         </div>
-        <div class="small text-muted">Paid and Refunded invoices are disabled for batch send.</div>
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            <form method="get" class="d-flex align-items-center gap-2">
+                {% for field in per_page_hidden_fields %}
+                <input type="hidden" name="{{ field.name }}" value="{{ field.value }}">
+                {% endfor %}
+                <label for="invoicePerPage" class="small text-muted mb-0">Show</label>
+                <select id="invoicePerPage" name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+                    {% for option in per_page_options %}
+                    <option value="{{ option }}" {% if per_page == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            <div class="small text-muted">Paid and Refunded invoices are disabled for batch send.</div>
+        </div>
     </div>
     <form method="post" action="{% url 'invoice-send-email-batch' %}">
         {% csrf_token %}
@@ -137,6 +151,8 @@
                     <th>Issue Date</th>
                     <th>Due Date</th>
                     <th class="text-end">Total</th>
+                    <th>Paid Date</th>
+                    <th>Payment Method</th>
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
@@ -184,6 +200,8 @@
                     <td>{{ invoice.issue_date }}</td>
                     <td>{{ invoice.due_date }}</td>
                     <td class="text-end">{{ invoice.currency }} {{ invoice.total_amount }}</td>
+                    <td>{{ invoice.paid_payment.paid_at|date:"Y-m-d"|default:"-" }}</td>
+                    <td>{{ invoice.paid_payment.get_provider_display|default:"-" }}</td>
                     <td class="text-end">
                         <div class="d-flex justify-content-end gap-1 flex-wrap">
                             <a href="{% url 'invoice-detail' invoice.pk %}" class="btn btn-sm btn-outline-primary">View</a>
@@ -197,14 +215,52 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="8" class="text-center py-4"><div class="empty-state">No invoices found.</div></td>
+                    <td colspan="10" class="text-center py-4"><div class="empty-state">No invoices found.</div></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
     <div class="card-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <div class="small text-muted">Select the invoices that need customer delivery from the current result set.</div>
+        <div class="small text-muted">
+            Select the invoices that need customer delivery from the current result set.
+            {% if paginator.num_pages > 1 %}
+            Page {{ page_obj.number }} of {{ paginator.num_pages }}
+            {% endif %}
+        </div>
+        {% if paginator.num_pages > 1 %}
+        <nav aria-label="Invoice pages">
+            <ul class="pagination pagination-sm mb-0">
+                <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">
+                    {% if page_obj.has_previous %}
+                    <a class="page-link" href="{{ previous_page_url }}">Previous</a>
+                    {% else %}
+                    <span class="page-link">Previous</span>
+                    {% endif %}
+                </li>
+                {% for link in pagination_links %}
+                {% if link.is_gap %}
+                <li class="page-item disabled"><span class="page-link">{{ link.label }}</span></li>
+                {% else %}
+                <li class="page-item{% if link.is_current %} active{% endif %}">
+                    {% if link.is_current %}
+                    <span class="page-link">{{ link.label }}</span>
+                    {% else %}
+                    <a class="page-link" href="{{ link.url }}">{{ link.label }}</a>
+                    {% endif %}
+                </li>
+                {% endif %}
+                {% endfor %}
+                <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">
+                    {% if page_obj.has_next %}
+                    <a class="page-link" href="{{ next_page_url }}">Next</a>
+                    {% else %}
+                    <span class="page-link">Next</span>
+                    {% endif %}
+                </li>
+            </ul>
+        </nav>
+        {% endif %}
         <button type="submit" class="btn btn-outline-dark">Send Selected Invoice Emails</button>
     </div>
     </form>

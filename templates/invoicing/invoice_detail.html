@@ -17,12 +17,6 @@
             {% csrf_token %}
             <button type="submit" class="btn btn-outline-dark">Send / Resend Invoice Email</button>
         </form>
-        {% if invoice.status == "paid" %}
-        <form method="post" action="{% url 'payment-refund-invoice' invoice.pk %}" class="d-inline">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-outline-warning">Refund Stripe Payment</button>
-        </form>
-        {% endif %}
         <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
         <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-outline-success">Download Excel</a>
         <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Back to List</a>
@@ -38,6 +32,8 @@
                 <p class="mb-1"><strong>Status:</strong> <span class="badge bg-secondary">{% if invoice.status == "sent" %}Pending Payment{% else %}{{ invoice.get_status_display }}{% endif %}</span></p>
                 <p class="mb-1"><strong>Issue Date:</strong> {{ invoice.issue_date }}</p>
                 <p class="mb-1"><strong>Due Date:</strong> {{ invoice.due_date }}</p>
+                <p class="mb-1"><strong>Paid At:</strong> {{ paid_payment.paid_at|date:"Y-m-d H:i"|default:"-" }}</p>
+                <p class="mb-1"><strong>Payment Method:</strong> {{ paid_payment.get_provider_display|default:"-" }}</p>
                 <p class="mb-1"><strong>Public Link:</strong> <a href="{% url 'invoice-public-view' invoice.public_view_token %}" target="_blank">Open Online View</a></p>
                 <p class="mb-1"><strong>Viewed At:</strong> {{ invoice.viewed_at|default:"-" }}</p>
                 <p class="mb-1"><strong>View Count:</strong> {{ invoice.view_count }}</p>
@@ -144,6 +140,69 @@
                     </div>
                     <button type="submit" class="btn btn-success btn-sm">Confirm Verified Bank Transfer</button>
                 </form>
+            </div>
+        </div>
+        {% endif %}
+        {% if refund_summary %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <h2 class="h6">Refund Payment</h2>
+                <p class="mb-1"><strong>Method:</strong> {{ refund_summary.method_label }}</p>
+                <p class="mb-1"><strong>Paid Amount:</strong> {{ refund_summary.payment_record.currency }} {{ refund_summary.paid_amount }}</p>
+                <p class="mb-1"><strong>Refunded So Far:</strong> {{ refund_summary.payment_record.currency }} {{ refund_summary.refunded_total }}</p>
+                <p class="mb-2"><strong>Remaining Refundable:</strong> {{ refund_summary.payment_record.currency }} {{ refund_summary.remaining_refundable_amount }}</p>
+                <form method="post" action="{% url 'payment-refund-invoice' invoice.pk %}">
+                    {% csrf_token %}
+                    {% if refund_form.non_field_errors %}
+                    <div class="alert alert-danger py-2">{{ refund_form.non_field_errors }}</div>
+                    {% endif %}
+                    <div class="mb-2">
+                        <label class="form-label" for="{{ refund_form.amount.id_for_label }}">Refund amount</label>
+                        {{ refund_form.amount }}
+                        {% for error in refund_form.amount.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {% if refund_summary.payment_record.provider == "manual" %}
+                    <div class="mb-2">
+                        <label class="form-label" for="{{ refund_form.bank_reference.id_for_label }}">Bank refund reference</label>
+                        {{ refund_form.bank_reference }}
+                        {% for error in refund_form.bank_reference.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    {{ refund_form.bank_reference }}
+                    {% endif %}
+                    <div class="mb-2">
+                        <label class="form-label" for="{{ refund_form.customer_message.id_for_label }}">Message to customer</label>
+                        {{ refund_form.customer_message }}
+                        {% for error in refund_form.customer_message.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="btn btn-outline-warning btn-sm">Submit Refund</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+        {% if refund_history %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <h2 class="h6">Refund History</h2>
+                {% for refund in refund_history %}
+                <div class="border-top pt-2 mt-2">
+                    <p class="mb-1"><strong>{{ refund.currency }} {{ refund.amount }}</strong> - {{ refund.get_status_display }} via {{ refund.get_method_display }}</p>
+                    <p class="mb-1"><strong>Reason:</strong> {{ refund.customer_message }}</p>
+                    {% if refund.stripe_refund_id %}
+                    <p class="mb-1"><strong>Stripe Refund ID:</strong> {{ refund.stripe_refund_id }}</p>
+                    {% endif %}
+                    {% if refund.bank_reference %}
+                    <p class="mb-1"><strong>Bank Reference:</strong> {{ refund.bank_reference }}</p>
+                    {% endif %}
+                    <p class="mb-0 text-muted small">Created {{ refund.created_at|date:"Y-m-d H:i" }}{% if refund.created_by %} by {{ refund.created_by.username }}{% endif %}</p>
+                </div>
+                {% endfor %}
             </div>
         </div>
         {% endif %}

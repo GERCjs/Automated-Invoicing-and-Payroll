@@ -14,7 +14,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from payments.models import PaymentRecord
+from payments.models import PaymentRecord, PaymentRefund
 from payments.services import get_bank_transfer_details
 
 from .models import Invoice, InvoiceTemplateSettings
@@ -112,6 +112,13 @@ def _payment_records_for_invoice(invoice: Invoice) -> list[PaymentRecord]:
         return []
 
 
+def _refund_records_for_invoice(invoice: Invoice) -> list[PaymentRefund]:
+    try:
+        return list(invoice.payment_refunds.all())
+    except (AttributeError, ValueError):
+        return []
+
+
 def _sum_payment_amounts(payment_records: list[PaymentRecord], statuses: set[str]) -> Decimal:
     return sum(
         (Decimal(record.amount or 0) for record in payment_records if record.status in statuses and record.paid_at),
@@ -121,9 +128,24 @@ def _sum_payment_amounts(payment_records: list[PaymentRecord], statuses: set[str
 
 def _resolve_invoice_payment_summary(invoice: Invoice) -> dict:
     payment_records = _payment_records_for_invoice(invoice)
-    successful_paid_amount = _sum_payment_amounts(payment_records, {PaymentRecord.STATUS_SUCCEEDED})
-    refunded_amount = _sum_payment_amounts(payment_records, {PaymentRecord.STATUS_REFUNDED})
-    recorded_paid_amount = successful_paid_amount + refunded_amount
+    refund_records = _refund_records_for_invoice(invoice)
+    successful_paid_amount = _sum_payment_amounts(
+        payment_records,
+        {
+            PaymentRecord.STATUS_SUCCEEDED,
+            PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+            PaymentRecord.STATUS_REFUNDED,
+        },
+    )
+    refunded_amount = sum(
+        (
+            Decimal(refund.amount or 0)
+            for refund in refund_records
+            if refund.status == PaymentRefund.STATUS_SUCCEEDED
+        ),
+        Decimal("0.00"),
+    )
+    recorded_paid_amount = successful_paid_amount
     amount_paid = Decimal("0.00")
     amount_due = invoice.total_amount
     payment_status_message = ""
@@ -132,12 +154,16 @@ def _resolve_invoice_payment_summary(invoice: Invoice) -> dict:
     if invoice.total_amount == Decimal("0.00"):
         amount_due = Decimal("0.00")
         payment_status_message = "No Payment Required"
-    elif invoice.status == Invoice.STATUS_REFUNDED:
+    elif invoice.status in {Invoice.STATUS_PARTIALLY_REFUNDED, Invoice.STATUS_REFUNDED}:
         amount_paid = recorded_paid_amount
         amount_due = Decimal("0.00")
-        payment_status_message = "Refunded"
+        payment_status_message = (
+            "Partially Refunded"
+            if invoice.status == Invoice.STATUS_PARTIALLY_REFUNDED
+            else "Refunded"
+        )
         if refunded_amount == Decimal("0.00"):
-            payment_data_issue = "Refund status requires review: no matching refunded payment record was found."
+            payment_data_issue = "Refund status requires review: no matching refund record was found."
     elif invoice.status == Invoice.STATUS_PAID:
         amount_paid = successful_paid_amount or invoice.total_amount
         amount_due = max(invoice.total_amount - amount_paid, Decimal("0.00"))
@@ -146,7 +172,8 @@ def _resolve_invoice_payment_summary(invoice: Invoice) -> dict:
     show_payment_instructions = (
         invoice.status in ISSUED_INVOICE_STATUSES
         and amount_due > Decimal("0.00")
-        and invoice.status not in {Invoice.STATUS_PAID, Invoice.STATUS_REFUNDED}
+        and invoice.status
+        not in {Invoice.STATUS_PAID, Invoice.STATUS_PARTIALLY_REFUNDED, Invoice.STATUS_REFUNDED}
     )
     return {
         "amount_paid": amount_paid,

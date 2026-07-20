@@ -17,7 +17,7 @@ from invoicing.models import Invoice
 from invoicing.services import refresh_overdue_invoices
 from notifications.models import EmailDeliveryLog
 from notifications.models import PaymentReminderSettings
-from payments.models import PaymentRecord
+from payments.models import PaymentRecord, PaymentRefund
 from payments.services import successful_payments_queryset
 from payroll.models import Employee, PayrollRecord
 from payroll.services import cpf_for_2026
@@ -1079,6 +1079,14 @@ def payment_stripe_report(request):
         status__in=[PaymentRecord.STATUS_FAILED, PaymentRecord.STATUS_CANCELLED]
     )
     refunded_payments = payment_records.filter(status=PaymentRecord.STATUS_REFUNDED)
+    refund_records = PaymentRefund.objects.filter(status=PaymentRefund.STATUS_SUCCEEDED)
+    if not date_filter_error:
+        refund_records = _apply_date_bounds(
+            refund_records,
+            "processed_at__date",
+            filter_date_from,
+            filter_date_to,
+        )
     pending_manual_payments = payment_records.filter(
         provider=PaymentRecord.PROVIDER_MANUAL,
         status=PaymentRecord.STATUS_PENDING,
@@ -1110,6 +1118,11 @@ def payment_stripe_report(request):
     payment_status_summary = [
         {"status": "pending", "label": "Pending", "total": status_count_map.get(PaymentRecord.STATUS_PENDING, 0)},
         {"status": "succeeded", "label": "Successful", "total": status_count_map.get(PaymentRecord.STATUS_SUCCEEDED, 0)},
+        {
+            "status": "partially_refunded",
+            "label": "Partially Refunded",
+            "total": status_count_map.get(PaymentRecord.STATUS_PARTIALLY_REFUNDED, 0),
+        },
         {"status": "failed", "label": "Failed", "total": status_count_map.get(PaymentRecord.STATUS_FAILED, 0)},
         {"status": "cancelled", "label": "Cancelled", "total": status_count_map.get(PaymentRecord.STATUS_CANCELLED, 0)},
         {"status": "refunded", "label": "Refunded", "total": status_count_map.get(PaymentRecord.STATUS_REFUNDED, 0)},
@@ -1140,10 +1153,11 @@ def payment_stripe_report(request):
             PaymentRecord.STATUS_PENDING,
             PaymentRecord.STATUS_FAILED,
             PaymentRecord.STATUS_CANCELLED,
+            PaymentRecord.STATUS_PARTIALLY_REFUNDED,
             PaymentRecord.STATUS_REFUNDED,
         ]
     ).order_by("-created_at")[:10]
-    refunded_amount = _safe_sum(refunded_payments, "amount")
+    refunded_amount = _safe_sum(refund_records, "amount")
     failed_payment_count = failed_payments.count()
     cancelled_payment_count = cancelled_payments.count()
     status_chart_summary = [

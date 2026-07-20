@@ -1,7 +1,8 @@
 from django import forms
+from django.db.models import Sum
 from django.utils import timezone
 
-from .models import PaymentBankDetails, PaymentRecord
+from .models import PaymentBankDetails, PaymentRecord, PaymentRefund
 
 
 class BankTransferNoticeForm(forms.Form):
@@ -127,6 +128,80 @@ class BankTransferConfirmationForm(forms.Form):
                 raise forms.ValidationError(
                     f"Amount received must match the invoice payment amount ({payment_record.currency} {payment_record.amount})."
                 )
+        return cleaned_data
+
+
+class PaymentRefundForm(forms.Form):
+    amount = forms.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        min_value=0,
+        label="Refund amount",
+        widget=forms.NumberInput(attrs={"class": "form-control", "step": "0.01"}),
+    )
+    customer_message = forms.CharField(
+        label="Message to customer",
+        widget=forms.Textarea(attrs={"class": "form-control", "rows": 4}),
+    )
+    bank_reference = forms.CharField(
+        required=False,
+        max_length=100,
+        label="Bank refund reference",
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+
+    def __init__(self, *args, payment_record: PaymentRecord | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.payment_record = payment_record
+        if payment_record is None:
+            self.remaining_refundable_amount = 0
+            return
+
+        refunded_total = (
+            PaymentRefund.objects.filter(
+                payment_record=payment_record,
+                status=PaymentRefund.STATUS_SUCCEEDED,
+            ).aggregate(total=Sum("amount"))["total"]
+            or 0
+        )
+        self.refunded_total = refunded_total
+        self.remaining_refundable_amount = payment_record.amount - refunded_total
+        if not self.is_bound:
+            self.fields["amount"].initial = self.remaining_refundable_amount
+        if payment_record.provider != PaymentRecord.PROVIDER_MANUAL:
+            self.fields["bank_reference"].widget = forms.HiddenInput()
+
+    def clean_customer_message(self):
+        message = (self.cleaned_data["customer_message"] or "").strip()
+        if not message:
+            raise forms.ValidationError("Message to customer is required.")
+        return message
+
+    def clean_bank_reference(self):
+        bank_reference = (self.cleaned_data.get("bank_reference") or "").strip()
+        if (
+            self.payment_record is not None
+            and self.payment_record.provider == PaymentRecord.PROVIDER_MANUAL
+            and not bank_reference
+        ):
+            raise forms.ValidationError("Bank refund reference is required for bank-transfer refunds.")
+        return bank_reference
+
+    def clean(self):
+        cleaned_data = super().clean()
+        amount = cleaned_data.get("amount")
+        if self.payment_record is None or amount is None:
+            return cleaned_data
+        if amount <= 0:
+            self.add_error("amount", "Refund amount must be greater than zero.")
+        if amount > self.remaining_refundable_amount:
+            self.add_error(
+                "amount",
+                (
+                    "Refund amount cannot exceed the remaining refundable amount "
+                    f"({self.payment_record.currency} {self.remaining_refundable_amount})."
+                ),
+            )
         return cleaned_data
 
 

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import PaymentBankDetails, PaymentRecord, StripeWebhookEvent
+from .models import PaymentBankDetails, PaymentRecord, PaymentRefund, StripeWebhookEvent
 
 
 @admin.register(PaymentBankDetails)
@@ -32,6 +32,26 @@ class PaymentRecordAdmin(admin.ModelAdmin):
         "external_transaction_id",
         "manual_customer_bank_reference",
         "manual_bank_reference",
+    )
+
+
+@admin.register(PaymentRefund)
+class PaymentRefundAdmin(admin.ModelAdmin):
+    list_display = (
+        "invoice",
+        "payment_record",
+        "method",
+        "status",
+        "amount",
+        "processed_at",
+        "created_by",
+    )
+    list_filter = ("method", "status", "processed_at")
+    search_fields = (
+        "invoice__invoice_number",
+        "payment_record__payment_reference",
+        "stripe_refund_id",
+        "bank_reference",
     )
 
 

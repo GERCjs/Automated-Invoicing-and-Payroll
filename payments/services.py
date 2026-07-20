@@ -9,12 +9,13 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from core.audit import log_event
 from invoicing.models import Invoice
 
-from .models import PaymentBankDetails, PaymentRecord, StripeWebhookEvent
+from .models import PaymentBankDetails, PaymentRecord, PaymentRefund, StripeWebhookEvent
 
 # Stripe event names this app knows how to handle.
 WEBHOOK_EVENT_COMPLETED = "checkout.session.completed"
@@ -29,6 +30,7 @@ PAYNOW_ENABLED_CURRENCY = "SGD"
 BANK_TRANSFER_REFERENCE_PREFIX = "BANK"
 FINAL_PAYMENT_STATUSES = {
     PaymentRecord.STATUS_SUCCEEDED,
+    PaymentRecord.STATUS_PARTIALLY_REFUNDED,
     PaymentRecord.STATUS_REFUNDED,
 }
 
@@ -63,7 +65,10 @@ SUPPORTED_WEBHOOK_EVENTS = {
 def successful_payments_queryset():
     # Reporting should use completed payments with a real paid timestamp.
     return PaymentRecord.objects.filter(
-        status=PaymentRecord.STATUS_SUCCEEDED,
+        status__in=[
+            PaymentRecord.STATUS_SUCCEEDED,
+            PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+        ],
         paid_at__isnull=False,
     )
 
@@ -463,34 +468,213 @@ def confirm_bank_transfer_payment(
         raise ValueError(str(exc)) from exc
 
 
+def get_succeeded_refund_total(payment_record: PaymentRecord) -> Decimal:
+    return (
+        PaymentRefund.objects.filter(
+            payment_record=payment_record,
+            status=PaymentRefund.STATUS_SUCCEEDED,
+        ).aggregate(total=Sum("amount"))["total"]
+        or Decimal("0.00")
+    )
+
+
+def get_remaining_refundable_amount(payment_record: PaymentRecord) -> Decimal:
+    remaining = Decimal(payment_record.amount) - get_succeeded_refund_total(payment_record)
+    return max(remaining, Decimal("0.00"))
+
+
+def _resolve_refunded_payment_status(payment_record: PaymentRecord) -> str:
+    refunded_total = get_succeeded_refund_total(payment_record)
+    if refunded_total <= Decimal("0.00"):
+        return PaymentRecord.STATUS_SUCCEEDED
+    if refunded_total >= payment_record.amount:
+        return PaymentRecord.STATUS_REFUNDED
+    return PaymentRecord.STATUS_PARTIALLY_REFUNDED
+
+
 def _resolve_refunded_invoice_status(invoice: Invoice) -> str:
-    # At the moment, any successful refund changes the invoice to refunded.
-    return Invoice.STATUS_REFUNDED
+    paid_records = PaymentRecord.objects.filter(
+        invoice=invoice,
+        status__in=[
+            PaymentRecord.STATUS_SUCCEEDED,
+            PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+            PaymentRecord.STATUS_REFUNDED,
+        ],
+    )
+    paid_total = paid_records.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+    refunded_total = (
+        PaymentRefund.objects.filter(
+            invoice=invoice,
+            status=PaymentRefund.STATUS_SUCCEEDED,
+        ).aggregate(total=Sum("amount"))["total"]
+        or Decimal("0.00")
+    )
+    if refunded_total <= Decimal("0.00"):
+        return Invoice.STATUS_PAID
+    if paid_total and refunded_total >= paid_total:
+        return Invoice.STATUS_REFUNDED
+    return Invoice.STATUS_PARTIALLY_REFUNDED
+
+
+def _sync_refund_state(payment_record: PaymentRecord) -> None:
+    locked_record = PaymentRecord.objects.select_related("invoice").select_for_update().get(pk=payment_record.pk)
+    invoice = _lock_invoice(locked_record.invoice_id)
+    new_payment_status = _resolve_refunded_payment_status(locked_record)
+    if locked_record.status != new_payment_status:
+        locked_record.status = new_payment_status
+        locked_record.save(update_fields=["status", "updated_at"])
+    new_invoice_status = _resolve_refunded_invoice_status(invoice)
+    if invoice.status in {
+        Invoice.STATUS_PAID,
+        Invoice.STATUS_PARTIALLY_REFUNDED,
+        Invoice.STATUS_REFUNDED,
+    } and invoice.status != new_invoice_status:
+        invoice.status = new_invoice_status
+        invoice.save(update_fields=["status", "updated_at"])
 
 
 def _apply_local_refunded_state(payment_record: PaymentRecord) -> None:
     # Update our own database after Stripe confirms or already has a refund.
     with transaction.atomic():
-        # Lock the row so two refund updates cannot change it at the same time.
         locked_record = (
             PaymentRecord.objects.select_related("invoice")
             .select_for_update()
             .get(pk=payment_record.pk)
         )
-        invoice = _lock_invoice(locked_record.invoice_id)
-        updates = []
-        # Mark the payment as refunded if it is not already refunded.
-        if locked_record.status != PaymentRecord.STATUS_REFUNDED:
-            locked_record.status = PaymentRecord.STATUS_REFUNDED
-            updates.append("status")
-        if updates:
-            # Save only the fields that changed.
-            updates.append("updated_at")
-            locked_record.save(update_fields=updates)
-        # If the invoice was paid, move it to refunded too.
-        if invoice.status == Invoice.STATUS_PAID:
-            invoice.status = _resolve_refunded_invoice_status(invoice)
-            invoice.save(update_fields=["status", "updated_at"])
+        if not PaymentRefund.objects.filter(
+            payment_record=locked_record,
+            status=PaymentRefund.STATUS_SUCCEEDED,
+        ).exists():
+            PaymentRefund.objects.create(
+                invoice=locked_record.invoice,
+                payment_record=locked_record,
+                amount=locked_record.amount,
+                currency=locked_record.currency,
+                method=PaymentRefund.METHOD_STRIPE,
+                status=PaymentRefund.STATUS_SUCCEEDED,
+                customer_message="Full refund completed.",
+                processed_at=timezone.now(),
+            )
+        _sync_refund_state(locked_record)
+
+
+def _refund_method_for_payment(payment_record: PaymentRecord) -> str:
+    if payment_record.provider == PaymentRecord.PROVIDER_STRIPE:
+        return PaymentRefund.METHOD_STRIPE
+    if payment_record.provider == PaymentRecord.PROVIDER_MANUAL:
+        return PaymentRefund.METHOD_BANK_TRANSFER
+    raise ValueError("Unsupported payment provider for refunds.")
+
+
+def create_refund_for_payment(
+    *,
+    payment_record: PaymentRecord,
+    amount: Decimal,
+    customer_message: str,
+    bank_reference: str = "",
+    initiated_by=None,
+) -> PaymentRefund:
+    if payment_record.status not in {
+        PaymentRecord.STATUS_SUCCEEDED,
+        PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+    }:
+        raise ValueError("Only successful payments with a refundable balance can be refunded.")
+    normalized_amount = Decimal(amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if normalized_amount <= Decimal("0.00"):
+        raise ValueError("Refund amount must be greater than zero.")
+    message = (customer_message or "").strip()
+    if not message:
+        raise ValueError("Message to customer is required.")
+
+    with transaction.atomic():
+        locked_record = (
+            PaymentRecord.objects.select_related("invoice")
+            .select_for_update()
+            .get(pk=payment_record.pk)
+        )
+        if locked_record.status not in {
+            PaymentRecord.STATUS_SUCCEEDED,
+            PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+        }:
+            raise ValueError("Only successful payments with a refundable balance can be refunded.")
+        remaining_amount = get_remaining_refundable_amount(locked_record)
+        if normalized_amount > remaining_amount:
+            raise ValueError(
+                f"Refund amount cannot exceed the remaining refundable amount ({locked_record.currency} {remaining_amount})."
+            )
+        method = _refund_method_for_payment(locked_record)
+        normalized_bank_reference = (bank_reference or "").strip()
+        if method == PaymentRefund.METHOD_BANK_TRANSFER and not normalized_bank_reference:
+            raise ValueError("Bank refund reference is required for bank-transfer refunds.")
+
+        refund = PaymentRefund.objects.create(
+            invoice=locked_record.invoice,
+            payment_record=locked_record,
+            amount=normalized_amount,
+            currency=locked_record.currency,
+            method=method,
+            status=PaymentRefund.STATUS_PENDING,
+            customer_message=message,
+            bank_reference=normalized_bank_reference,
+            created_by=initiated_by,
+        )
+
+    if refund.method == PaymentRefund.METHOD_STRIPE:
+        payment_intent_id = _normalize_external_id(payment_record.external_transaction_id)
+        if not payment_intent_id:
+            refund.status = PaymentRefund.STATUS_FAILED
+            refund.failure_reason = "Stripe payment intent is missing for this payment record."
+            refund.save(update_fields=["status", "failure_reason", "updated_at"])
+            raise ValueError(refund.failure_reason)
+        stripe = _import_stripe()
+        stripe.api_key = _require_stripe_secret_key()
+        try:
+            stripe_refund = stripe.Refund.create(
+                payment_intent=payment_intent_id,
+                amount=_to_minor_units(refund.amount),
+                reason="requested_by_customer",
+                metadata={
+                    "payment_record_id": str(payment_record.id),
+                    "invoice_id": str(payment_record.invoice_id),
+                    "payment_refund_id": str(refund.id),
+                    "payment_reference": payment_record.payment_reference,
+                },
+                idempotency_key=f"refund-{refund.id}",
+            )
+        except Exception as exc:
+            refund.status = PaymentRefund.STATUS_FAILED
+            refund.failure_reason = str(exc)
+            refund.processed_at = timezone.now()
+            refund.save(update_fields=["status", "failure_reason", "processed_at", "updated_at"])
+            raise
+
+        refund.stripe_refund_id = _normalize_external_id(getattr(stripe_refund, "id", ""))
+        refund_status = str(getattr(stripe_refund, "status", "") or "").lower()
+        if refund_status == "succeeded":
+            refund.status = PaymentRefund.STATUS_SUCCEEDED
+            refund.processed_by = initiated_by
+            refund.processed_at = timezone.now()
+        else:
+            refund.status = PaymentRefund.STATUS_PENDING
+        refund.save(
+            update_fields=[
+                "stripe_refund_id",
+                "status",
+                "processed_by",
+                "processed_at",
+                "updated_at",
+            ]
+        )
+    else:
+        refund.status = PaymentRefund.STATUS_SUCCEEDED
+        refund.processed_by = initiated_by
+        refund.processed_at = timezone.now()
+        refund.save(update_fields=["status", "processed_by", "processed_at", "updated_at"])
+
+    if refund.status == PaymentRefund.STATUS_SUCCEEDED:
+        with transaction.atomic():
+            _sync_refund_state(refund.payment_record)
+    return refund
 
 
 def _build_checkout_session(
@@ -544,15 +728,17 @@ def create_checkout_for_invoice(
     initiated_by=None,
 ) -> PaymentRecord:
     # Do not create another checkout session for an already-paid invoice.
-    if invoice.status == Invoice.STATUS_PAID:
+    if invoice.status in {Invoice.STATUS_PAID, Invoice.STATUS_PARTIALLY_REFUNDED, Invoice.STATUS_REFUNDED}:
         raise ValueError("Invoice is already paid.")
     _require_stripe_secret_key()
     with transaction.atomic():
         locked_invoice = _lock_invoice(invoice.id)
-        if locked_invoice.status == Invoice.STATUS_PAID:
+        if locked_invoice.status in {
+            Invoice.STATUS_PAID,
+            Invoice.STATUS_PARTIALLY_REFUNDED,
+            Invoice.STATUS_REFUNDED,
+        }:
             raise ValueError("Invoice is already paid.")
-        if locked_invoice.status == Invoice.STATUS_REFUNDED:
-            raise ValueError("Invoice has already been refunded.")
         if _invoice_has_final_payment(locked_invoice):
             raise ValueError("Invoice already has a completed payment.")
 
@@ -617,11 +803,11 @@ def create_full_refund_for_payment(
     payment_record: PaymentRecord,
     initiated_by=None,
 ) -> Any:
-    # Only Stripe payments can be refunded through Stripe.
     if payment_record.provider != PaymentRecord.PROVIDER_STRIPE:
         raise ValueError("Only Stripe payments can be refunded from this flow.")
-    if payment_record.status != PaymentRecord.STATUS_SUCCEEDED:
-        raise ValueError("Only successful Stripe payments can be refunded.")
+    remaining_amount = get_remaining_refundable_amount(payment_record)
+    if remaining_amount <= Decimal("0.00"):
+        raise ValueError("This payment is already fully refunded.")
     # Stripe needs the payment intent ID to know what charge to refund.
     payment_intent_id = _normalize_external_id(payment_record.external_transaction_id)
     if not payment_intent_id:
@@ -630,17 +816,11 @@ def create_full_refund_for_payment(
     stripe = _import_stripe()
     stripe.api_key = _require_stripe_secret_key()
     try:
-        # Ask Stripe for a full refund of this payment.
-        refund = stripe.Refund.create(
-            payment_intent=payment_intent_id,
-            reason="requested_by_customer",
-            metadata={
-                "payment_record_id": str(payment_record.id),
-                "invoice_id": str(payment_record.invoice_id),
-                "payment_reference": payment_record.payment_reference,
-            },
-            # This prevents accidental duplicate refunds for the same payment record.
-            idempotency_key=f"refund-full-{payment_record.id}",
+        payment_refund = create_refund_for_payment(
+            payment_record=payment_record,
+            amount=remaining_amount,
+            customer_message="Full refund completed.",
+            initiated_by=initiated_by,
         )
     except Exception as exc:
         error_text = str(exc).lower()
@@ -651,10 +831,11 @@ def create_full_refund_for_payment(
         raise
 
     # Some Stripe refunds finish immediately. If so, update our local records now.
-    refund_status = str(getattr(refund, "status", "") or "").lower()
-    if refund_status == "succeeded":
-        _apply_local_refunded_state(payment_record)
-    return refund
+    return SimpleNamespace(
+        id=payment_refund.stripe_refund_id,
+        status=payment_refund.status,
+        payment_intent=payment_intent_id,
+    )
 
 
 def finalize_checkout_success_from_redirect(
@@ -852,6 +1033,49 @@ def _lock_payment_record_for_refund(refund_object: dict[str, Any]) -> PaymentRec
     return None
 
 
+def _lock_payment_refund_for_event(
+    *,
+    refund_object: dict[str, Any],
+    payment_record: PaymentRecord,
+) -> PaymentRefund:
+    metadata = refund_object.get("metadata") or {}
+    if not hasattr(metadata, "get"):
+        try:
+            metadata = dict(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+    refund_id = _normalize_external_id(refund_object.get("id"))
+    payment_refund_id = metadata.get("payment_refund_id")
+    queryset = PaymentRefund.objects.select_for_update().filter(payment_record=payment_record)
+    if payment_refund_id:
+        existing = queryset.filter(id=payment_refund_id).first()
+        if existing is not None:
+            return existing
+    if refund_id:
+        existing = queryset.filter(stripe_refund_id=refund_id).first()
+        if existing is not None:
+            return existing
+
+    raw_amount = refund_object.get("amount")
+    if raw_amount in {"", None}:
+        amount = payment_record.amount
+    else:
+        try:
+            amount = (Decimal(int(raw_amount)) / Decimal("100")).quantize(Decimal("0.01"))
+        except (TypeError, ValueError):
+            amount = payment_record.amount
+    return PaymentRefund.objects.create(
+        invoice=payment_record.invoice,
+        payment_record=payment_record,
+        amount=amount,
+        currency=payment_record.currency,
+        method=PaymentRefund.METHOD_STRIPE,
+        status=PaymentRefund.STATUS_PENDING,
+        stripe_refund_id=refund_id,
+        customer_message="Refund processed by Stripe.",
+    )
+
+
 def _mark_refund_from_event(
     *,
     event_type: str,
@@ -872,15 +1096,28 @@ def _mark_refund_from_event(
             return
 
         invoice = _lock_invoice(payment_record.invoice_id)
+        payment_refund = _lock_payment_refund_for_event(
+            refund_object=refund_object,
+            payment_record=payment_record,
+        )
         invoice_status_before = invoice.status
         if refund_status == "succeeded":
-            # Successful refund: mark the payment and invoice as refunded.
-            if payment_record.status != PaymentRecord.STATUS_REFUNDED:
-                payment_record.status = PaymentRecord.STATUS_REFUNDED
-                payment_record.save(update_fields=["status", "updated_at"])
-            if invoice.status == Invoice.STATUS_PAID:
-                invoice.status = _resolve_refunded_invoice_status(invoice)
-                invoice.save(update_fields=["status", "updated_at"])
+            payment_refund.status = PaymentRefund.STATUS_SUCCEEDED
+            payment_refund.failure_reason = ""
+            payment_refund.processed_at = payment_refund.processed_at or timezone.now()
+            if refund_id and payment_refund.stripe_refund_id != refund_id:
+                payment_refund.stripe_refund_id = refund_id
+            payment_refund.save(
+                update_fields=[
+                    "status",
+                    "failure_reason",
+                    "processed_at",
+                    "stripe_refund_id",
+                    "updated_at",
+                ]
+            )
+            _sync_refund_state(payment_record)
+            invoice.refresh_from_db()
             log_event(
                 action="payment.refund.succeeded",
                 user=None,
@@ -889,6 +1126,8 @@ def _mark_refund_from_event(
                 metadata={
                     "invoice_number": invoice.invoice_number,
                     "payment_reference": payment_record.payment_reference,
+                    "payment_refund_id": str(payment_refund.id),
+                    "refund_amount": str(payment_refund.amount),
                     "refund_status": refund_status,
                     "refund_id": refund_id,
                     "event_type": event_type,
@@ -897,7 +1136,24 @@ def _mark_refund_from_event(
                 },
             )
         elif refund_status in {"failed", "canceled"}:
-            # Failed/cancelled refund: keep the payment as it was and log the failure.
+            payment_refund.status = (
+                PaymentRefund.STATUS_CANCELLED
+                if refund_status == "canceled"
+                else PaymentRefund.STATUS_FAILED
+            )
+            payment_refund.failure_reason = _normalize_external_id(refund_object.get("failure_reason"))
+            payment_refund.processed_at = timezone.now()
+            if refund_id and payment_refund.stripe_refund_id != refund_id:
+                payment_refund.stripe_refund_id = refund_id
+            payment_refund.save(
+                update_fields=[
+                    "status",
+                    "failure_reason",
+                    "processed_at",
+                    "stripe_refund_id",
+                    "updated_at",
+                ]
+            )
             log_event(
                 action="payment.refund.failed",
                 user=None,
@@ -906,6 +1162,8 @@ def _mark_refund_from_event(
                 metadata={
                     "invoice_number": invoice.invoice_number,
                     "payment_reference": payment_record.payment_reference,
+                    "payment_refund_id": str(payment_refund.id),
+                    "refund_amount": str(payment_refund.amount),
                     "refund_status": refund_status,
                     "refund_id": refund_id,
                     "event_type": event_type,
@@ -921,6 +1179,8 @@ def _mark_refund_from_event(
                 metadata={
                     "invoice_number": invoice.invoice_number,
                     "payment_reference": payment_record.payment_reference,
+                    "payment_refund_id": str(payment_refund.id),
+                    "refund_amount": str(payment_refund.amount),
                     "refund_status": refund_status or "unknown",
                     "refund_id": refund_id,
                     "event_type": event_type,
@@ -949,6 +1209,7 @@ def _mark_refund_from_event(
         payload_data = event_record.payload.get("data") or {}
         payload_object = payload_data.get("object") or {}
         payload_object["normalized_refund_status"] = refund_status
+        payload_object["payment_refund_id"] = str(payment_refund.id)
         payload_data["object"] = payload_object
         event_record.payload["data"] = payload_data
         event_record.save(update_fields=["payload", "updated_at"])

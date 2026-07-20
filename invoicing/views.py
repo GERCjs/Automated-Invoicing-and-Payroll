@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Sum
 from django.db.models import Q
@@ -23,10 +24,12 @@ from notifications.services import get_invoice_reminder_history, send_invoice_em
 from payments.services import (
     get_bank_transfer_details,
     get_or_create_bank_transfer_payment,
+    get_remaining_refundable_amount,
+    get_succeeded_refund_total,
     successful_payments_queryset,
 )
-from payments.models import PaymentRecord
-from payments.forms import BankTransferConfirmationForm, BankTransferNoticeForm
+from payments.models import PaymentRecord, PaymentRefund
+from payments.forms import BankTransferConfirmationForm, BankTransferNoticeForm, PaymentRefundForm
 from support.models import SupportTicket
 
 from .exports import generate_invoice_excel, generate_invoice_pdf
@@ -71,12 +74,33 @@ OUTSTANDING_INVOICE_STATUSES = {
 INVOICE_DASHBOARD_DEFAULT_CATEGORY = "bank_transfer_to_verify"
 
 
+def _submitted_pending_bank_transfer_filter(prefix: str = "") -> dict:
+    return {
+        f"{prefix}payment_records__provider": PaymentRecord.PROVIDER_MANUAL,
+        f"{prefix}payment_records__status": PaymentRecord.STATUS_PENDING,
+        f"{prefix}payment_records__manual_customer_submitted_at__isnull": False,
+    }
+
+
 def _invoice_dashboard_category_queryset(category_key: str):
     base_queryset = Invoice.objects.select_related("customer")
     if category_key == "outstanding":
         return base_queryset.filter(status__in=OUTSTANDING_INVOICE_STATUSES)
-    if category_key == "overdue":
-        return base_queryset.filter(status=Invoice.STATUS_OVERDUE)
+    if category_key == "overdue_unverified_transfer":
+        return base_queryset.filter(
+            status=Invoice.STATUS_OVERDUE,
+            **_submitted_pending_bank_transfer_filter(),
+        ).distinct()
+    if category_key == "overdue_not_paid":
+        submitted_bank_transfer_invoice_ids = PaymentRecord.objects.filter(
+            provider=PaymentRecord.PROVIDER_MANUAL,
+            status=PaymentRecord.STATUS_PENDING,
+            manual_customer_submitted_at__isnull=False,
+            invoice__status=Invoice.STATUS_OVERDUE,
+        ).values("invoice_id")
+        return base_queryset.filter(status=Invoice.STATUS_OVERDUE).exclude(
+            id__in=submitted_bank_transfer_invoice_ids
+        )
     if category_key == "requires_follow_up":
         return base_queryset.filter(
             status__in=[
@@ -88,9 +112,8 @@ def _invoice_dashboard_category_queryset(category_key: str):
         )
     if category_key == "bank_transfer_to_verify":
         return base_queryset.filter(
-            payment_records__provider=PaymentRecord.PROVIDER_MANUAL,
-            payment_records__status=PaymentRecord.STATUS_PENDING,
-            payment_records__manual_customer_submitted_at__isnull=False,
+            status__in=OUTSTANDING_INVOICE_STATUSES,
+            **_submitted_pending_bank_transfer_filter(),
         ).distinct()
     return base_queryset.none()
 
@@ -105,21 +128,31 @@ def _build_invoice_dashboard_categories(selected_key: str):
             "key": "bank_transfer_to_verify",
             "label": "Bank Transfer to Verify",
             "description": "Customer-submitted bank transfer notices waiting for Finance verification.",
+            "row_action": "verify_transfer",
+        },
+        {
+            "key": "overdue_unverified_transfer",
+            "label": "Overdue - Unverified Transfer",
+            "description": "Overdue invoices where the customer submitted a bank-transfer notice awaiting verification.",
+            "row_action": "verify_transfer",
+        },
+        {
+            "key": "overdue_not_paid",
+            "label": "Overdue - Not Paid",
+            "description": "Overdue invoices with no submitted bank-transfer notice yet.",
+            "row_action": "send_reminder",
         },
         {
             "key": "outstanding",
             "label": "Outstanding",
             "description": "Sent, viewed, and overdue invoices still waiting for payment.",
-        },
-        {
-            "key": "overdue",
-            "label": "Overdue",
-            "description": "Invoices already past due and needing immediate collection follow-up.",
+            "row_action": "default",
         },
         {
             "key": "requires_follow_up",
             "label": "Requires Action",
             "description": "Drafts awaiting issue and unpaid invoices requiring collection or delivery action.",
+            "row_action": "default",
         },
     ]
     categories = []
@@ -584,6 +617,13 @@ def invoice_list(request):
     search_query = request.GET.get("q", "").strip()
     issue_date_from_raw = request.GET.get("issue_date_from", "").strip()
     issue_date_to_raw = request.GET.get("issue_date_to", "").strip()
+    per_page_options = [10, 20, 50]
+    try:
+        per_page = int(request.GET.get("per_page", "10"))
+    except (TypeError, ValueError):
+        per_page = 10
+    if per_page not in per_page_options:
+        per_page = 10
 
     def _parse_issue_date(raw_value: str, label: str) -> tuple[date | None, str]:
         value = (raw_value or "").strip()
@@ -668,10 +708,70 @@ def invoice_list(request):
     }
     active_filter_label = filter_label_map.get(selected_filter, "All invoices")
 
-    invoice_rows = list(invoices)
+    result_count = invoices.count()
+    paginator = Paginator(invoices, per_page)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    def _query_string_with(**updates) -> str:
+        params = request.GET.copy()
+        for key, value in updates.items():
+            if value in {"", None}:
+                params.pop(key, None)
+            else:
+                params[key] = str(value)
+        return params.urlencode()
+
+    pagination_links = []
+    for page_number in paginator.get_elided_page_range(page_obj.number):
+        if isinstance(page_number, int):
+            pagination_links.append(
+                {
+                    "number": page_number,
+                    "label": str(page_number),
+                    "url": f"?{_query_string_with(page=page_number, per_page=per_page)}",
+                    "is_current": page_number == page_obj.number,
+                    "is_gap": False,
+                }
+            )
+        else:
+            pagination_links.append(
+                {
+                    "number": "",
+                    "label": str(page_number),
+                    "url": "",
+                    "is_current": False,
+                    "is_gap": True,
+                }
+            )
+
+    per_page_hidden_fields = []
+    for key, values in request.GET.lists():
+        if key in {"page", "per_page"}:
+            continue
+        for value in values:
+            per_page_hidden_fields.append({"name": key, "value": value})
+
+    invoice_rows = list(page_obj.object_list)
+    invoice_ids = [invoice.id for invoice in invoice_rows]
+    paid_payments = (
+        PaymentRecord.objects.filter(
+            invoice_id__in=invoice_ids,
+            status__in=[
+                PaymentRecord.STATUS_SUCCEEDED,
+                PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+                PaymentRecord.STATUS_REFUNDED,
+            ],
+            paid_at__isnull=False,
+        )
+        .order_by("invoice_id", "-paid_at", "-created_at")
+    )
+    paid_payment_by_invoice_id = {}
+    for payment in paid_payments:
+        paid_payment_by_invoice_id.setdefault(payment.invoice_id, payment)
     for invoice in invoice_rows:
         invoice.batch_email_block_reason = _get_batch_invoice_email_block_reason(invoice)
         invoice.can_batch_send_email = not invoice.batch_email_block_reason
+        invoice.paid_payment = paid_payment_by_invoice_id.get(invoice.id)
 
     return render(
         request,
@@ -682,7 +782,23 @@ def invoice_list(request):
             "search_query": search_query,
             "active_filter_label": active_filter_label,
             "status_summary": status_summary,
-            "result_count": len(invoice_rows),
+            "result_count": result_count,
+            "page_obj": page_obj,
+            "paginator": paginator,
+            "pagination_links": pagination_links,
+            "per_page": per_page,
+            "per_page_options": per_page_options,
+            "per_page_hidden_fields": per_page_hidden_fields,
+            "previous_page_url": (
+                f"?{_query_string_with(page=page_obj.previous_page_number(), per_page=per_page)}"
+                if page_obj.has_previous()
+                else ""
+            ),
+            "next_page_url": (
+                f"?{_query_string_with(page=page_obj.next_page_number(), per_page=per_page)}"
+                if page_obj.has_next()
+                else ""
+            ),
             "issue_date_from": issue_date_from_raw,
             "issue_date_to": issue_date_to_raw,
             "issue_date_error": issue_date_error,
@@ -698,8 +814,9 @@ def invoice_dashboard(request):
     requested_category = request.GET.get("category", "").strip().lower()
     allowed_category_keys = {
         "bank_transfer_to_verify",
+        "overdue_unverified_transfer",
+        "overdue_not_paid",
         "outstanding",
-        "overdue",
         "requires_follow_up",
     }
     selected_invoice_category_key = (
@@ -1233,6 +1350,48 @@ def invoice_detail(request, pk):
         .order_by("-attempted_at")
         .first()
     )
+    refundable_payment = (
+        PaymentRecord.objects.filter(
+            invoice=invoice,
+            status__in=[
+                PaymentRecord.STATUS_SUCCEEDED,
+                PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+            ],
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    paid_payment = (
+        PaymentRecord.objects.filter(
+            invoice=invoice,
+            status__in=[
+                PaymentRecord.STATUS_SUCCEEDED,
+                PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+                PaymentRecord.STATUS_REFUNDED,
+            ],
+            paid_at__isnull=False,
+        )
+        .order_by("-paid_at", "-created_at")
+        .first()
+    )
+    refund_history = PaymentRefund.objects.filter(invoice=invoice).select_related(
+        "payment_record",
+        "created_by",
+        "processed_by",
+    )
+    refund_form = None
+    refund_summary = None
+    if refundable_payment is not None:
+        refunded_total = get_succeeded_refund_total(refundable_payment)
+        remaining_refundable_amount = get_remaining_refundable_amount(refundable_payment)
+        refund_form = PaymentRefundForm(payment_record=refundable_payment)
+        refund_summary = {
+            "payment_record": refundable_payment,
+            "paid_amount": refundable_payment.amount,
+            "refunded_total": refunded_total,
+            "remaining_refundable_amount": remaining_refundable_amount,
+            "method_label": refundable_payment.get_provider_display(),
+        }
     return render(
         request,
         "invoicing/invoice_detail.html",
@@ -1241,6 +1400,10 @@ def invoice_detail(request, pk):
             "items": invoice.items.all(),
             "status_choices": Invoice.STATUS_CHOICES,
             **_bank_transfer_context(invoice, initiated_by=request.user),
+            "paid_payment": paid_payment,
+            "refund_form": refund_form,
+            "refund_summary": refund_summary,
+            "refund_history": refund_history,
             "last_invoice_email_sent_at": (
                 (last_invoice_email_log.sent_at or last_invoice_email_log.attempted_at)
                 if last_invoice_email_log

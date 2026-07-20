@@ -52,6 +52,7 @@ class Invoice(models.Model):
     STATUS_SENT = "sent"
     STATUS_VIEWED = "viewed"
     STATUS_PAID = "paid"
+    STATUS_PARTIALLY_REFUNDED = "partially_refunded"
     STATUS_OVERDUE = "overdue"
     STATUS_REFUNDED = "refunded"
     STATUS_CHOICES = [
@@ -59,6 +60,7 @@ class Invoice(models.Model):
         (STATUS_SENT, "Pending Payment"),
         (STATUS_VIEWED, "Viewed"),
         (STATUS_PAID, "Paid"),
+        (STATUS_PARTIALLY_REFUNDED, "Partially Refunded"),
         (STATUS_OVERDUE, "Overdue"),
         (STATUS_REFUNDED, "Refunded"),
     ]

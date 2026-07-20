@@ -31,13 +31,38 @@
         </tr>
         <tr>
             <td style="padding: 4px 10px 4px 0;"><strong>Refunded Amount:</strong></td>
-            <td style="padding: 4px 0;">{{ payment_record.currency }} {{ payment_record.amount }}</td>
+            <td style="padding: 4px 0;">{{ payment_record.currency }} {{ refund_amount }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Total Refunded So Far:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_record.currency }} {{ total_refunded_amount }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Remaining Paid Amount:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_record.currency }} {{ remaining_paid_amount }}</td>
+        </tr>
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Payment Method:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_method_label }}</td>
         </tr>
         <tr>
             <td style="padding: 4px 10px 4px 0;"><strong>Payment Reference:</strong></td>
             <td style="padding: 4px 0;">{{ payment_record.payment_reference }}</td>
         </tr>
+        {% if payment_refund and payment_refund.stripe_refund_id %}
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Stripe Refund ID:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_refund.stripe_refund_id }}</td>
+        </tr>
+        {% endif %}
+        {% if payment_refund and payment_refund.bank_reference %}
+        <tr>
+            <td style="padding: 4px 10px 4px 0;"><strong>Bank Refund Reference:</strong></td>
+            <td style="padding: 4px 0;">{{ payment_refund.bank_reference }}</td>
+        </tr>
+        {% endif %}
     </table>
+    <p><strong>Reason:</strong><br>{{ customer_message|default:"Full refund completed."|linebreaksbr }}</p>
     <p>
         View your invoice online:
         <a href="{{ public_invoice_url }}">{{ public_invoice_url }}</a>

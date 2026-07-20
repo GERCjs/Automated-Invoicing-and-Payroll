@@ -60,12 +60,14 @@ class PaymentRecord(models.Model):
 
     STATUS_PENDING = "pending"
     STATUS_SUCCEEDED = "succeeded"
+    STATUS_PARTIALLY_REFUNDED = "partially_refunded"
     STATUS_FAILED = "failed"
     STATUS_REFUNDED = "refunded"
     STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = [
         (STATUS_PENDING, "Pending"),
         (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_PARTIALLY_REFUNDED, "Partially Refunded"),
         (STATUS_FAILED, "Failed"),
         (STATUS_REFUNDED, "Refunded"),
         (STATUS_CANCELLED, "Cancelled"),
@@ -173,6 +175,79 @@ class PaymentRecord(models.Model):
     @property
     def has_customer_bank_transfer_notice(self) -> bool:
         return self.manual_customer_submitted_at is not None
+
+
+class PaymentRefund(models.Model):
+    METHOD_STRIPE = "stripe"
+    METHOD_BANK_TRANSFER = "bank_transfer"
+    METHOD_CHOICES = [
+        (METHOD_STRIPE, "Stripe"),
+        (METHOD_BANK_TRANSFER, "Bank Transfer"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_SUCCEEDED = "succeeded"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SUCCEEDED, "Succeeded"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    invoice = models.ForeignKey(
+        "invoicing.Invoice",
+        on_delete=models.PROTECT,
+        related_name="payment_refunds",
+    )
+    payment_record = models.ForeignKey(
+        PaymentRecord,
+        on_delete=models.PROTECT,
+        related_name="refunds",
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+    currency = models.CharField(max_length=3, default="SGD")
+    method = models.CharField(max_length=20, choices=METHOD_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    customer_message = models.TextField()
+    stripe_refund_id = models.CharField(max_length=255, blank=True)
+    bank_reference = models.CharField(max_length=100, blank=True)
+    failure_reason = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payment_refunds_created",
+    )
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payment_refunds_processed",
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "payment_refund"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status"]),
+            models.Index(fields=["method"]),
+            models.Index(fields=["processed_at"]),
+            models.Index(fields=["stripe_refund_id"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Refund {self.currency} {self.amount} for {self.payment_record.payment_reference}"
 
 
 # A StripeWebhookEvent stores one event sent by Stripe to this application.

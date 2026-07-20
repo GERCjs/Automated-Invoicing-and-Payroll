@@ -16,14 +16,15 @@ from invoicing.models import Invoice
 from invoicing.services import apply_overdue_status
 from notifications.services import (
     send_bank_transfer_payment_success_email,
+    send_payment_refund_success_email,
     send_stripe_refund_failed_email,
     send_stripe_refund_success_email,
     send_stripe_payment_failed_email,
     send_stripe_payment_success_email,
 )
 
-from .forms import BankTransferConfirmationForm, BankTransferNoticeForm, PaymentBankDetailsForm
-from .models import PaymentBankDetails, PaymentRecord
+from .forms import BankTransferConfirmationForm, BankTransferNoticeForm, PaymentBankDetailsForm, PaymentRefundForm
+from .models import PaymentBankDetails, PaymentRecord, PaymentRefund
 from .services import (
     WEBHOOK_EVENT_ASYNC_FAILED,
     WEBHOOK_EVENT_ASYNC_SUCCEEDED,
@@ -36,6 +37,7 @@ from .services import (
     confirm_bank_transfer_payment,
     create_full_refund_for_payment,
     create_checkout_for_invoice,
+    create_refund_for_payment,
     finalize_checkout_success_from_redirect,
     get_bank_transfer_details,
     get_or_create_bank_transfer_payment,
@@ -219,25 +221,27 @@ def _send_failed_payment_email(
     )
 
 
-def _send_success_refund_email(request, payment_record: PaymentRecord) -> None:
+def _send_success_refund_email(request, payment_refund: PaymentRefund) -> None:
     # Send an email to the customer after a successful refund.
-    invoice = payment_record.invoice
-    success, delivery_log = send_stripe_refund_success_email(
+    invoice = payment_refund.invoice
+    success, delivery_log = send_payment_refund_success_email(
         invoice=invoice,
-        payment_record=payment_record,
+        payment_refund=payment_refund,
         public_invoice_url=_public_invoice_url(request, invoice),
-        triggered_by=request.user if request.user.is_authenticated else payment_record.created_by,
+        triggered_by=request.user if request.user.is_authenticated else payment_refund.created_by,
     )
     # Record whether the refund email was sent successfully.
     log_event(
         action="payment.email.sent" if success else "payment.email.failed",
-        user=request.user if request.user.is_authenticated else payment_record.created_by,
+        user=request.user if request.user.is_authenticated else payment_refund.created_by,
         target_type="invoice",
         target_id=str(invoice.id),
         metadata={
             "invoice_number": invoice.invoice_number,
             "delivery_log_id": delivery_log.id,
-            "payment_reference": payment_record.payment_reference,
+            "payment_reference": payment_refund.payment_record.payment_reference,
+            "payment_refund_id": str(payment_refund.id),
+            "refund_amount": str(payment_refund.amount),
             "payment_outcome": "refund_successful",
             "recipient_email": invoice.customer.email,
             "error_message": delivery_log.error_message,
@@ -651,22 +655,23 @@ def bank_transfer_settings(request):
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE)
-@require_POST
 def refund_invoice_payment(request, pk):
     # Only admin/finance roles can request refunds from this endpoint.
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
-    # Use the latest Stripe payment record for this invoice.
+    # Use the latest completed payment record for this invoice and keep refunds on the original method.
     payment_record = (
         PaymentRecord.objects.select_related("invoice")
         .filter(
             invoice=invoice,
-            provider=PaymentRecord.PROVIDER_STRIPE,
+            status__in=[
+                PaymentRecord.STATUS_SUCCEEDED,
+                PaymentRecord.STATUS_PARTIALLY_REFUNDED,
+            ],
         )
         .order_by("-created_at")
         .first()
     )
     if payment_record is None:
-        # Refunds need an existing Stripe payment record.
         log_event(
             action="payment.refund.failed",
             user=request.user,
@@ -674,14 +679,17 @@ def refund_invoice_payment(request, pk):
             target_id=str(invoice.id),
             metadata={
                 "invoice_number": invoice.invoice_number,
-                "reason": "No Stripe payment record found for invoice.",
+                "reason": "No refundable payment record found for invoice.",
             },
             ip_address=get_client_ip(request),
         )
-        messages.error(request, "No Stripe payment record was found for this invoice.")
+        messages.error(request, "No refundable payment record was found for this invoice.")
         return redirect("invoice-detail", pk=invoice.pk)
-    if payment_record.status == PaymentRecord.STATUS_REFUNDED:
-        # Avoid refunding the same payment twice.
+
+    form = PaymentRefundForm(request.POST or None, payment_record=payment_record)
+    if request.method != "POST":
+        return redirect("invoice-detail", pk=invoice.pk)
+    if not request.POST:
         log_event(
             action="payment.refund.requested",
             user=request.user,
@@ -691,11 +699,54 @@ def refund_invoice_payment(request, pk):
                 "invoice_number": invoice.invoice_number,
                 "payment_reference": payment_record.payment_reference,
                 "current_status": payment_record.status,
-                "result": "already_refunded",
+                "payment_method": payment_record.provider,
+                "refund_type": "full",
             },
             ip_address=get_client_ip(request),
         )
-        messages.info(request, "This Stripe payment is already refunded.")
+        try:
+            invoice_status_before = invoice.status
+            refund = create_full_refund_for_payment(
+                payment_record=payment_record,
+                initiated_by=request.user,
+            )
+        except Exception as exc:
+            log_event(
+                action="payment.refund.failed",
+                user=request.user,
+                target_type="invoice",
+                target_id=str(invoice.id),
+                metadata={
+                    "invoice_number": invoice.invoice_number,
+                    "payment_reference": payment_record.payment_reference,
+                    "reason": str(exc),
+                },
+                ip_address=get_client_ip(request),
+            )
+            messages.error(request, str(exc))
+            return redirect("invoice-detail", pk=invoice.pk)
+        payment_record.refresh_from_db()
+        invoice.refresh_from_db()
+        log_event(
+            action="payment.refund.succeeded",
+            user=request.user,
+            target_type="invoice",
+            target_id=str(invoice.id),
+            metadata={
+                "invoice_number": invoice.invoice_number,
+                "payment_reference": payment_record.payment_reference,
+                "refund_status": str(getattr(refund, "status", "") or ""),
+                "previous_invoice_status": invoice_status_before,
+                "new_invoice_status": invoice.status,
+            },
+            ip_address=get_client_ip(request),
+        )
+        messages.success(request, f"Refund succeeded for invoice {invoice.invoice_number}.")
+        return redirect("invoice-detail", pk=invoice.pk)
+    if not form.is_valid():
+        for field_errors in form.errors.values():
+            for error in field_errors:
+                messages.error(request, error)
         return redirect("invoice-detail", pk=invoice.pk)
 
     # Audit that a refund was requested.
@@ -708,15 +759,19 @@ def refund_invoice_payment(request, pk):
             "invoice_number": invoice.invoice_number,
             "payment_reference": payment_record.payment_reference,
             "current_status": payment_record.status,
+            "refund_amount": str(form.cleaned_data["amount"]),
+            "payment_method": payment_record.provider,
         },
         ip_address=get_client_ip(request),
     )
 
     try:
         invoice_status_before = invoice.status
-        # Ask Stripe to create the refund.
-        refund = create_full_refund_for_payment(
+        payment_refund = create_refund_for_payment(
             payment_record=payment_record,
+            amount=form.cleaned_data["amount"],
+            customer_message=form.cleaned_data["customer_message"],
+            bank_reference=form.cleaned_data["bank_reference"],
             initiated_by=request.user,
         )
     except ImproperlyConfigured as exc:
@@ -752,7 +807,6 @@ def refund_invoice_payment(request, pk):
         messages.error(request, str(exc))
         return redirect("invoice-detail", pk=invoice.pk)
     except Exception as exc:
-        # Unexpected Stripe refund failures are logged with details.
         log_event(
             action="payment.refund.failed",
             user=request.user,
@@ -761,20 +815,20 @@ def refund_invoice_payment(request, pk):
             metadata={
                 "invoice_number": invoice.invoice_number,
                 "payment_reference": payment_record.payment_reference,
-                "reason": f"Stripe refund request failed: {exc}",
+                "reason": f"Refund request failed: {exc}",
             },
             ip_address=get_client_ip(request),
         )
-        messages.error(request, "Stripe refund request failed. Please try again later.")
+        messages.error(request, "Refund request failed. Please try again later.")
         return redirect("invoice-detail", pk=invoice.pk)
 
     # Refresh from the database because the refund service may have changed statuses.
-    refund_status = str(getattr(refund, "status", "") or "").lower()
+    refund_status = payment_refund.status
     payment_record.refresh_from_db()
     invoice.refresh_from_db()
-    if refund_status == "succeeded":
+    if refund_status == PaymentRefund.STATUS_SUCCEEDED:
         # Refund finished immediately, so email the customer and log success.
-        _send_success_refund_email(request, payment_record)
+        _send_success_refund_email(request, payment_refund)
         log_event(
             action="payment.refund.succeeded",
             user=request.user,
@@ -783,20 +837,16 @@ def refund_invoice_payment(request, pk):
             metadata={
                 "invoice_number": invoice.invoice_number,
                 "payment_reference": payment_record.payment_reference,
+                "payment_refund_id": str(payment_refund.id),
+                "refund_amount": str(payment_refund.amount),
                 "refund_status": refund_status,
                 "previous_invoice_status": invoice_status_before,
                 "new_invoice_status": invoice.status,
             },
             ip_address=get_client_ip(request),
         )
-        messages.success(request, f"Stripe refund succeeded for invoice {invoice.invoice_number}.")
+        messages.success(request, f"Refund succeeded for invoice {invoice.invoice_number}.")
     else:
-        # Refund exists but is not final yet, so email/log it as pending or unclear.
-        _send_failed_refund_email(
-            request,
-            payment_record,
-            failure_reason=f"Stripe refund status: {refund_status or 'unknown'}.",
-        )
         log_event(
             action="payment.refund.requested",
             user=request.user,
@@ -805,6 +855,8 @@ def refund_invoice_payment(request, pk):
             metadata={
                 "invoice_number": invoice.invoice_number,
                 "payment_reference": payment_record.payment_reference,
+                "payment_refund_id": str(payment_refund.id),
+                "refund_amount": str(payment_refund.amount),
                 "refund_status": refund_status or "unknown",
                 "result": "pending_or_non_final",
             },
@@ -1020,8 +1072,13 @@ def stripe_webhook(request):
             # Refund webhooks send either success or failure emails when final.
             refund_object = ((event_record.payload or {}).get("data") or {}).get("object") or {}
             refund_status = str(refund_object.get("normalized_refund_status") or refund_object.get("status") or "").lower()
+            payment_refund = None
+            payment_refund_id = str(refund_object.get("payment_refund_id") or "").strip()
+            if payment_refund_id.isdigit():
+                payment_refund = PaymentRefund.objects.filter(id=int(payment_refund_id)).first()
             if refund_status == "succeeded":
-                _send_success_refund_email(request, payment_record)
+                if payment_refund is not None:
+                    _send_success_refund_email(request, payment_refund)
             elif refund_status in {"failed", "canceled"}:
                 failure_reason = str(refund_object.get("failure_reason") or "").strip()
                 _send_failed_refund_email(
