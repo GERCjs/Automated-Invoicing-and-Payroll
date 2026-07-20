@@ -11,7 +11,7 @@
     <a href="{{ back_url }}" class="btn btn-outline-secondary">{{ back_label }}</a>
 </div>
 
-{% if ticket.is_sla_breached %}
+{% if ticket.response_target_breached %}
 <div class="alert alert-danger portal-alert">
     This ticket has been unresolved for {{ ticket.unresolved_age_days }} days. The current response target is {{ support_ticket_sla_days }} days.
 </div>

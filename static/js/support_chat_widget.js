@@ -16,6 +16,7 @@
     const referenceInput = widget.querySelector("[data-support-chat-reference]");
     const optionsScript = widget.querySelector("#support-chat-options");
     const chatOptions = optionsScript ? JSON.parse(optionsScript.textContent) : { options: [], references: [] };
+    const responseTargetDays = Number(chatOptions.responseTargetDays || 0);
     let activeOption = null;
     const generalAnswers = [
         {
@@ -36,7 +37,9 @@
         },
         {
             keywords: ["how long", "response time", "resolve", "resolved", "response target"],
-            answer: "The support team uses a 3 day response target. Tickets that pass that target are highlighted for the responsible officers.",
+            answer: responseTargetDays
+                ? `The support team uses a ${responseTargetDays} day response target. Tickets that pass that target are highlighted for the responsible officers.`
+                : "The support team uses a configurable response target. Tickets that pass that target are highlighted for the responsible officers.",
         },
         {
             keywords: ["who handles", "finance", "payroll", "hr", "admin"],

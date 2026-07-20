@@ -1,28 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Ask About This Invoice | Automated Invoicing & Payroll{% endblock %}
+{% block title %}Ask About This Payslip | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-lg-8">
         <div class="page-header">
             <div>
-                <h1 class="page-title">Ask About This Invoice</h1>
-                <p class="page-subtitle">Finance will receive this request with the linked invoice reference attached automatically.</p>
+                <h1 class="page-title">Ask About This Payslip</h1>
+                <p class="page-subtitle">Payroll will receive this request with the linked payslip reference attached automatically.</p>
             </div>
-            <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-outline-secondary">Back to Invoice</a>
+            <a href="{% url 'my-payslips' %}" class="btn btn-outline-secondary">Back to My Payslips</a>
         </div>
         <div class="card">
-            <div class="card-header">Invoice {{ invoice.invoice_number }}</div>
+            <div class="card-header">Payslip {{ related_reference }}</div>
             <div class="card-body">
                 <div class="row g-2 mb-3">
                     <div class="col-md-6">
-                        <div class="small text-muted">Invoice Reference</div>
-                        <div class="fw-semibold">{{ invoice.invoice_number }}</div>
+                        <div class="small text-muted">Payslip Reference</div>
+                        <div class="fw-semibold">{{ related_reference }}</div>
                     </div>
                     <div class="col-md-6">
-                        <div class="small text-muted">Status</div>
-                        <div class="fw-semibold">{{ invoice.get_status_display }}</div>
+                        <div class="small text-muted">Net Salary</div>
+                        <div class="fw-semibold">SGD {{ payslip.net_salary }}</div>
                     </div>
                 </div>
                 <form method="post">
@@ -39,7 +39,7 @@
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">Submit Request</button>
-                        <a href="{% url 'customer-invoice-detail' invoice.pk %}" class="btn btn-outline-secondary">Back to Invoice</a>
+                        <a href="{% url 'my-payslips' %}" class="btn btn-outline-secondary">Back to My Payslips</a>
                     </div>
                 </form>
             </div>

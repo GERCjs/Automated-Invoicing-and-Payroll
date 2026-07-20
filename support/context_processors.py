@@ -8,10 +8,17 @@ def support_chat_options(request):
 
     role = get_user_role(request.user)
     if role == CUSTOMER:
-        return {"support_chat_options": _customer_support_chat_options(request.user)}
+        return {"support_chat_options": _with_response_target(_customer_support_chat_options(request.user))}
     if role == STAFF:
-        return {"support_chat_options": _staff_support_chat_options(request.user)}
+        return {"support_chat_options": _with_response_target(_staff_support_chat_options(request.user))}
     return {}
+
+
+def _with_response_target(options):
+    from .models import get_support_ticket_response_target_days
+
+    options["responseTargetDays"] = get_support_ticket_response_target_days()
+    return options
 
 
 def _customer_support_chat_options(user):
@@ -89,6 +96,7 @@ def _staff_support_chat_options(user):
         )
         references = [
             {
+                "id": payslip.id,
                 "label": f"{payslip.payment_date:%Y-%m-%d} - SGD {payslip.net_salary}",
                 "value": f"{payslip.employee_id} / {payslip.payment_date:%Y-%m-%d}",
                 "meta": "Payslip",

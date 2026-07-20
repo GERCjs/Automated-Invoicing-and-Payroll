@@ -1,6 +1,6 @@
 from django import forms
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
-from .models import SupportTicket
+from .models import SupportTicket, SupportTicketSettings
 
 
 class SupportTicketCreateForm(forms.ModelForm):
@@ -70,3 +70,33 @@ class CustomerInvoiceSupportTicketForm(forms.ModelForm):
             ),
             "message": forms.Textarea(attrs={"class": "form-control", "rows": 5}),
         }
+
+
+class StaffPayslipSupportTicketForm(forms.ModelForm):
+    class Meta:
+        model = SupportTicket
+        fields = ("subject", "message")
+        widgets = {
+            "subject": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "What do you need help with on this payslip?",
+                }
+            ),
+            "message": forms.Textarea(attrs={"class": "form-control", "rows": 5}),
+        }
+
+
+class SupportTicketSettingsForm(forms.ModelForm):
+    class Meta:
+        model = SupportTicketSettings
+        fields = ("response_target_days",)
+        widgets = {
+            "response_target_days": forms.NumberInput(attrs={"class": "form-control", "min": "1", "max": "30"}),
+        }
+
+    def clean_response_target_days(self):
+        value = self.cleaned_data["response_target_days"]
+        if value < 1 or value > 30:
+            raise forms.ValidationError("Enter a response target between 1 and 30 days.")
+        return value

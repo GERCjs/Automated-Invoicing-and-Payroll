@@ -16,7 +16,14 @@ from invoicing.services import refresh_overdue_invoices
 from invoicing.exports import generate_invoice_pdf
 from invoicing.models import Invoice
 
-from .models import EmailDeliveryLog, PaymentReminderSettings
+from .models import (
+    EmailDeliveryLog,
+    PAYMENT_REMINDER_DEFAULT_BODY_TEMPLATE,
+    PAYMENT_REMINDER_DEFAULT_SUBJECT_TEMPLATE,
+    PAYMENT_REMINDER_TEMPLATE_FIELDS,
+    PaymentReminderSettings,
+    render_payment_reminder_template,
+)
 
 STRIPE_PAYMENT_SUCCESS_EMAIL_TEMPLATE_KEY = "stripe_payment_success_invoice_email_v1"
 STRIPE_PAYMENT_FAILED_EMAIL_TEMPLATE_KEY = "stripe_payment_failed_invoice_email_v1"
@@ -721,51 +728,64 @@ def get_invoice_reminder_history(invoice: Invoice):
     ).order_by("-attempted_at")
 
 
-def _build_payment_reminder_message(invoice: Invoice, reminder_type: str, public_invoice_url: str) -> tuple[str, str]:
+def _reminder_status_for(invoice: Invoice, reminder_type: str):
     reminder_titles = {
         "before_due": f"due in {max((invoice.due_date - timezone.localdate()).days, 0)} day(s)",
         "due_date": "due today",
         "after_due": "overdue",
         "overdue_repeat": "still overdue",
     }
-    reminder_label = reminder_titles.get(reminder_type, "payment reminder")
-    subject = f"Payment Reminder: {invoice.invoice_number} is {reminder_label}"
-    body = (
-        f"Dear {invoice.customer.name},\n\n"
-        f"This is a payment reminder for invoice {invoice.invoice_number}.\n"
-        f"Due date: {invoice.due_date:%Y-%m-%d}\n"
-        f"Amount due: {invoice.currency} {invoice.total_amount:.2f}\n\n"
-        f"View invoice: {public_invoice_url}\n\n"
-        f"If payment has already been made, please disregard this reminder.\n\n"
-        f"{settings.COMPANY_NAME}\n"
-        f"{settings.COMPANY_EMAIL}"
-    )
+    return reminder_titles.get(reminder_type, "payment reminder")
+
+
+def _payment_reminder_template_values(invoice: Invoice, reminder_type: str, public_invoice_url: str) -> dict:
+    return {
+        "customer_name": invoice.customer.name,
+        "invoice_number": invoice.invoice_number,
+        "reminder_status": _reminder_status_for(invoice, reminder_type),
+        "due_date": f"{invoice.due_date:%Y-%m-%d}",
+        "currency": invoice.currency,
+        "amount_due": f"{invoice.total_amount:.2f}",
+        "invoice_link": public_invoice_url,
+        "company_name": settings.COMPANY_NAME,
+        "company_email": settings.COMPANY_EMAIL,
+    }
+
+
+def _build_payment_reminder_message(
+    invoice: Invoice,
+    reminder_type: str,
+    public_invoice_url: str,
+    reminder_settings: PaymentReminderSettings | None = None,
+) -> tuple[str, str]:
+    reminder_settings = reminder_settings or PaymentReminderSettings.load()
+    values = _payment_reminder_template_values(invoice, reminder_type, public_invoice_url)
+    subject_template = reminder_settings.reminder_subject_template or PAYMENT_REMINDER_DEFAULT_SUBJECT_TEMPLATE
+    body_template = reminder_settings.reminder_body_template or PAYMENT_REMINDER_DEFAULT_BODY_TEMPLATE
+    subject = render_payment_reminder_template(subject_template, values).strip()
+    body = render_payment_reminder_template(body_template, values)
     return subject, body
 
 
-def build_payment_reminder_template_preview() -> dict:
+def build_payment_reminder_template_preview(reminder_settings: PaymentReminderSettings | None = None) -> dict:
+    reminder_settings = reminder_settings or PaymentReminderSettings.load()
+    preview_values = {
+        "customer_name": "Customer Name",
+        "invoice_number": "INV-2026-0001",
+        "reminder_status": "overdue",
+        "due_date": "2026-07-31",
+        "currency": "SGD",
+        "amount_due": "139.00",
+        "invoice_link": "https://client-domain.com/invoices/view/example-token/",
+        "company_name": settings.COMPANY_NAME,
+        "company_email": settings.COMPANY_EMAIL,
+    }
+    subject_template = reminder_settings.reminder_subject_template or PAYMENT_REMINDER_DEFAULT_SUBJECT_TEMPLATE
+    body_template = reminder_settings.reminder_body_template or PAYMENT_REMINDER_DEFAULT_BODY_TEMPLATE
     return {
-        "subject": "Payment Reminder: INV-2026-0001 is overdue",
-        "body": (
-            "Dear Customer Name,\n\n"
-            "This is a payment reminder for invoice INV-2026-0001.\n"
-            "Due date: 2026-07-31\n"
-            "Amount due: SGD 139.00\n\n"
-            "View invoice: https://client-domain.com/invoices/view/example-token/\n\n"
-            "If payment has already been made, please disregard this reminder.\n\n"
-            f"{settings.COMPANY_NAME}\n"
-            f"{settings.COMPANY_EMAIL}"
-        ),
-        "editable_fields": [
-            "customer name",
-            "invoice number",
-            "due date",
-            "currency",
-            "amount due",
-            "invoice link",
-            "company name",
-            "company email",
-        ],
+        "subject": render_payment_reminder_template(subject_template, preview_values).strip(),
+        "body": render_payment_reminder_template(body_template, preview_values),
+        "dynamic_values": [f"{{{{ {field} }}}}" for field in PAYMENT_REMINDER_TEMPLATE_FIELDS],
     }
 
 
@@ -775,13 +795,19 @@ def _send_payment_reminder(
     triggered_by=None,
     base_url: str = "",
     simulate: bool = True,
+    reminder_settings: PaymentReminderSettings | None = None,
 ) -> EmailDeliveryLog:
     template_key = REMINDER_TEMPLATE_KEYS[reminder_type]
     recipient = (invoice.customer.email or "").strip().lower()
     base_url = (base_url or "").rstrip("/")
     public_path = reverse("invoice-public-view", args=[invoice.public_view_token])
     public_invoice_url = f"{base_url}{public_path}" if base_url else public_path
-    subject, body = _build_payment_reminder_message(invoice, reminder_type, public_invoice_url)
+    subject, body = _build_payment_reminder_message(
+        invoice,
+        reminder_type,
+        public_invoice_url,
+        reminder_settings=reminder_settings,
+    )
 
     metadata = {
         "invoice_number": invoice.invoice_number,
@@ -927,6 +953,7 @@ def run_payment_reminder_check(*, triggered_by=None, base_url: str = "", simulat
                 triggered_by=triggered_by,
                 base_url=base_url,
                 simulate=simulate,
+                reminder_settings=settings_obj,
             )
         )
         if not simulate:

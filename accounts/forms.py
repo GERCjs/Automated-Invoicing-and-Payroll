@@ -7,7 +7,12 @@ from django.contrib.auth.forms import UserCreationForm
 from django.db.models import Q
 
 from invoicing.models import Customer as InvoiceCustomer
-from notifications.models import PaymentReminderSettings
+from notifications.models import (
+    PAYMENT_REMINDER_DEFAULT_BODY_TEMPLATE,
+    PAYMENT_REMINDER_DEFAULT_SUBJECT_TEMPLATE,
+    get_unknown_payment_reminder_template_fields,
+    PaymentReminderSettings,
+)
 
 from .models import EmailVerificationToken, LoginSecurityPolicy
 from .roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, STAFF, SUPERADMIN
@@ -281,6 +286,8 @@ class PaymentReminderSettingsForm(forms.ModelForm):
             "overdue_repeat_enabled",
             "overdue_repeat_days",
             "mass_email_enabled",
+            "reminder_subject_template",
+            "reminder_body_template",
         )
         widgets = {
             "reminder_days_before_due": forms.NumberInput(attrs={"class": "form-control", "min": "1"}),
@@ -291,7 +298,31 @@ class PaymentReminderSettingsForm(forms.ModelForm):
             "after_due_reminders_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "overdue_repeat_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "mass_email_enabled": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "reminder_subject_template": forms.TextInput(attrs={"class": "form-control"}),
+            "reminder_body_template": forms.Textarea(attrs={"class": "form-control", "rows": 12}),
         }
+
+    def clean_reminder_subject_template(self):
+        value = (self.cleaned_data.get("reminder_subject_template") or "").strip()
+        if not value:
+            return PAYMENT_REMINDER_DEFAULT_SUBJECT_TEMPLATE
+        unknown_fields = get_unknown_payment_reminder_template_fields(value)
+        if unknown_fields:
+            raise forms.ValidationError(self._unknown_template_fields_message(unknown_fields))
+        return value
+
+    def clean_reminder_body_template(self):
+        value = (self.cleaned_data.get("reminder_body_template") or "").strip()
+        if not value:
+            return PAYMENT_REMINDER_DEFAULT_BODY_TEMPLATE
+        unknown_fields = get_unknown_payment_reminder_template_fields(value)
+        if unknown_fields:
+            raise forms.ValidationError(self._unknown_template_fields_message(unknown_fields))
+        return value
+
+    def _unknown_template_fields_message(self, unknown_fields):
+        formatted_fields = ", ".join(f"{{{{ {field} }}}}" for field in unknown_fields)
+        return f"Unknown dynamic value: {formatted_fields}."
 
     def clean(self):
         # If a reminder type is enabled, its number-of-days field must be filled.

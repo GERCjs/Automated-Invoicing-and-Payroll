@@ -44,6 +44,7 @@
                     <td>{{ payslip_record.payment_date }}</td>
                     <td class="text-end">
                         <a href="{% url 'payslip-pdf-download' payslip_record.pk %}" class="btn btn-sm btn-outline-success">Download PDF</a>
+                        <a href="{% url 'staff-payslip-support-ticket-create' payslip_record.pk %}" class="btn btn-sm btn-outline-warning">Ask About This Payslip</a>
                     </td>
                 </tr>
                 {% empty %}

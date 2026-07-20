@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Support Ticket Settings | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="page-header">
+            <div>
+                <h1 class="page-title">Support Ticket Settings</h1>
+                <p class="page-subtitle">Set when unresolved support tickets should be highlighted for follow-up.</p>
+            </div>
+            <a href="{% url 'support-ticket-list' %}" class="btn btn-outline-secondary">Back to Support Tickets</a>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Response Target</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Highlight unresolved tickets after this many days</label>
+                        {{ form.response_target_days }}
+                        <div class="form-text">Example: enter 3 to highlight tickets that have been unresolved for 3 days or more.</div>
+                        {% for error in form.response_target_days.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">Save Settings</button>
+                        <a href="{% url 'support-ticket-list' %}" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

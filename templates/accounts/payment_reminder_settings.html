@@ -3,19 +3,20 @@
 {% block title %}Reminder Settings | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
-<div class="row g-3 justify-content-center">
-    <div class="col-lg-6">
-        <div class="page-header">
-            <div>
-                <h1 class="page-title">Payment Reminder Settings</h1>
-                <p class="page-subtitle">Configure automated reminder behavior for due and overdue invoices.</p>
-            </div>
-        </div>
-        <div class="card">
-            <div class="card-header">Payment Reminder Settings</div>
-            <div class="card-body">
-                <form method="post">
-                    {% csrf_token %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Payment Reminder Settings</h1>
+        <p class="page-subtitle">Configure automated reminder behavior and the email template for due and overdue invoices.</p>
+    </div>
+</div>
+
+<form method="post">
+    {% csrf_token %}
+    <div class="row g-3 justify-content-center">
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header">Payment Reminder Settings</div>
+                <div class="card-body">
                     <div class="sub-kpi mb-3">
                         <div class="form-check mb-2">
                             {{ form.before_due_reminders_enabled }}
@@ -62,29 +63,54 @@
                         <button type="submit" class="btn btn-primary">Save Settings</button>
                         <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Cancel</a>
                     </div>
-                </form>
+                </div>
+            </div>
+        </div>
 
-                <hr class="my-4">
-                <div>
-                    <h2 class="section-heading mb-2">Send Payment Reminders</h2>
-                    <p class="text-muted small mb-3">Send reminders for invoices that match the saved rules and are due for another reminder.</p>
-                    <form method="post" action="{% url 'payment-reminder-run-check' %}">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-primary">Send Payment Reminders</button>
-                    </form>
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header">Reminder Email Template</div>
+                <div class="card-body">
+                    <label class="form-label small">Subject Template</label>
+                    {{ form.reminder_subject_template }}
+                    {% for error in form.reminder_subject_template.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+
+                    <label class="form-label small mt-3">Body Template</label>
+                    {{ form.reminder_body_template }}
+                    {% for error in form.reminder_body_template.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+
+                    <h2 class="section-heading mt-4 mb-2">Dynamic Values</h2>
+                    <p class="text-muted small mb-2">Use these exact keywords in the subject or body. The system replaces them from each invoice before sending.</p>
+                    <div class="d-flex flex-wrap gap-2 mb-4">
+                        {% for field in template_preview.dynamic_values %}
+                        <span class="badge bg-secondary">{{ field }}</span>
+                        {% endfor %}
+                    </div>
+
+                    <h2 class="section-heading mb-2">Sample Preview</h2>
+                    <label class="form-label small">Subject</label>
+                    <div class="sub-kpi mb-3">{{ template_preview.subject }}</div>
+
+                    <label class="form-label small">Body</label>
+                    <pre class="sub-kpi mb-0" style="white-space: pre-wrap; font-family: inherit;">{{ template_preview.body }}</pre>
                 </div>
             </div>
         </div>
     </div>
-    <div class="col-lg-5">
-        <div class="card h-100">
-            <div class="card-header">Reminder Email Template Preview</div>
-            <div class="card-body">
-                <label class="form-label small">Subject</label>
-                <div class="sub-kpi mb-3">{{ template_preview.subject }}</div>
+</form>
 
-                <label class="form-label small">Body</label>
-                <pre class="sub-kpi mb-3" style="white-space: pre-wrap; font-family: inherit;">{{ template_preview.body }}</pre>
+<div class="row g-3 justify-content-center mt-1">
+    <div class="col-lg-11">
+        <div class="card">
+            <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+                <div>
+                    <h2 class="section-heading mb-1">Send Payment Reminders</h2>
+                    <p class="text-muted small mb-0">Send reminders for invoices that match the saved rules and are due for another reminder.</p>
+                </div>
+                <form method="post" action="{% url 'payment-reminder-run-check' %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary">Send Payment Reminders</button>
+                </form>
             </div>
         </div>
     </div>

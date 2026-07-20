@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models
+from django.db import OperationalError, ProgrammingError, models
 from django.utils import timezone
 
 
@@ -104,7 +104,7 @@ class SupportTicket(models.Model):
 
     @property
     def is_sla_breached(self):
-        return not self.is_resolved and self.unresolved_age_days >= settings.SUPPORT_TICKET_SLA_DAYS
+        return not self.is_resolved and self.unresolved_age_days >= get_support_ticket_response_target_days()
 
     @property
     def assigned_display(self):
@@ -141,3 +141,37 @@ class SupportTicket(models.Model):
             self.resolved_at = timezone.now()
         if self.status != self.STATUS_RESOLVED:
             self.resolved_at = None
+
+
+class SupportTicketSettings(models.Model):
+    response_target_days = models.PositiveSmallIntegerField(default=3)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="support_ticket_settings_updates",
+        db_constraint=False,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "support_ticket_settings"
+        verbose_name = "Support ticket settings"
+        verbose_name_plural = "Support ticket settings"
+
+    def __str__(self) -> str:
+        return "Support ticket settings"
+
+    @classmethod
+    def load(cls):
+        settings_obj, _ = cls.objects.get_or_create(pk=1)
+        return settings_obj
+
+
+def get_support_ticket_response_target_days():
+    fallback_days = int(getattr(settings, "SUPPORT_TICKET_SLA_DAYS", 3) or 3)
+    try:
+        return SupportTicketSettings.load().response_target_days
+    except (OperationalError, ProgrammingError):
+        return fallback_days

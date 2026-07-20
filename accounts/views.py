@@ -797,7 +797,7 @@ def login_security_policy_update(request, role=None):
 def payment_reminder_settings_update(request):
     # Page for editing automatic payment reminder settings.
     reminder_settings = PaymentReminderSettings.load()
-    template_preview = build_payment_reminder_template_preview()
+    template_preview = build_payment_reminder_template_preview(reminder_settings)
     if request.method != "POST":
         return render(
             request,
@@ -813,6 +813,7 @@ def payment_reminder_settings_update(request):
         settings_obj = form.save(commit=False)
         settings_obj.updated_by = request.user
         settings_obj.save()
+        template_preview = build_payment_reminder_template_preview(settings_obj)
         log_event(
             action="admin.payment_reminders.updated",
             user=request.user,
@@ -827,6 +828,7 @@ def payment_reminder_settings_update(request):
                 "overdue_repeat_enabled": settings_obj.overdue_repeat_enabled,
                 "overdue_repeat_days": settings_obj.overdue_repeat_days,
                 "mass_email_enabled": settings_obj.mass_email_enabled,
+                "template_customized": True,
             },
             ip_address=get_client_ip(request),
         )

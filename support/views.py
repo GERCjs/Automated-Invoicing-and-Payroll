@@ -1,4 +1,5 @@
-from django.conf import settings
+from datetime import date
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
@@ -13,10 +14,12 @@ from core.audit import get_client_ip, log_event
 
 from .forms import (
     CustomerInvoiceSupportTicketForm,
+    StaffPayslipSupportTicketForm,
     SupportTicketCreateForm,
+    SupportTicketSettingsForm,
     SupportTicketUpdateForm,
 )
-from .models import SupportTicket
+from .models import SupportTicket, SupportTicketSettings, get_support_ticket_response_target_days
 from .services import send_support_ticket_resolved_email
 
 
@@ -43,6 +46,10 @@ def _default_assigned_role_for_category(category):
 def _apply_assigned_status(ticket):
     if ticket.assigned_role and ticket.status == SupportTicket.STATUS_OPEN:
         ticket.status = SupportTicket.STATUS_IN_PROGRESS
+
+
+def _is_response_target_breached(ticket, response_target_days):
+    return not ticket.is_resolved and ticket.unresolved_age_days >= response_target_days
 
 
 def _ticket_queryset_for(user):
@@ -126,12 +133,16 @@ def _build_ticket_list_context(
 ):
     filtered_tickets, selected_filters = _filter_ticket_queryset(request, tickets)
     ticket_list = list(filtered_tickets.order_by("-created_at")[:500])
-    sla_breached_count = sum(1 for ticket in ticket_list if ticket.is_sla_breached)
+    response_target_days = get_support_ticket_response_target_days()
+    for ticket in ticket_list:
+        ticket.response_target_breached = _is_response_target_breached(ticket, response_target_days)
+    sla_breached_count = sum(1 for ticket in ticket_list if ticket.response_target_breached)
     role = get_user_role(request.user)
     return {
         "tickets": ticket_list,
         "can_handle_tickets": role in TICKET_HANDLER_ROLES,
-        "support_ticket_sla_days": settings.SUPPORT_TICKET_SLA_DAYS,
+        "can_edit_support_settings": role in {SUPERADMIN, ADMIN},
+        "support_ticket_sla_days": response_target_days,
         "sla_breached_count": sla_breached_count,
         "status_choices": SupportTicket.STATUS_CHOICES,
         "category_choices": SupportTicket.CATEGORY_CHOICES,
@@ -156,6 +167,23 @@ def _customer_invoice_queryset_for(user):
 
 def _get_customer_invoice_or_404(user, invoice_id):
     return get_object_or_404(_customer_invoice_queryset_for(user), pk=invoice_id)
+
+
+def _staff_payslip_queryset_for(user):
+    from payroll.models import Employee, PayrollRecord
+
+    employee = getattr(user, "employee_profile", None)
+    if employee is None:
+        user_email = (user.email or "").strip()
+        email_matches = Employee.objects.filter(email__iexact=user_email) if user_email else Employee.objects.none()
+        employee = email_matches.first() if email_matches.count() == 1 else None
+    if employee is None:
+        return PayrollRecord.objects.none()
+    return PayrollRecord.objects.filter(employee_id=employee.employee_code)
+
+
+def _get_staff_payslip_or_404(user, payslip_id):
+    return get_object_or_404(_staff_payslip_queryset_for(user), pk=payslip_id)
 
 
 def _validated_customer_invoice_reference(user, category, raw_invoice_id="", raw_reference=""):
@@ -205,6 +233,38 @@ def _related_reference_url_for(user, ticket):
     return ""
 
 
+def _payslip_reference_url_for(user, ticket):
+    if ticket.category != SupportTicket.CATEGORY_PAYROLL:
+        return ""
+    related_reference = (ticket.related_reference or "").strip()
+    if not related_reference:
+        return ""
+
+    from payroll.models import PayrollRecord
+
+    employee_id, _, payment_date = related_reference.partition(" / ")
+    if not employee_id.strip() or not payment_date.strip():
+        return ""
+    try:
+        parsed_payment_date = date.fromisoformat(payment_date.strip())
+    except ValueError:
+        return ""
+    payslip = PayrollRecord.objects.filter(employee_id=employee_id.strip(), payment_date=parsed_payment_date).first()
+    if payslip is None:
+        return ""
+
+    role = get_user_role(user)
+    if role in {SUPERADMIN, ADMIN, HR}:
+        return reverse("payroll-detail", args=[payslip.pk])
+    if role == STAFF and _staff_payslip_queryset_for(user).filter(pk=payslip.pk).exists():
+        return reverse("payslip-pdf-download", args=[payslip.pk])
+    return ""
+
+
+def _reference_url_for(user, ticket):
+    return _related_reference_url_for(user, ticket) or _payslip_reference_url_for(user, ticket)
+
+
 def _can_manage_ticket(user, ticket):
     role = get_user_role(user)
     if role in {SUPERADMIN, ADMIN}:
@@ -231,6 +291,7 @@ def _internal_ticket_back_url_for(user):
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE, HR)
 def support_ticket_list(request):
+    response_target_days = get_support_ticket_response_target_days()
     return render(
         request,
         "support/ticket_list.html",
@@ -240,7 +301,7 @@ def support_ticket_list(request):
             page_title="Support Tickets",
             page_subtitle=(
                 "Track invoice, payment, payroll, and account support requests. "
-                f"Tickets open for {settings.SUPPORT_TICKET_SLA_DAYS} days are highlighted."
+                f"Tickets open for {response_target_days} days are highlighted."
             ),
             detail_url_name="support-ticket-detail",
             show_requester_details=True,
@@ -363,6 +424,55 @@ def customer_invoice_support_ticket_create(request, invoice_id):
         {
             "form": form,
             "invoice": invoice,
+        },
+    )
+
+
+@login_required
+@role_required(STAFF)
+def staff_payslip_support_ticket_create(request, payslip_id):
+    payslip = _get_staff_payslip_or_404(request.user, payslip_id)
+    related_reference = f"{payslip.employee_id} / {payslip.payment_date:%Y-%m-%d}"
+
+    if request.method == "POST":
+        form = StaffPayslipSupportTicketForm(request.POST)
+        if form.is_valid():
+            ticket = form.save(commit=False)
+            ticket.category = SupportTicket.CATEGORY_PAYROLL
+            ticket.related_reference = related_reference
+            ticket.created_by = request.user
+            ticket.assigned_role = SupportTicket.ASSIGNED_ROLE_PAYROLL
+            _apply_assigned_status(ticket)
+            ticket.save()
+            log_event(
+                action="support.ticket.created",
+                user=request.user,
+                target_type="support_ticket",
+                target_id=str(ticket.id),
+                metadata={
+                    "category": ticket.category,
+                    "priority": ticket.priority,
+                    "status": ticket.status,
+                    "related_reference": ticket.related_reference,
+                    "assigned_role": ticket.assigned_role,
+                    "source": "staff_payslip_list",
+                },
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Support request submitted.")
+            return redirect("customer-support-ticket-detail", ticket_id=ticket.id)
+    else:
+        form = StaffPayslipSupportTicketForm(
+            initial={"subject": f"Question about payslip {related_reference}"}
+        )
+
+    return render(
+        request,
+        "support/staff_payslip_ticket_form.html",
+        {
+            "form": form,
+            "payslip": payslip,
+            "related_reference": related_reference,
         },
     )
 
@@ -565,6 +675,8 @@ def support_ticket_detail(request, ticket_id):
     else:
         form = SupportTicketUpdateForm(instance=ticket, actor_role=role) if can_manage else None
 
+    response_target_days = get_support_ticket_response_target_days()
+    ticket.response_target_breached = _is_response_target_breached(ticket, response_target_days)
     return render(
         request,
         "support/ticket_detail.html",
@@ -572,8 +684,8 @@ def support_ticket_detail(request, ticket_id):
             "ticket": ticket,
             "form": form,
             "can_manage": can_manage,
-            "support_ticket_sla_days": settings.SUPPORT_TICKET_SLA_DAYS,
-            "related_reference_url": _related_reference_url_for(request.user, ticket),
+            "support_ticket_sla_days": response_target_days,
+            "related_reference_url": _reference_url_for(request.user, ticket),
             "back_url": _internal_ticket_back_url_for(request.user),
             "back_label": "Back",
             "show_requester_details": True,
@@ -585,6 +697,8 @@ def support_ticket_detail(request, ticket_id):
 @role_required(CUSTOMER, STAFF)
 def customer_support_ticket_detail(request, ticket_id):
     ticket = get_object_or_404(_customer_ticket_queryset_for(request.user), pk=ticket_id)
+    response_target_days = get_support_ticket_response_target_days()
+    ticket.response_target_breached = _is_response_target_breached(ticket, response_target_days)
     return render(
         request,
         "support/ticket_detail.html",
@@ -592,10 +706,42 @@ def customer_support_ticket_detail(request, ticket_id):
             "ticket": ticket,
             "form": None,
             "can_manage": False,
-            "support_ticket_sla_days": settings.SUPPORT_TICKET_SLA_DAYS,
-            "related_reference_url": _related_reference_url_for(request.user, ticket),
+            "support_ticket_sla_days": response_target_days,
+            "related_reference_url": _reference_url_for(request.user, ticket),
             "back_url": reverse("customer-support-ticket-list"),
             "back_label": "Back to My Support Requests",
             "show_requester_details": False,
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN)
+def support_ticket_settings_update(request):
+    support_settings = SupportTicketSettings.load()
+    if request.method == "POST":
+        form = SupportTicketSettingsForm(request.POST, instance=support_settings)
+        if form.is_valid():
+            settings_obj = form.save(commit=False)
+            settings_obj.updated_by = request.user
+            settings_obj.save()
+            log_event(
+                action="support.ticket_settings.updated",
+                user=request.user,
+                target_type="support_ticket_settings",
+                target_id=str(settings_obj.id),
+                metadata={"response_target_days": settings_obj.response_target_days},
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Support ticket settings updated.")
+            return redirect("support-ticket-list")
+    else:
+        form = SupportTicketSettingsForm(instance=support_settings)
+
+    return render(
+        request,
+        "support/settings.html",
+        {
+            "form": form,
         },
     )

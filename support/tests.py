@@ -11,7 +11,7 @@ from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
 from payroll.models import Employee, PayrollRecord
 
-from .models import SupportTicket
+from .models import SupportTicket, SupportTicketSettings
 
 
 class SupportTicketFlowTests(TestCase):
@@ -383,6 +383,91 @@ class SupportTicketFlowTests(TestCase):
         self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_FINANCE)
         self.assertEqual(ticket.status, SupportTicket.STATUS_IN_PROGRESS)
 
+    def test_invoice_support_request_page_has_back_to_invoice_button(self):
+        customer = self._make_user("invoice_back_customer", CUSTOMER)
+        invoice = self._make_customer_invoice(customer, "INV-BACK-001")
+        self.client.force_login(customer)
+
+        response = self.client.get(reverse("customer-invoice-support-ticket-create", args=[invoice.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Back to Invoice")
+        self.assertContains(response, reverse("customer-invoice-detail", args=[invoice.id]))
+
+    def test_staff_payslip_enquiry_auto_assigns_to_payroll_and_in_progress(self):
+        staff = self._make_user("payslip_request_staff", STAFF)
+        Employee.objects.create(
+            user=staff,
+            employee_code="STF-000778",
+            first_name="Payslip",
+            last_name="Requester",
+            email=staff.email,
+            hire_date=date(2026, 1, 1),
+            base_salary="3000.00",
+        )
+        payslip = PayrollRecord.objects.create(
+            employee_name="Payslip Requester",
+            employee_id="STF-000778",
+            basic_salary="3000.00",
+            net_salary="2800.00",
+            payment_date=date(2026, 6, 30),
+        )
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("staff-payslip-support-ticket-create", args=[payslip.id]),
+            data={
+                "subject": "Question about payslip deductions",
+                "message": "Please check my deductions.",
+            },
+        )
+
+        ticket = SupportTicket.objects.get(subject="Question about payslip deductions")
+        self.assertRedirects(response, reverse("customer-support-ticket-detail", args=[ticket.id]))
+        self.assertEqual(ticket.category, SupportTicket.CATEGORY_PAYROLL)
+        self.assertEqual(ticket.related_reference, "STF-000778 / 2026-06-30")
+        self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_PAYROLL)
+        self.assertEqual(ticket.status, SupportTicket.STATUS_IN_PROGRESS)
+
+    def test_staff_cannot_create_ticket_for_another_staff_payslip(self):
+        staff = self._make_user("payslip_owner_staff", STAFF)
+        other_staff = self._make_user("payslip_other_staff", STAFF)
+        Employee.objects.create(
+            user=staff,
+            employee_code="STF-000779",
+            first_name="Payslip",
+            last_name="Owner",
+            email=staff.email,
+            hire_date=date(2026, 1, 1),
+            base_salary="3000.00",
+        )
+        PayrollRecord.objects.create(
+            employee_name="Payslip Owner",
+            employee_id="STF-000779",
+            basic_salary="3000.00",
+            net_salary="2800.00",
+            payment_date=date(2026, 6, 30),
+        )
+        other_payslip = PayrollRecord.objects.create(
+            employee_name="Other Staff",
+            employee_id="STF-999999",
+            basic_salary="3000.00",
+            net_salary="2800.00",
+            payment_date=date(2026, 6, 30),
+        )
+        self.client.force_login(other_staff)
+
+        response = self.client.post(
+            reverse("staff-payslip-support-ticket-create", args=[other_payslip.id]),
+            data={
+                "subject": "Trying another payslip",
+                "message": "This should not work.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SupportTicket.objects.filter(subject="Trying another payslip").exists())
+
     def test_customer_cannot_create_ticket_for_another_customers_invoice(self):
         customer_a = self._make_user("invoice_owner_a", CUSTOMER)
         customer_b = self._make_user("invoice_owner_b", CUSTOMER)
@@ -460,6 +545,39 @@ class SupportTicketFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content.decode().count("support-ticket-overdue"), 5)
         self.assertContains(response, "5 unresolved support tickets reached the 3 day response target.")
+
+    def test_admin_can_update_support_response_target_setting(self):
+        admin = self._make_user("response_target_admin", ADMIN)
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            reverse("support-ticket-settings-update"),
+            data={"response_target_days": 5},
+        )
+
+        self.assertRedirects(response, reverse("support-ticket-list"))
+        self.assertEqual(SupportTicketSettings.load().response_target_days, 5)
+
+    def test_response_target_setting_controls_overdue_highlight(self):
+        admin = self._make_user("custom_sla_admin", ADMIN)
+        support_settings = SupportTicketSettings.load()
+        support_settings.response_target_days = 5
+        support_settings.save(update_fields=["response_target_days", "updated_at"])
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Four day issue",
+            message="This should not breach five day target.",
+            created_by=admin,
+        )
+        ticket.created_at = timezone.now() - timedelta(days=4)
+        ticket.save(update_fields=["created_at"])
+        self.client.force_login(admin)
+
+        response = self.client.get(reverse("support-ticket-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Tickets open for 5 days are highlighted.")
+        self.assertNotContains(response, "support-ticket-overdue")
 
     def test_response_target_uses_calendar_days(self):
         admin = self._make_user("calendar_sla_admin", ADMIN)

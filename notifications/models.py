@@ -1,5 +1,44 @@
+import re
+
 from django.conf import settings
 from django.db import models
+
+
+PAYMENT_REMINDER_DEFAULT_SUBJECT_TEMPLATE = "Payment Reminder: {{ invoice_number }} is {{ reminder_status }}"
+PAYMENT_REMINDER_DEFAULT_BODY_TEMPLATE = (
+    "Dear {{ customer_name }},\n\n"
+    "This is a payment reminder for invoice {{ invoice_number }}.\n"
+    "Due date: {{ due_date }}\n"
+    "Amount due: {{ currency }} {{ amount_due }}\n\n"
+    "View invoice: {{ invoice_link }}\n\n"
+    "If payment has already been made, please disregard this reminder.\n\n"
+    "{{ company_name }}\n"
+    "{{ company_email }}"
+)
+PAYMENT_REMINDER_TEMPLATE_FIELDS = [
+    "customer_name",
+    "invoice_number",
+    "reminder_status",
+    "due_date",
+    "currency",
+    "amount_due",
+    "invoice_link",
+    "company_name",
+    "company_email",
+]
+_PAYMENT_REMINDER_PLACEHOLDER_RE = re.compile(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*}}")
+
+
+def get_unknown_payment_reminder_template_fields(template: str):
+    placeholders = set(_PAYMENT_REMINDER_PLACEHOLDER_RE.findall(template or ""))
+    return sorted(placeholders.difference(PAYMENT_REMINDER_TEMPLATE_FIELDS))
+
+
+def render_payment_reminder_template(template: str, values: dict):
+    def replace_placeholder(match):
+        return str(values.get(match.group(1), ""))
+
+    return _PAYMENT_REMINDER_PLACEHOLDER_RE.sub(replace_placeholder, template or "")
 
 
 class EmailDeliveryLog(models.Model):
@@ -53,6 +92,15 @@ class PaymentReminderSettings(models.Model):
     overdue_reminders_enabled = models.BooleanField(default=True)
     overdue_repeat_days = models.PositiveSmallIntegerField(default=7)
     mass_email_enabled = models.BooleanField(default=True)
+    reminder_subject_template = models.CharField(
+        max_length=255,
+        blank=True,
+        default=PAYMENT_REMINDER_DEFAULT_SUBJECT_TEMPLATE,
+    )
+    reminder_body_template = models.TextField(
+        blank=True,
+        default=PAYMENT_REMINDER_DEFAULT_BODY_TEMPLATE,
+    )
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

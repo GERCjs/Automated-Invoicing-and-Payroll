@@ -87,6 +87,34 @@ class PaymentReminderServiceTests(TestCase):
         self.assertEqual(log.template_key, REMINDER_TEMPLATE_KEYS["due_date"])
         self.assertTrue(log.metadata["simulate"])
 
+    def test_real_send_uses_custom_payment_reminder_template(self):
+        settings_obj = PaymentReminderSettings.load()
+        settings_obj.before_due_reminders_enabled = False
+        settings_obj.due_date_reminders_enabled = True
+        settings_obj.after_due_reminders_enabled = False
+        settings_obj.overdue_repeat_enabled = False
+        settings_obj.reminder_subject_template = "Action needed for {{ customer_name }}: {{ invoice_number }}"
+        settings_obj.reminder_body_template = (
+            "Dear {{ customer_name }},\n"
+            "Please review {{ invoice_number }} for {{ currency }} {{ amount_due }}.\n"
+            "Status: {{ reminder_status }}\n"
+            "{{ invoice_link }}"
+        )
+        settings_obj.save()
+        invoice = self._create_sent_invoice_due_today()
+
+        summary = run_payment_reminder_check(
+            triggered_by=self.admin_user,
+            base_url="https://example.test",
+            simulate=False,
+        )
+
+        self.assertEqual(summary["sent"], 1)
+        self.assertEqual(mail.outbox[0].subject, "Action needed for Reminder Fixture Customer: REM-TEST-001")
+        self.assertIn("Please review REM-TEST-001 for SGD 100.00.", mail.outbox[0].body)
+        self.assertIn("Status: due today", mail.outbox[0].body)
+        self.assertIn("https://example.test", mail.outbox[0].body)
+
     def test_real_send_skips_duplicate_reminder_for_same_day(self):
         invoice = self._create_sent_invoice_due_today()
 
