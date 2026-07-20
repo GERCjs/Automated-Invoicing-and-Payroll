@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}CEO Dashboard | Automated Invoicing & Payroll{% endblock %}
+{% block page_container_class %}container-xl management-dashboard-container{% endblock %}
+
+{% block content %}
+<div class="report-page management-dashboard-page ceo-health-dashboard">
+    <section class="report-header report-section">
+        <div>
+            <h1 class="page-title">CEO Dashboard</h1>
+            <p class="page-subtitle">Company Health Profile for sales, customer value, service performance, and receivables.</p>
+            <div class="report-header-meta">
+                <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
+                <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
+            </div>
+        </div>
+        <div class="report-header-actions" aria-label="Related report links">
+            {% for link in related_report_links %}
+            <a href="{{ link.url }}" class="btn btn-outline-secondary btn-sm">{{ link.label }}</a>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="section-heading mb-0">Company Health Profile</h2>
+            <span class="text-muted small">Sales use confirmed paid payments by payment date.</span>
+        </div>
+        <div class="row g-3 report-kpi-grid ceo-health-kpi-grid">
+            <div class="col-12 col-md-6 col-xl">
+                <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Total Sales</div>
+                        <div class="report-kpi-value">S${{ total_sales|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">{{ paid_payment_count }} paid payment(s) recorded.</div>
+                        <a href="{% url 'payment-stripe-report' %}" class="report-link mt-auto">Review payments &rarr;</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl">
+                <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Sales This Month</div>
+                        <div class="report-kpi-value">S${{ sales_this_month|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">{{ sales_comparison_note }}</div>
+                        <a href="{% url 'invoice-customer-report' %}?date_type=payment_date" class="report-link mt-auto">View sales report &rarr;</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl">
+                <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Active Customers</div>
+                        <div class="report-kpi-value">{{ active_customer_total }}</div>
+                        <div class="small text-muted">{{ buying_customer_total }} customer(s) have paid invoices.</div>
+                        <a href="{% url 'invoice-customer-create' %}" class="report-link mt-auto">Review customers &rarr;</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl">
+                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Outstanding Sales to Collect</div>
+                        <div class="report-kpi-value">S${{ outstanding_sales_to_collect|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">{{ outstanding_invoice_count }} issued invoice(s) still awaiting payment.</div>
+                        <a href="{% url 'invoice-list' %}?status=overdue" class="report-link mt-auto">Review receivables &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="report-summary-strip">
+            {% for item in ceo_summary_items %}
+            <div class="report-summary-card">
+                <div class="report-summary-label">{{ item.label }}</div>
+                <div class="report-summary-value">{{ item.value }}</div>
+                <div class="report-summary-note">{{ item.note }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="report-section">
+        <h2 class="section-heading mb-3">Monthly Sales Trend</h2>
+        <div class="report-chart-card">
+            <div class="report-chart-header">Paid Sales by Month</div>
+            <div class="report-chart-body">
+                <canvas id="monthlySalesTrendChart" class="report-chart-canvas" aria-label="Monthly sales trend chart" role="img"></canvas>
+                <div id="monthlySalesTrendChartEmpty" class="report-chart-empty d-none">No monthly sales data is available yet.</div>
+            </div>
+            <div class="px-3 text-muted small">Shows confirmed paid sales over the last 6 months using payment dates.</div>
+            <div class="report-chart-summary">
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">Current month</span>
+                    <span class="report-chart-stat-value">S${{ sales_this_month|floatformat:2|intcomma }}</span>
+                </div>
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">6-month sales</span>
+                    <span class="report-chart-stat-value">S${{ monthly_sales_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
+                </div>
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">Best month</span>
+                    <span class="report-chart-stat-value">{{ monthly_sales_chart_summary.peak_label|default:"No data" }}{% if monthly_sales_chart_summary.has_data %}: S${{ monthly_sales_chart_summary.peak_value|floatformat:2|intcomma }}{% endif %}</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Top 5 High Spenders</span>
+                <span class="text-muted small">Customers ranked by confirmed paid sales.</span>
+            </div>
+            <div class="card-body p-0">
+                {% if top_spending_customers %}
+                <div class="table-responsive report-attention-table">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Customer</th>
+                                <th class="text-end">Paid Invoices</th>
+                                <th class="text-end">Total Spent</th>
+                                <th>Last Payment</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for customer in top_spending_customers %}
+                            <tr>
+                                <td>
+                                    <div>{{ customer.name }}</div>
+                                    <div class="text-muted small">{{ customer.email }}</div>
+                                </td>
+                                <td class="text-end">{{ customer.invoice_count }}</td>
+                                <td class="text-end">S${{ customer.total_spent|floatformat:2|intcomma }}</td>
+                                <td>{{ customer.last_payment_at|date:"d M Y"|default:"-" }}</td>
+                                <td class="text-end"><a href="{% url 'invoice-customer-report' %}{{ customer.report_query }}" class="report-link">View customer &rarr;</a></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state m-3">No paying customers yet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="row g-3">
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card h-100">
+                    <div class="report-chart-header">Top Selling Services / Products</div>
+                    <div class="report-chart-body">
+                        <canvas id="topServiceSalesChart" class="report-chart-canvas" aria-label="Top selling services or products chart" role="img"></canvas>
+                        <div id="topServiceSalesChartEmpty" class="report-chart-empty d-none">No paid service or product sales yet.</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Grouped from paid invoice item descriptions.</div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <span>Services Driving Revenue</span>
+                        <span class="text-muted small">Top paid invoice items by sales.</span>
+                    </div>
+                    <div class="card-body p-0">
+                        {% if top_service_items %}
+                        <div class="table-responsive report-attention-table">
+                            <table class="table table-clean table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Service / Product</th>
+                                        <th class="text-end">Qty Sold</th>
+                                        <th class="text-end">Sales</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for item in top_service_items %}
+                                    <tr>
+                                        <td>{{ item.name }}</td>
+                                        <td class="text-end">{{ item.quantity|floatformat:2|intcomma }}</td>
+                                        <td class="text-end">S${{ item.sales|floatformat:2|intcomma }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="report-empty-state m-3">No paid service or product sales yet.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+{{ monthly_sales_labels|json_script:"monthly-sales-labels" }}
+{{ monthly_sales_values|json_script:"monthly-sales-values" }}
+{{ top_service_labels|json_script:"top-service-labels" }}
+{{ top_service_values|json_script:"top-service-values" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+<script src="{% static 'js/report_charts.js' %}"></script>
+<script>
+    (function () {
+        var monthlySalesLabels = window.ReportCharts.parseJsonScript("monthly-sales-labels", []);
+        var monthlySalesValues = window.ReportCharts.parseJsonScript("monthly-sales-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "monthlySalesTrendChart",
+            emptyStateId: "monthlySalesTrendChartEmpty",
+            type: "line",
+            labels: monthlySalesLabels,
+            datasets: [
+                {
+                    label: "Paid sales (SGD)",
+                    data: monthlySalesValues,
+                    borderColor: "#198754",
+                    backgroundColor: "rgba(25, 135, 84, 0.12)",
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }
+            ],
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            },
+            emptyText: "No monthly sales data is available yet."
+        });
+
+        var topServiceLabels = window.ReportCharts.parseJsonScript("top-service-labels", []);
+        var topServiceValues = window.ReportCharts.parseJsonScript("top-service-values", []);
+        window.ReportCharts.renderChart({
+            canvasId: "topServiceSalesChart",
+            emptyStateId: "topServiceSalesChartEmpty",
+            type: "bar",
+            labels: topServiceLabels,
+            datasets: [
+                {
+                    label: "Sales (SGD)",
+                    data: topServiceValues,
+                    borderColor: "#0f766e",
+                    backgroundColor: "rgba(15, 118, 110, 0.22)",
+                    borderWidth: 1
+                }
+            ],
+            options: {
+                indexAxis: "y",
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true
+                    }
+                }
+            },
+            emptyText: "No paid service or product sales yet."
+        });
+    })();
+</script>
+{% endblock %}
