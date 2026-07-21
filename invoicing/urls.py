@@ -19,6 +19,7 @@ urlpatterns = [
     path("send-email/batch/", views.invoice_send_email_batch, name="invoice-send-email-batch"),
     path("<int:pk>/status/", views.invoice_status_update, name="invoice-status-update"),
     path("<int:pk>/download/pdf/", views.invoice_download_pdf, name="invoice-download-pdf"),
+    path("<int:pk>/preview/pdf/", views.invoice_preview_pdf, name="invoice-preview-pdf"),
     path("<int:pk>/download/excel/", views.invoice_download_excel, name="invoice-download-excel"),
     path("view/<str:token>/", views.invoice_public_view, name="invoice-public-view"),
 ]

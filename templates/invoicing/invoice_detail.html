@@ -17,6 +17,7 @@
             {% csrf_token %}
             <button type="submit" class="btn btn-outline-dark">Send / Resend Invoice Email</button>
         </form>
+        <a href="{% url 'invoice-preview-pdf' invoice.pk %}" class="btn btn-outline-info" target="_blank" rel="noopener">Preview PDF</a>
         <a href="{% url 'invoice-download-pdf' invoice.pk %}" class="btn btn-outline-primary">Download PDF</a>
         <a href="{% url 'invoice-download-excel' invoice.pk %}" class="btn btn-outline-success">Download Excel</a>
         <a href="{% url 'invoice-list' %}" class="btn btn-outline-secondary">Back to List</a>

@@ -1477,6 +1477,45 @@ class InvoicingMvpTests(TestCase):
         self.assertEqual(pdf_response.status_code, 403)
         self.assertEqual(excel_response.status_code, 403)
 
+    def test_finance_can_preview_draft_invoice_pdf_inline(self):
+        invoice = self._create_invoice_with_item(status=Invoice.STATUS_DRAFT)
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-preview-pdf", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("inline", response["Content-Disposition"])
+        self.assertIn(f'{invoice.invoice_number}.pdf', response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
+    def test_staff_cannot_preview_invoice_pdf(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="staff_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-preview-pdf", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_user_cannot_preview_invoice_pdf(self):
+        invoice = self._create_invoice_with_item()
+
+        response = self.client.get(reverse("invoice-preview-pdf", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response["Location"])
+
+    def test_invoice_detail_page_shows_preview_pdf_link(self):
+        invoice = self._create_invoice_with_item()
+        self.client.login(username="finance_u", password="TempPass123!")
+
+        response = self.client.get(reverse("invoice-detail", args=[invoice.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("invoice-preview-pdf", args=[invoice.pk]))
+        self.assertContains(response, "Preview PDF")
+        self.assertContains(response, 'target="_blank"')
+
     @override_settings(
         EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
         DEFAULT_FROM_EMAIL="billing@example.com",

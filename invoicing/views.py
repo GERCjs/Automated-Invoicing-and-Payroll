@@ -1497,6 +1497,24 @@ def invoice_download_pdf(request, pk):
 
 @login_required
 @role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_preview_pdf(request, pk):
+    invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
+    pdf_bytes = generate_invoice_pdf(invoice)
+    log_event(
+        action="invoice.pdf.previewed",
+        user=request.user,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata={"invoice_number": invoice.invoice_number},
+        ip_address=get_client_ip(request),
+    )
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{invoice.invoice_number}.pdf"'
+    return response
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
 def invoice_download_excel(request, pk):
     invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
     excel_bytes = generate_invoice_excel(invoice)
