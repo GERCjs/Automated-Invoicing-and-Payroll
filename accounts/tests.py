@@ -110,6 +110,27 @@ class AccountsPhaseOneTests(TestCase):
             ).exists()
         )
 
+    def test_password_reset_request_creates_audit_log_for_matching_account(self):
+        user = User.objects.create_user(
+            username="reset_audit_user",
+            email="reset_audit_user@vaniday.com",
+            password="TempPass123!",
+        )
+
+        response = self.client.post(reverse("password-reset"), data={"email": user.email})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action="auth.password_reset.requested",
+                user=user,
+                target_type="user",
+                target_id=str(user.id),
+                metadata__username=user.username,
+                metadata__email=user.email,
+            ).exists()
+        )
+
     def test_public_user_can_register_customer_with_invoice_email_and_requires_verification(self):
         Customer.objects.create(name="Cust One", email="cust1@gmail.com")
         response = self.client.post(

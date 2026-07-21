@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 
 from accounts.models import EmailVerificationToken
+from core.models import AuditLog
 
 
 @pytest.mark.django_db
@@ -63,6 +64,14 @@ def test_forgot_password_reset_flow_updates_password(live_server, page, mailoutb
     page.wait_for_url(re.compile(r".*/accounts/password-reset/done/?$"))
     assert page.get_by_text("If the email matches an active account").is_visible()
     assert len(mailoutbox) == 1
+
+    reset_user = User.objects.get(username="e2e_reset_user")
+    assert AuditLog.objects.filter(
+        action="auth.password_reset.requested",
+        user=reset_user,
+        target_type="user",
+        target_id=str(reset_user.id),
+    ).exists()
 
     reset_url = re.search(r"https?://\S+", mailoutbox[0].body).group(0)
     reset_path = urlparse(reset_url).path

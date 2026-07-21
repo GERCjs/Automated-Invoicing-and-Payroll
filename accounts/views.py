@@ -2,7 +2,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.views import LoginView, LogoutView
+from django.contrib.auth.views import LoginView, LogoutView, PasswordResetView
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
@@ -186,6 +186,26 @@ class UserLoginView(LoginView):
 class UserLogoutView(LogoutView):
     # After logout, send the user back to the login page.
     next_page = reverse_lazy("login")
+
+
+class AuditedPasswordResetView(PasswordResetView):
+    def form_valid(self, form):
+        email = (form.cleaned_data.get("email") or "").strip().lower()
+        matching_users = User.objects.filter(email__iexact=email).select_related("role_profile")
+        for user in matching_users:
+            log_event(
+                action="auth.password_reset.requested",
+                user=user,
+                target_type="user",
+                target_id=str(user.id),
+                metadata={
+                    "username": user.username,
+                    "role": get_user_role(user),
+                    "email": email,
+                },
+                ip_address=get_client_ip(self.request),
+            )
+        return super().form_valid(form)
 
 
 def register(request):
