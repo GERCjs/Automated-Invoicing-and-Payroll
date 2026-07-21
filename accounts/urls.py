@@ -1,3 +1,4 @@
+from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from .views import (
@@ -28,6 +29,34 @@ urlpatterns = [
     # Login and logout pages.
     path("login/", UserLoginView.as_view(), name="login"),
     path("logout/", UserLogoutView.as_view(), name="logout"),
+    path(
+        "password-reset/",
+        auth_views.PasswordResetView.as_view(
+            template_name="accounts/password_reset_form.html",
+            email_template_name="accounts/password_reset_email.txt",
+            subject_template_name="accounts/password_reset_subject.txt",
+            success_url="/accounts/password-reset/done/",
+        ),
+        name="password-reset",
+    ),
+    path(
+        "password-reset/done/",
+        auth_views.PasswordResetDoneView.as_view(template_name="accounts/password_reset_done.html"),
+        name="password-reset-done",
+    ),
+    path(
+        "password-reset/<uidb64>/<token>/",
+        auth_views.PasswordResetConfirmView.as_view(
+            template_name="accounts/password_reset_confirm.html",
+            success_url="/accounts/password-reset/complete/",
+        ),
+        name="password-reset-confirm",
+    ),
+    path(
+        "password-reset/complete/",
+        auth_views.PasswordResetCompleteView.as_view(template_name="accounts/password_reset_complete.html"),
+        name="password-reset-complete",
+    ),
     # Public account registration and email verification.
     path("register/", register, name="register"),
     path("verify-email/<str:token>/", verify_email, name="verify-email"),

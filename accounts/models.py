@@ -116,8 +116,12 @@ class UserRole(models.Model):
                 "updated_at",
             ]
         )
-        # Reactivate the Django user so they can log in again.
-        if not self.user.is_active:
+        # Reactivate only accounts that are not still waiting on email verification.
+        has_pending_verification = EmailVerificationToken.objects.filter(
+            user=self.user,
+            used_at__isnull=True,
+        ).exists()
+        if not self.user.is_active and not has_pending_verification:
             self.user.is_active = True
             self.user.save(update_fields=["is_active"])
 

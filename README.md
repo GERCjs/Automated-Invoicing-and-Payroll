@@ -21,6 +21,19 @@ Use the dedicated Django test settings for routine verification. They force an i
 .\.venv\Scripts\python.exe manage.py test --settings=config.test_settings
 ```
 
+Playwright E2E tests use pytest and Django's live test server. Install the Python dependencies and Chromium browser once:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m playwright install chromium
+```
+
+Run the E2E suite with:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest e2e --browser chromium
+```
+
 Focused suites used during hardening:
 
 ```powershell

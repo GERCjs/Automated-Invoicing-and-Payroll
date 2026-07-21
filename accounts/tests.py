@@ -385,12 +385,33 @@ class AccountsPhaseOneTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_admin_user_can_create_admin_account(self):
+    def test_admin_user_cannot_create_admin_account(self):
         admin = User.objects.create_user(username="projectadmin", password="TempPass123!")
         admin.role_profile.role = ADMIN
         admin.role_profile.save()
 
         self.client.login(username="projectadmin", password="TempPass123!")
+        response = self.client.post(
+            reverse("create-admin-account"),
+            data={
+                "username": "admin_created",
+                "email": "admin_created@vaniday.com",
+                "password1": "StrongPass123!",
+                "password2": "StrongPass123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(User.objects.filter(username="admin_created").exists())
+
+    def test_superadmin_user_can_create_admin_account(self):
+        superadmin = User.objects.create_superuser(
+            username="projectsuperadmin",
+            email="projectsuperadmin@vaniday.com",
+            password="TempPass123!",
+        )
+
+        self.client.login(username="projectsuperadmin", password="TempPass123!")
         response = self.client.post(
             reverse("create-admin-account"),
             data={
@@ -410,7 +431,7 @@ class AccountsPhaseOneTests(TestCase):
                 action="auth.admin_account.created",
                 target_type="user",
                 target_id=str(created.id),
-                user=admin,
+                user=superadmin,
             ).exists()
         )
 
@@ -664,6 +685,27 @@ class AccountsPhaseOneTests(TestCase):
         customer.role_profile.refresh_from_db()
         self.assertFalse(customer.is_active)
         self.assertTrue(customer.role_profile.is_suspended)
+
+    def test_unsuspend_does_not_activate_unverified_account(self):
+        admin = User.objects.create_user(username="unverified_unsuspend_admin", password="TempPass123!")
+        admin.role_profile.role = ADMIN
+        admin.role_profile.save()
+        target = User.objects.create_user(
+            username="unverified_unsuspend_target",
+            email="unverified_unsuspend_target@vaniday.com",
+            password="TempPass123!",
+        )
+        target.is_active = False
+        target.save(update_fields=["is_active"])
+        EmailVerificationToken.issue_for_user(target)
+        target.role_profile.suspend(by=admin, reason="Suspended before verification")
+
+        target.role_profile.unsuspend()
+
+        target.refresh_from_db()
+        target.role_profile.refresh_from_db()
+        self.assertFalse(target.is_active)
+        self.assertFalse(target.role_profile.is_suspended)
 
     def test_admin_can_update_login_security_policy(self):
         admin = User.objects.create_user(username="policy_admin", password="TempPass123!")

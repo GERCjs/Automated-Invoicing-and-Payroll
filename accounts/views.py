@@ -1107,7 +1107,7 @@ def suspicious_activity_list(request):
 
 
 @login_required
-@role_required(SUPERADMIN, ADMIN)
+@role_required(SUPERADMIN)
 def create_admin_account(request):
     # Older/simple page for creating Admin role accounts.
     if request.method == "POST":
