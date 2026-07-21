@@ -1,0 +1,174 @@
+409d4455 Fix refund consistency test and add refund lines to Excel export
+
+ invoicing/exports.py | 23 +++++++++++++++++++++++
+ invoicing/tests.py   | 43 +++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 64 insertions(+), 2 deletions(-)
+
+diff --git a/invoicing/exports.py b/invoicing/exports.py
+index 9e8b623b..79d34d4d 100644
+--- a/invoicing/exports.py
++++ b/invoicing/exports.py
+@@ -705,20 +705,43 @@ def generate_invoice_excel(invoice: Invoice) -> bytes:
+     row += 1
+     ws.cell(row=row, column=4, value="Subtotal").font = Font(bold=True)
+     ws.cell(row=row, column=5, value=float(invoice.subtotal))
+     row += 1
+     ws.cell(row=row, column=4, value="GST").font = Font(bold=True)
+     ws.cell(row=row, column=5, value=float(invoice.tax_amount))
+     row += 1
+     ws.cell(row=row, column=4, value="Total").font = Font(bold=True)
+     ws.cell(row=row, column=5, value=float(invoice.total_amount)).font = Font(bold=True)
+ 
++    payment_summary = _resolve_invoice_payment_summary(invoice)
++    amount_paid = payment_summary["amount_paid"]
++    refunded_amount = payment_summary["refunded_amount"]
++    amount_due = payment_summary["amount_due"]
++
++    row += 1
++    ws.cell(row=row, column=4, value="Amount Paid").font = Font(bold=True)
++    ws.cell(row=row, column=5, value=float(amount_paid))
++    if invoice.status == Invoice.STATUS_REFUNDED or refunded_amount > Decimal("0.00"):
++        row += 1
++        ws.cell(row=row, column=4, value="Refunded").font = Font(bold=True)
++        ws.cell(row=row, column=5, value=float(refunded_amount))
++    row += 1
++    ws.cell(row=row, column=4, value="Amount Due").font = Font(bold=True)
++    ws.cell(row=row, column=5, value=float(amount_due)).font = Font(bold=True)
++
++    if payment_summary["payment_status_message"]:
++        row += 2
++        ws.cell(row=row, column=1, value=payment_summary["payment_status_message"]).font = Font(bold=True)
++        if payment_summary["payment_data_issue"]:
++            row += 1
++            ws.cell(row=row, column=1, value=payment_summary["payment_data_issue"])
++
+     if invoice.notes:
+         row += 2
+         ws.cell(row=row, column=1, value="Notes").font = Font(bold=True)
+         row += 1
+         ws.cell(row=row, column=1, value=invoice.notes)
+ 
+     widths = {"A": 45, "B": 10, "C": 15, "D": 10, "E": 15, "F": 25}
+     for column, width in widths.items():
+         ws.column_dimensions[column].width = width
+ 
+diff --git a/invoicing/tests.py b/invoicing/tests.py
+index af42b4c0..2db48590 100644
+--- a/invoicing/tests.py
++++ b/invoicing/tests.py
+@@ -15,33 +15,34 @@ from django.test import override_settings
+ from django.urls import reverse
+ from django.utils import timezone
+ from openpyxl import Workbook, load_workbook
+ from PIL import Image as PilImage
+ from reportlab.lib.units import mm
+ 
+ from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
+ from core.models import AuditLog
+ from imports.models import ImportJob
+ from notifications.models import EmailDeliveryLog
+-from payments.models import PaymentBankDetails, PaymentRecord
++from payments.models import PaymentBankDetails, PaymentRecord, PaymentRefund
+ from support.models import SupportTicket
+ 
+ from .exports import (
+     COMPUTER_GENERATED_INVOICE_STATEMENT,
+     _build_invoice_logo,
+     _build_logo_row,
+     _payment_note_lines_for_pdf,
+     _registered_office_line,
+     _resolve_invoice_payment_summary,
+     _resolve_invoice_branding,
+     _invoice_text_lines,
+     build_export_context,
++    generate_invoice_excel,
+     generate_invoice_pdf,
+ )
+ from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow, InvoiceTemplateSettings
+ from .services import (
+     apply_overdue_status,
+     parse_invoice_csv,
+     parse_invoice_excel,
+     recalculate_invoice_totals,
+     refresh_overdue_invoices,
+     transition_invoice_status,
+@@ -2356,40 +2357,78 @@ class InvoiceTemplateSettingsTests(TestCase):
+ 
+         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+         self.assertFalse(payment_summary["show_payment_instructions"])
+         self.assertEqual(payment_summary["amount_due"], Decimal("0.00"))
+         self.assertEqual(payment_summary["payment_status_message"], "Paid in Full")
+         self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
+ 
+     def test_fully_refunded_invoice_shows_refund_amount_and_zero_due(self):
+         self._save_complete_bank_details()
+         self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
+-        self._create_payment_record(
++        payment_record = self._create_payment_record(
+             status=PaymentRecord.STATUS_REFUNDED,
+             reference="PAY-TEMPLATE-REFUNDED",
+         )
++        PaymentRefund.objects.create(
++            invoice=self.invoice,
++            payment_record=payment_record,
++            amount=self.invoice.total_amount,
++            currency=self.invoice.currency,
++            method=PaymentRefund.METHOD_BANK_TRANSFER,
++            status=PaymentRefund.STATUS_SUCCEEDED,
++        )
+         self.invoice.status = Invoice.STATUS_REFUNDED
+         self.invoice.save(update_fields=["status", "updated_at"])
+ 
+         context = build_export_context(self.invoice)
+         payment_summary = _resolve_invoice_payment_summary(self.invoice)
+         pdf_bytes = generate_invoice_pdf(self.invoice)
+ 
+         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+         self.assertFalse(payment_summary["show_payment_instructions"])
+         self.assertEqual(payment_summary["payment_status_message"], "Refunded")
+         self.assertEqual(payment_summary["amount_paid"], self.invoice.total_amount)
+         self.assertEqual(payment_summary["refunded_amount"], self.invoice.total_amount)
+         self.assertEqual(payment_summary["amount_due"], Decimal("0.00"))
+         self.assertEqual(payment_summary["payment_data_issue"], "")
+         self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
+ 
++    def test_fully_refunded_invoice_excel_shows_refund_amount_and_zero_due(self):
++        self._save_complete_bank_details()
++        self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
++        payment_record = self._create_payment_record(
++            status=PaymentRecord.STATUS_REFUNDED,
++            reference="PAY-TEMPLATE-REFUNDED-XLSX",
++        )
++        PaymentRefund.objects.create(
++            invoice=self.invoice,
++            payment_record=payment_record,
++            amount=self.invoice.total_amount,
++            currency=self.invoice.currency,
++            method=PaymentRefund.METHOD_BANK_TRANSFER,
++            status=PaymentRefund.STATUS_SUCCEEDED,
++        )
++        self.invoice.status = Invoice.STATUS_REFUNDED
++        self.invoice.save(update_fields=["status", "updated_at"])
++
++        excel_bytes = generate_invoice_excel(self.invoice)
++
++        wb = load_workbook(BytesIO(excel_bytes))
++        ws = wb["Invoice"]
++        self.assertEqual(ws["D17"].value, "Amount Paid")
++        self.assertAlmostEqual(float(ws["E17"].value), float(self.invoice.total_amount), places=2)
++        self.assertEqual(ws["D18"].value, "Refunded")
++        self.assertAlmostEqual(float(ws["E18"].value), float(self.invoice.total_amount), places=2)
++        self.assertEqual(ws["D19"].value, "Amount Due")
++        self.assertAlmostEqual(float(ws["E19"].value), 0.00, places=2)
++        self.assertEqual(ws["A21"].value, "Refunded")
++
+     def test_inconsistent_refunded_invoice_without_payment_record_is_reported_safely(self):
+         self._save_complete_bank_details()
+         self.invoice.status = Invoice.STATUS_REFUNDED
+         self.invoice.save(update_fields=["status", "updated_at"])
+ 
+         payment_summary = _resolve_invoice_payment_summary(self.invoice)
+         pdf_bytes = generate_invoice_pdf(self.invoice)
+ 
+         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+         self.assertFalse(payment_summary["show_payment_instructions"])
