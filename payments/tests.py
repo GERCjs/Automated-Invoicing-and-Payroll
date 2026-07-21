@@ -166,6 +166,36 @@ class StripePaymentsPhaseTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_customer_bank_transfer_notice_rejects_other_customer_invoice(self):
+        other_customer = Customer.objects.create(name="Other", email="other@example.com")
+        other_invoice = Invoice.objects.create(
+            invoice_number="INV-STRIPE-1003",
+            customer=other_customer,
+            status=Invoice.STATUS_SENT,
+            issue_date=timezone.localdate(),
+            due_date=timezone.localdate() + timedelta(days=7),
+            currency="SGD",
+            subtotal=Decimal("10.00"),
+            tax_amount=Decimal("0.90"),
+            total_amount=Decimal("10.90"),
+        )
+
+        self.client.login(username="customer_stripe", password="TempPass123!")
+        response = self.client.post(
+            reverse("payment-bank-transfer-notice-customer", args=[other_invoice.pk]),
+            data={
+                "manual_customer_amount": str(other_invoice.total_amount),
+                "manual_customer_transfer_date": timezone.localdate().isoformat(),
+                "manual_customer_bank_reference": "CUSTOMER-BANK-REF-IDOR",
+                "manual_customer_notes": "Attempted cross-account submission.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(
+            PaymentRecord.objects.filter(invoice=other_invoice).exists()
+        )
+
     @patch("payments.views.create_checkout_for_invoice")
     def test_public_checkout_rejects_draft_invoice(self, create_checkout_mock):
         self.invoice.status = Invoice.STATUS_DRAFT
