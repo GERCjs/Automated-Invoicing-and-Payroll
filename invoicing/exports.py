@@ -712,6 +712,29 @@ def generate_invoice_excel(invoice: Invoice) -> bytes:
     ws.cell(row=row, column=4, value="Total").font = Font(bold=True)
     ws.cell(row=row, column=5, value=float(invoice.total_amount)).font = Font(bold=True)
 
+    payment_summary = _resolve_invoice_payment_summary(invoice)
+    amount_paid = payment_summary["amount_paid"]
+    refunded_amount = payment_summary["refunded_amount"]
+    amount_due = payment_summary["amount_due"]
+
+    row += 1
+    ws.cell(row=row, column=4, value="Amount Paid").font = Font(bold=True)
+    ws.cell(row=row, column=5, value=float(amount_paid))
+    if invoice.status == Invoice.STATUS_REFUNDED or refunded_amount > Decimal("0.00"):
+        row += 1
+        ws.cell(row=row, column=4, value="Refunded").font = Font(bold=True)
+        ws.cell(row=row, column=5, value=float(refunded_amount))
+    row += 1
+    ws.cell(row=row, column=4, value="Amount Due").font = Font(bold=True)
+    ws.cell(row=row, column=5, value=float(amount_due)).font = Font(bold=True)
+
+    if payment_summary["payment_status_message"]:
+        row += 2
+        ws.cell(row=row, column=1, value=payment_summary["payment_status_message"]).font = Font(bold=True)
+        if payment_summary["payment_data_issue"]:
+            row += 1
+            ws.cell(row=row, column=1, value=payment_summary["payment_data_issue"])
+
     if invoice.notes:
         row += 2
         ws.cell(row=row, column=1, value="Notes").font = Font(bold=True)

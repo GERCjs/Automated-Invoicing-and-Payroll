@@ -22,7 +22,7 @@ from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from core.models import AuditLog
 from imports.models import ImportJob
 from notifications.models import EmailDeliveryLog
-from payments.models import PaymentBankDetails, PaymentRecord
+from payments.models import PaymentBankDetails, PaymentRecord, PaymentRefund
 from support.models import SupportTicket
 
 from .exports import (
@@ -35,6 +35,7 @@ from .exports import (
     _resolve_invoice_branding,
     _invoice_text_lines,
     build_export_context,
+    generate_invoice_excel,
     generate_invoice_pdf,
 )
 from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow, InvoiceTemplateSettings
@@ -2363,9 +2364,17 @@ class InvoiceTemplateSettingsTests(TestCase):
     def test_fully_refunded_invoice_shows_refund_amount_and_zero_due(self):
         self._save_complete_bank_details()
         self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
-        self._create_payment_record(
+        payment_record = self._create_payment_record(
             status=PaymentRecord.STATUS_REFUNDED,
             reference="PAY-TEMPLATE-REFUNDED",
+        )
+        PaymentRefund.objects.create(
+            invoice=self.invoice,
+            payment_record=payment_record,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            method=PaymentRefund.METHOD_BANK_TRANSFER,
+            status=PaymentRefund.STATUS_SUCCEEDED,
         )
         self.invoice.status = Invoice.STATUS_REFUNDED
         self.invoice.save(update_fields=["status", "updated_at"])
@@ -2382,6 +2391,36 @@ class InvoiceTemplateSettingsTests(TestCase):
         self.assertEqual(payment_summary["amount_due"], Decimal("0.00"))
         self.assertEqual(payment_summary["payment_data_issue"], "")
         self.assertEqual(_payment_note_lines_for_pdf(context, payment_summary), [])
+
+    def test_fully_refunded_invoice_excel_shows_refund_amount_and_zero_due(self):
+        self._save_complete_bank_details()
+        self._save_template_settings(invoice_payment_notes="Please pay by bank transfer.")
+        payment_record = self._create_payment_record(
+            status=PaymentRecord.STATUS_REFUNDED,
+            reference="PAY-TEMPLATE-REFUNDED-XLSX",
+        )
+        PaymentRefund.objects.create(
+            invoice=self.invoice,
+            payment_record=payment_record,
+            amount=self.invoice.total_amount,
+            currency=self.invoice.currency,
+            method=PaymentRefund.METHOD_BANK_TRANSFER,
+            status=PaymentRefund.STATUS_SUCCEEDED,
+        )
+        self.invoice.status = Invoice.STATUS_REFUNDED
+        self.invoice.save(update_fields=["status", "updated_at"])
+
+        excel_bytes = generate_invoice_excel(self.invoice)
+
+        wb = load_workbook(BytesIO(excel_bytes))
+        ws = wb["Invoice"]
+        self.assertEqual(ws["D17"].value, "Amount Paid")
+        self.assertAlmostEqual(float(ws["E17"].value), float(self.invoice.total_amount), places=2)
+        self.assertEqual(ws["D18"].value, "Refunded")
+        self.assertAlmostEqual(float(ws["E18"].value), float(self.invoice.total_amount), places=2)
+        self.assertEqual(ws["D19"].value, "Amount Due")
+        self.assertAlmostEqual(float(ws["E19"].value), 0.00, places=2)
+        self.assertEqual(ws["A21"].value, "Refunded")
 
     def test_inconsistent_refunded_invoice_without_payment_record_is_reported_safely(self):
         self._save_complete_bank_details()
