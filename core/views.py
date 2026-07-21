@@ -1,4 +1,3 @@
-from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required

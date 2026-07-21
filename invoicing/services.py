@@ -34,20 +34,24 @@ def _to_money(value: Decimal) -> Decimal:
 def generate_invoice_number() -> str:
     year = timezone.localdate().year
     prefix = f"INV-{year}-"
-    last_invoice = (
-        Invoice.objects.filter(invoice_number__startswith=prefix)
-        .order_by("-invoice_number")
-        .only("invoice_number")
-        .first()
-    )
-    if not last_invoice:
+    existing_numbers = Invoice.objects.filter(
+        invoice_number__startswith=prefix
+    ).values_list("invoice_number", flat=True)
+
+    max_seq = 0
+    for invoice_number in existing_numbers:
+        try:
+            seq = int(invoice_number[len(prefix):])
+        except ValueError:
+            continue
+        if seq > max_seq:
+            max_seq = seq
+
+    if max_seq == 0 and not existing_numbers:
         return f"{prefix}0001"
 
-    try:
-        last_seq = int(last_invoice.invoice_number.split("-")[-1])
-    except (ValueError, IndexError):
-        last_seq = Invoice.objects.filter(invoice_number__startswith=prefix).count()
-    return f"{prefix}{last_seq + 1:04d}"
+    next_seq = max_seq + 1
+    return f"{prefix}{next_seq:04d}"
 
 
 def calculate_item_amounts(item: InvoiceItem) -> tuple[Decimal, Decimal, Decimal]:

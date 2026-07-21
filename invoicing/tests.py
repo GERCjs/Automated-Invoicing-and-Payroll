@@ -41,6 +41,7 @@ from .exports import (
 from .models import Customer, Invoice, InvoiceItem, InvoiceSourceRow, InvoiceTemplateSettings
 from .services import (
     apply_overdue_status,
+    generate_invoice_number,
     parse_invoice_csv,
     parse_invoice_excel,
     recalculate_invoice_totals,
@@ -1892,6 +1893,26 @@ class InvoicingMvpTests(TestCase):
         self.client.login(username="staff_u", password="TempPass123!")
         response = self.client.get(reverse("invoice-csv-upload"))
         self.assertEqual(response.status_code, 403)
+
+    def test_generate_invoice_number_rolls_over_past_four_digits_without_duplicates(self):
+        year = timezone.localdate().year
+        self._create_basic_invoice(
+            invoice_number=f"INV-{year}-9999",
+            status=Invoice.STATUS_DRAFT,
+            due_date=timezone.localdate() + timedelta(days=10),
+        )
+
+        next_number = generate_invoice_number()
+        self.assertEqual(next_number, f"INV-{year}-10000")
+
+        self._create_basic_invoice(
+            invoice_number=next_number,
+            status=Invoice.STATUS_DRAFT,
+            due_date=timezone.localdate() + timedelta(days=10),
+        )
+
+        next_number_after_rollover = generate_invoice_number()
+        self.assertEqual(next_number_after_rollover, f"INV-{year}-10001")
 
 
 class InvoiceTemplateSettingsTests(TestCase):
@@ -4235,7 +4256,7 @@ class InvoiceFileUploadTests(TestCase):
         self.assertEqual(job.saved_rows, 2)
         self.assertEqual(job.invalid_rows, 1)
 
-    def test_excel_duplicate_rows_within_same_upload_are_rejected(self):
+    def test_excel_identical_rows_within_same_upload_each_create_an_invoice(self):
         self.client.login(username="finance_upload", password="TempPass123!")
         duplicate_row = [
             "S1",
