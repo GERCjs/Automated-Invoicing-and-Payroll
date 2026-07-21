@@ -11,7 +11,9 @@
     <section class="report-header report-section">
         <div>
             <h1 class="page-title">Management Dashboard</h1>
+            <p class="page-subtitle">CEO view of cash collection, issued receivables, operational risk, and drill-down reports.</p>
             <div class="report-header-meta">
+                <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
                 <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
             </div>
         </div>
@@ -22,6 +24,87 @@
         </div>
     </section>
 
+    <section class="report-section">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="section-heading mb-0">CEO Health Snapshot</h2>
+            <span class="text-muted small">Payroll details stay in the Payroll Report.</span>
+        </div>
+        <div class="row g-3 report-kpi-grid">
+            <div class="col-12 col-md-6 col-xl">
+                <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Collected This Month</div>
+                        <div class="report-kpi-value">S${{ collected_this_month|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">{{ collection_comparison_note }}</div>
+                        <a href="{% url 'payment-stripe-report' %}" class="report-link mt-auto">Review payments &rarr;</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl">
+                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Issued Outstanding</div>
+                        <div class="report-kpi-value">S${{ invoice_outstanding|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Sent, viewed, and overdue invoices waiting for customer payment.</div>
+                        <a href="{% url 'invoice-list' %}?status=overdue" class="report-link mt-auto">Review receivables &rarr;</a>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-xl">
+                <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Refunded</div>
+                        <div class="report-kpi-value">S${{ refunded_total|floatformat:2|intcomma }}</div>
+                        <div class="small text-muted">Total refunded to customers.</div>
+                        <a href="{% url 'payment-stripe-report' %}" class="report-link mt-auto">View Payment Report &rarr;</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="section-heading mb-0">Operational Risk Items</h2>
+            <span class="text-muted small">Issues that may affect collections or reporting accuracy.</span>
+        </div>
+        <div class="report-summary-strip">
+            {% for item in secondary_summary_items %}
+            <div class="report-summary-card">
+                <div class="report-summary-label">{{ item.label }}</div>
+                <div class="report-summary-value">{{ item.value }}</div>
+                <div class="report-summary-note">{{ item.note }}</div>
+                <a href="{{ item.link_url }}" class="report-link">{{ item.link_label }} &rarr;</a>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="report-section">
+        <h2 class="section-heading mb-3">Collection Trend</h2>
+        <div class="report-chart-card">
+            <div class="report-chart-header">Collected by Month</div>
+            <div class="report-chart-body">
+                <canvas id="collectionTrendChart" class="report-chart-canvas" aria-label="Collection trend chart" role="img"></canvas>
+                <div id="collectionTrendChartEmpty" class="report-chart-empty d-none">No collection trend data is available yet.</div>
+            </div>
+            <div class="px-3 text-muted small">Shows confirmed collected payments over the last 6 months.</div>
+            <div class="report-chart-summary">
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">Current month</span>
+                    <span class="report-chart-stat-value">S${{ collected_this_month|floatformat:2|intcomma }}</span>
+                </div>
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">6-month collected</span>
+                    <span class="report-chart-stat-value">S${{ collection_chart_summary.six_month_total|floatformat:2|intcomma }}</span>
+                </div>
+                <div class="report-chart-stat">
+                    <span class="report-chart-stat-label">Best month</span>
+                    <span class="report-chart-stat-value">{{ collection_chart_summary.peak_label|default:"No data" }}{% if collection_chart_summary.has_data %}: S${{ collection_chart_summary.peak_value|floatformat:2|intcomma }}{% endif %}</span>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <section class="report-section">
         <div class="card">

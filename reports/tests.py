@@ -11,7 +11,7 @@ from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from core.models import AuditLog
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog, PaymentReminderSettings
-from payments.models import PaymentRecord
+from payments.models import PaymentRecord, PaymentRefund
 
 
 User = get_user_model()
@@ -298,6 +298,53 @@ class PaymentStripeReportAccessTests(TestCase):
         self.assertContains(to_only_response, "Payment Date: up to 14 Jun 2026")
         self.assertContains(from_only_response, 'value="2026-06-14"', html=False)
         self.assertContains(to_only_response, 'value="2026-06-14"', html=False)
+
+    def test_payment_report_refunded_amount_includes_only_succeeded_refunds(self):
+        user = self._make_user("report_refund_mixed", FINANCE)
+        self.client.force_login(user)
+        today = timezone.localdate()
+
+        def _make_refund_invoice(invoice_number, refund_amount, refund_status):
+            invoice = Invoice.objects.create(
+                invoice_number=invoice_number,
+                customer=self.customer,
+                status=Invoice.STATUS_REFUNDED,
+                issue_date=today,
+                due_date=today + timedelta(days=7),
+                currency="SGD",
+                subtotal=refund_amount,
+                tax_amount=Decimal("0.00"),
+                total_amount=refund_amount,
+            )
+            payment_record = PaymentRecord.objects.create(
+                invoice=invoice,
+                payment_reference=f"PAY-{invoice_number}",
+                provider=PaymentRecord.PROVIDER_STRIPE,
+                status=PaymentRecord.STATUS_REFUNDED,
+                amount=refund_amount,
+                currency="SGD",
+                paid_at=timezone.now(),
+                stripe_checkout_session_id=f"cs_test_{invoice_number}",
+            )
+            PaymentRefund.objects.create(
+                invoice=invoice,
+                payment_record=payment_record,
+                amount=refund_amount,
+                currency="SGD",
+                method=PaymentRefund.METHOD_STRIPE,
+                status=refund_status,
+                processed_at=timezone.now(),
+            )
+
+        _make_refund_invoice("INV-REPORT-REFUND-SUCCEEDED", Decimal("50.00"), PaymentRefund.STATUS_SUCCEEDED)
+        _make_refund_invoice("INV-REPORT-REFUND-PENDING", Decimal("30.00"), PaymentRefund.STATUS_PENDING)
+        _make_refund_invoice("INV-REPORT-REFUND-FAILED", Decimal("20.00"), PaymentRefund.STATUS_FAILED)
+
+        response = self.client.get(reverse("payment-stripe-report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["refunded_amount"], Decimal("50.00"))
+        self.assertContains(response, "S$50.00")
 
 
 class PaymentStripeReportNavigationPlacementTests(TestCase):

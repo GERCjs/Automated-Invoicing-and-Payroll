@@ -67,7 +67,6 @@
             <div class="portal-nav-links">
                 {% if current_user_role == "superadmin" or current_user_role == "admin" %}
                 <a class="portal-nav-link" href="{% url 'dashboard' %}">Management Dashboard</a>
-                <a class="portal-nav-link" href="{% url 'ceo-dashboard' %}">CEO Dashboard</a>
                 {% endif %}
 
                 {% if current_user_role == "hr" %}

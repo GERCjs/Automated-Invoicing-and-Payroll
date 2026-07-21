@@ -490,7 +490,7 @@ def invoice_csv_upload(request):
                 "valid_rows": parsed["valid_rows"],
                 "invalid_rows": parsed["invalid_rows"],
                 "all_rows": parsed["all_rows"],
-                "preview_groups": parsed["preview_groups"],
+                "preview_invoices": parsed["preview_invoices"],
             }
             request.session[session_key] = preview_payload
             log_event(
@@ -524,7 +524,7 @@ def invoice_csv_upload(request):
             "form": form,
             "preview": preview_payload,
             "invalid_preview_rows": (preview_payload or {}).get("invalid_rows", [])[:20],
-            "group_preview_rows": (preview_payload or {}).get("preview_groups", []),
+            "invoice_preview_rows": (preview_payload or {}).get("preview_invoices", []),
         },
     )
 
@@ -1492,6 +1492,24 @@ def invoice_download_pdf(request, pk):
     )
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="{invoice.invoice_number}.pdf"'
+    return response
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, FINANCE)
+def invoice_preview_pdf(request, pk):
+    invoice = get_object_or_404(Invoice.objects.select_related("customer"), pk=pk)
+    pdf_bytes = generate_invoice_pdf(invoice)
+    log_event(
+        action="invoice.pdf.previewed",
+        user=request.user,
+        target_type="invoice",
+        target_id=str(invoice.id),
+        metadata={"invoice_number": invoice.invoice_number},
+        ip_address=get_client_ip(request),
+    )
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{invoice.invoice_number}.pdf"'
     return response
 
 
