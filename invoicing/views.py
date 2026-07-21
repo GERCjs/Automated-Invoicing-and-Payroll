@@ -490,7 +490,7 @@ def invoice_csv_upload(request):
                 "valid_rows": parsed["valid_rows"],
                 "invalid_rows": parsed["invalid_rows"],
                 "all_rows": parsed["all_rows"],
-                "preview_groups": parsed["preview_groups"],
+                "preview_invoices": parsed["preview_invoices"],
             }
             request.session[session_key] = preview_payload
             log_event(
@@ -524,7 +524,7 @@ def invoice_csv_upload(request):
             "form": form,
             "preview": preview_payload,
             "invalid_preview_rows": (preview_payload or {}).get("invalid_rows", [])[:20],
-            "group_preview_rows": (preview_payload or {}).get("preview_groups", []),
+            "invoice_preview_rows": (preview_payload or {}).get("preview_invoices", []),
         },
     )
 

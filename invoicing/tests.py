@@ -1856,11 +1856,13 @@ class InvoicingMvpTests(TestCase):
         )
         self.assertEqual(confirm_response.status_code, 302)
 
-        imported_invoice = Invoice.objects.filter(notes__contains="vaniday_sample.csv").first()
-        self.assertIsNotNone(imported_invoice)
-        self.assertEqual(imported_invoice.items.count(), 2)
+        imported_invoices = Invoice.objects.filter(notes__contains="vaniday_sample.csv").order_by("id")
+        self.assertEqual(imported_invoices.count(), 2)
+        for imported_invoice in imported_invoices:
+            self.assertEqual(imported_invoice.items.count(), 1)
         self.assertEqual(InvoiceSourceRow.objects.filter(source_file_name="vaniday_sample.csv").count(), 2)
-        self.assertEqual(imported_invoice.total_amount, Decimal("200.00"))
+        total_amount = sum((invoice.total_amount for invoice in imported_invoices), Decimal("0.00"))
+        self.assertEqual(total_amount, Decimal("200.00"))
 
         job = ImportJob.objects.latest("id")
         self.assertEqual(job.module, ImportJob.MODULE_INVOICING)
@@ -3838,6 +3840,52 @@ class InvoiceFileUploadTests(TestCase):
         self.assertEqual(latest_job.saved_rows, 1)
         self.assertEqual(latest_job.invalid_rows, 1)
 
+    def test_n_valid_rows_same_customer_and_month_create_n_invoices(self):
+        self.client.login(username="finance_upload", password="TempPass123!")
+        base_row = self._sample_csv_rows()[0]
+        rows = []
+        for index in range(1, 6):
+            row = base_row.copy()
+            row.update(
+                {
+                    "OrderID": f"ORD-SAME-{index:03d}",
+                    "serviceName": f"Service {index}",
+                    "bookedDate": f"2026-05-{index:02d} 10:00:00",
+                    "vanidayShare": f"{100 + index}.00",
+                }
+            )
+            rows.append(row)
+
+        initial_invoice_count = Invoice.objects.count()
+        initial_item_count = InvoiceItem.objects.count()
+
+        preview_response, confirm_response = self._preview_and_confirm_csv_rows(
+            rows, filename="same_customer_month.csv"
+        )
+
+        preview = preview_response.context["preview"]
+        self.assertEqual(len(preview["valid_rows"]), 5)
+        self.assertEqual(len(preview["invalid_rows"]), 0)
+
+        self.assertEqual(Invoice.objects.count(), initial_invoice_count + 5)
+        self.assertEqual(InvoiceItem.objects.count(), initial_item_count + 5)
+
+        created_invoices = Invoice.objects.filter(notes__contains="same_customer_month.csv").order_by("id")
+        self.assertEqual(created_invoices.count(), 5)
+        invoice_numbers = {invoice.invoice_number for invoice in created_invoices}
+        self.assertEqual(len(invoice_numbers), 5, "invoice numbers must not collide")
+
+        for index, invoice in enumerate(created_invoices, start=1):
+            self.assertEqual(invoice.customer.email, "billing@acme.com")
+            self.assertEqual(invoice.items.count(), 1)
+            item = invoice.items.first()
+            expected_amount = Decimal(f"{100 + index}.00")
+            self.assertEqual(item.line_total, expected_amount)
+            self.assertEqual(invoice.total_amount, expected_amount)
+
+        latest_job = ImportJob.objects.latest("id")
+        self.assertEqual(latest_job.saved_rows, 5)
+
     def test_corrected_previously_invalid_row_can_be_imported_later(self):
         self.client.login(username="finance_upload", password="TempPass123!")
         valid_row = self._sample_csv_rows()[0]
@@ -4175,16 +4223,19 @@ class InvoiceFileUploadTests(TestCase):
         )
 
         self.assertEqual(confirm_response.status_code, 302)
-        imported_invoice = Invoice.objects.get(notes__contains="vaniday_batch.xlsx")
-        self.assertEqual(imported_invoice.items.count(), 2)
-        self.assertFalse(imported_invoice.items.filter(description__icontains="Bad Row").exists())
-        self.assertEqual(imported_invoice.total_amount, Decimal("200.00"))
+        imported_invoices = Invoice.objects.filter(notes__contains="vaniday_batch.xlsx").order_by("id")
+        self.assertEqual(imported_invoices.count(), 2)
+        for imported_invoice in imported_invoices:
+            self.assertEqual(imported_invoice.items.count(), 1)
+            self.assertFalse(imported_invoice.items.filter(description__icontains="Bad Row").exists())
+        total_amount = sum((invoice.total_amount for invoice in imported_invoices), Decimal("0.00"))
+        self.assertEqual(total_amount, Decimal("200.00"))
         self.assertEqual(InvoiceSourceRow.objects.filter(source_file_name="vaniday_batch.xlsx").count(), 3)
         job = ImportJob.objects.latest("id")
         self.assertEqual(job.saved_rows, 2)
         self.assertEqual(job.invalid_rows, 1)
 
-    def test_excel_duplicate_rows_keep_existing_grouping_behavior(self):
+    def test_excel_duplicate_rows_within_same_upload_are_rejected(self):
         self.client.login(username="finance_upload", password="TempPass123!")
         duplicate_row = [
             "S1",
@@ -4212,9 +4263,12 @@ class InvoiceFileUploadTests(TestCase):
             data={"action": "confirm", "import_token": import_token},
         )
 
-        imported_invoice = Invoice.objects.get(notes__contains="duplicates.xlsx")
-        self.assertEqual(imported_invoice.items.count(), 2)
-        self.assertEqual(imported_invoice.total_amount, Decimal("240.00"))
+        imported_invoices = Invoice.objects.filter(notes__contains="duplicates.xlsx").order_by("id")
+        self.assertEqual(imported_invoices.count(), 2)
+        for imported_invoice in imported_invoices:
+            self.assertEqual(imported_invoice.items.count(), 1)
+        total_amount = sum((invoice.total_amount for invoice in imported_invoices), Decimal("0.00"))
+        self.assertEqual(total_amount, Decimal("240.00"))
 
     def test_new_upload_replaces_previous_preview_in_same_session(self):
         self.client.login(username="finance_upload", password="TempPass123!")

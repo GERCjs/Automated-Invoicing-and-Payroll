@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-from collections import defaultdict
 from datetime import datetime, timedelta
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -554,14 +553,17 @@ def _build_invoice_parse_result(headers: list[str], source_rows: list[tuple[int,
         else:
             valid_rows.append(transformed)
 
-    preview_groups = defaultdict(lambda: {"customer_name": "", "period": "", "rows": 0, "amount_total": ZERO})
-    for row in valid_rows:
-        key = f"{row['customer_name']}|{row['email'] or 'no-email'}|{row['group_period']}"
-        group = preview_groups[key]
-        group["customer_name"] = row["customer_name"]
-        group["period"] = row["group_period"]
-        group["rows"] += 1
-        group["amount_total"] += Decimal(row["amount"])
+    # One valid row becomes one invoice, so the preview lists one entry per
+    # valid row rather than grouping rows by customer/period.
+    preview_invoices = [
+        {
+            "customer_name": row["customer_name"],
+            "period": row["group_period"],
+            "order_id": row["source"]["order_id"],
+            "amount_total": f"{_to_money(Decimal(row['amount'])):.2f}",
+        }
+        for row in valid_rows
+    ]
 
     return {
         "headers": headers,
@@ -569,15 +571,7 @@ def _build_invoice_parse_result(headers: list[str], source_rows: list[tuple[int,
         "all_rows": normalized_rows,
         "valid_rows": valid_rows,
         "invalid_rows": invalid_rows,
-        "preview_groups": [
-            {
-                "customer_name": group["customer_name"],
-                "period": group["period"],
-                "rows": group["rows"],
-                "amount_total": f"{_to_money(group['amount_total']):.2f}",
-            }
-            for group in preview_groups.values()
-        ],
+        "preview_invoices": preview_invoices,
     }
 
 
@@ -690,11 +684,6 @@ def import_invoice_rows_from_preview(
         if _invoice_row_duplicate_key(row) not in existing_duplicate_keys
     ]
 
-    grouped_valid_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for row in importable_valid_rows:
-        group_key = f"{row['customer_name']}|{row['email'] or 'no-email'}|{row['group_period']}"
-        grouped_valid_rows[group_key].append(row)
-
     with transaction.atomic():
         for row in all_rows:
             if DUPLICATE_INVOICE_IMPORT_MESSAGE in row["errors"]:
@@ -737,11 +726,13 @@ def import_invoice_rows_from_preview(
             )
             stored_source_rows += 1
 
-        for grouped_rows in grouped_valid_rows.values():
-            sample = grouped_rows[0]
-            customer_name = sample["customer_name"]
-            email_value = sample["email"]
-            seller_id = sample["source"]["seller_id"]
+        # Supervisor rule: one valid spreadsheet row = one invoice with a
+        # single invoice item. Customer resolution/creation is still shared
+        # across rows for the same customer via customers_cache.
+        for row in importable_valid_rows:
+            customer_name = row["customer_name"]
+            email_value = row["email"]
+            seller_id = row["source"]["seller_id"]
             customer_email = email_value or _build_fallback_email(customer_name, seller_id)
 
             if customer_email in customers_cache:
@@ -752,7 +743,7 @@ def import_invoice_rows_from_preview(
                     customer = Customer.objects.create(
                         name=customer_name[:255],
                         email=customer_email,
-                        phone=sample["source"]["contact_no"][:30],
+                        phone=row["source"]["contact_no"][:30],
                         created_by=initiated_by,
                     )
                     created_customers += 1
@@ -761,20 +752,19 @@ def import_invoice_rows_from_preview(
                     if not customer.name and customer_name:
                         customer.name = customer_name[:255]
                         updated_fields.append("name")
-                    if not customer.phone and sample["source"]["contact_no"]:
-                        customer.phone = sample["source"]["contact_no"][:30]
+                    if not customer.phone and row["source"]["contact_no"]:
+                        customer.phone = row["source"]["contact_no"][:30]
                         updated_fields.append("phone")
                     if updated_fields:
                         updated_fields.append("updated_at")
                         customer.save(update_fields=updated_fields)
                 customers_cache[customer_email] = customer
 
-            booked_dates = [
+            issue_date = (
                 datetime.fromisoformat(row["booked_at"]).date()
-                for row in grouped_rows
                 if row["booked_at"]
-            ]
-            issue_date = min(booked_dates) if booked_dates else timezone.localdate()
+                else timezone.localdate()
+            )
             payment_term_days = getattr(settings, "INVOICE_PAYMENT_TERM_DAYS", 30)
             due_date = issue_date + timedelta(days=payment_term_days)
 
@@ -790,19 +780,18 @@ def import_invoice_rows_from_preview(
             )
             created_invoices += 1
 
-            for row in grouped_rows:
-                amount = Decimal(row["amount"])
-                quantity = Decimal(row["quantity"])
-                unit_price = _to_money(amount / quantity) if quantity > ZERO else amount
-                InvoiceItem.objects.create(
-                    invoice=invoice,
-                    description=row["item_description"][:255],
-                    quantity=quantity,
-                    unit_price=unit_price,
-                    tax_rate=ZERO,
-                    line_total=amount,
-                )
-                created_items += 1
+            amount = Decimal(row["amount"])
+            quantity = Decimal(row["quantity"])
+            unit_price = _to_money(amount / quantity) if quantity > ZERO else amount
+            InvoiceItem.objects.create(
+                invoice=invoice,
+                description=row["item_description"][:255],
+                quantity=quantity,
+                unit_price=unit_price,
+                tax_rate=ZERO,
+                line_total=amount,
+            )
+            created_items += 1
 
             recalculate_invoice_totals(invoice)
 
