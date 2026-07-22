@@ -88,6 +88,12 @@
                     {{ form.department }}
                     {% for error in form.department.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
+                <div class="col-md-3">
+                    <label class="form-label">Leave Status</label>
+                    {{ form.leave_status }}
+                    {% for error in form.leave_status.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                    <div class="form-text">Informational only. This does not change salary automatically.</div>
+                </div>
                 <div class="col-12">
                     <div class="form-check mb-2">
                         {{ form.sdl_exempt }}

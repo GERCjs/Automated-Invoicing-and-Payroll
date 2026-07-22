@@ -29,6 +29,7 @@
             <div class="col-md-6"><strong>Gender:</strong> {{ employee.get_gender_display|default:"-" }}</div>
             <div class="col-md-6"><strong>Race:</strong> {{ employee.race|default:"-" }}</div>
             <div class="col-md-6"><strong>Religion:</strong> {{ employee.religion|default:"-" }}</div>
+            <div class="col-md-6"><strong>Leave Status:</strong> {{ employee.get_leave_status_display }}</div>
             <div class="col-md-6"><strong>Date of Birth:</strong> {{ employee.date_of_birth|date:"d-m-Y"|default:"-" }}</div>
             <div class="col-md-6"><strong>Date of Appointment:</strong> {{ employee.date_of_appointment|date:"d-m-Y"|default:"-" }}</div>
             <div class="col-md-6"><strong>SDL Exempt:</strong> {% if employee.sdl_exempt %}Yes{% else %}No{% endif %}</div>

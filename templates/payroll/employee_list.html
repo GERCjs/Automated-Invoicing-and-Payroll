@@ -32,6 +32,14 @@
                     <option value="{{ inactive_status_value }}" {% if selected_status == inactive_status_value %}selected{% endif %}>Inactive</option>
                 </select>
             </div>
+            <div class="col-md-3 col-lg-2">
+                <label class="form-label mb-1" for="employeeLeaveStatus">Leave Status</label>
+                <select id="employeeLeaveStatus" name="leave_status" class="form-select">
+                    <option value="">All Leave Statuses</option>
+                    <option value="{{ leave_none_value }}" {% if selected_leave_status == leave_none_value %}selected{% endif %}>Available</option>
+                    <option value="{{ leave_on_leave_value }}" {% if selected_leave_status == leave_on_leave_value %}selected{% endif %}>On Leave</option>
+                </select>
+            </div>
             <div class="col-md-4 col-lg-2">
                 <label class="form-label mb-1" for="employeePaymentMethod">Payment Method</label>
                 <select id="employeePaymentMethod" name="payment_method" class="form-select">
@@ -58,7 +66,7 @@
                 <a href="{% url 'employee-list' %}" class="btn btn-outline-secondary">Reset</a>
             </div>
         </form>
-        <p class="text-muted mb-0 mt-2">{% if search_query %}Search: "{{ search_query }}" | {% endif %}{% if selected_status %}Status: {{ selected_status|title }} | {% endif %}{% if selected_payment_method %}Payment Method: {% if selected_payment_method == giro_payment_value %}GIRO{% elif selected_payment_method == cash_payment_value %}Cash{% elif selected_payment_method == cheque_payment_value %}Cheque{% else %}Not Set{% endif %} | {% endif %}{% if selected_department %}Department: {{ selected_department }} | {% endif %}Results: {{ result_count }}</p>
+        <p class="text-muted mb-0 mt-2">{% if search_query %}Search: "{{ search_query }}" | {% endif %}{% if selected_status %}Status: {{ selected_status|title }} | {% endif %}{% if selected_leave_status %}Leave Status: {% if selected_leave_status == leave_on_leave_value %}On Leave{% else %}Available{% endif %} | {% endif %}{% if selected_payment_method %}Payment Method: {% if selected_payment_method == giro_payment_value %}GIRO{% elif selected_payment_method == cash_payment_value %}Cash{% elif selected_payment_method == cheque_payment_value %}Cheque{% else %}Not Set{% endif %} | {% endif %}{% if selected_department %}Department: {{ selected_department }} | {% endif %}Results: {{ result_count }}</p>
     </div>
 </div>
 
@@ -72,6 +80,7 @@
                     <th>Department</th>
                     <th>Job Title</th>
                     <th>Status</th>
+                    <th>Leave Status</th>
                     <th>Legal Status</th>
                     <th>Payment Method</th>
                     <th class="text-end">Actions</th>
@@ -92,6 +101,11 @@
                             {{ employee.get_status_display }}
                         </span>
                     </td>
+                    <td>
+                        <span class="status-badge {% if employee.leave_status == leave_on_leave_value %}status-warning{% else %}status-neutral{% endif %}">
+                            {{ employee.get_leave_status_display }}
+                        </span>
+                    </td>
                     <td>{{ employee.get_legal_status_display|default:"-" }}</td>
                     <td>{{ employee.get_payment_method_display|default:"-" }}</td>
                     <td class="text-end">
@@ -106,7 +120,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="8" class="text-center py-4"><div class="empty-state">No employees found.</div></td></tr>
+                <tr><td colspan="9" class="text-center py-4"><div class="empty-state">No employees found.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>

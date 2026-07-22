@@ -315,6 +315,7 @@ class EmployeeForm(forms.ModelForm):
             "race",
             "religion",
             "department",
+            "leave_status",
             "sdl_exempt",
             "cpf_exempt",
             "job_title",
@@ -335,6 +336,7 @@ class EmployeeForm(forms.ModelForm):
             "race": forms.TextInput(attrs={"class": "form-control"}),
             "religion": forms.TextInput(attrs={"class": "form-control"}),
             "department": forms.Select(attrs={"class": "form-select"}),
+            "leave_status": forms.Select(attrs={"class": "form-select"}),
             "sdl_exempt": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "cpf_exempt": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "job_title": forms.TextInput(attrs={"class": "form-control"}),
@@ -371,9 +373,11 @@ class EmployeeForm(forms.ModelForm):
             self.fields[field_name].required = True
         self.fields["bank_name"].widget.attrs["class"] = "form-select"
         self.fields["department"].widget.attrs["class"] = "form-select"
+        self.fields["leave_status"].required = False
         self.fields["status"].required = False
         if not (self.instance and self.instance.pk):
             self.fields["status"].initial = Employee.STATUS_ACTIVE
+            self.fields["leave_status"].initial = Employee.LEAVE_STATUS_NONE
         current_department = (getattr(self.instance, "department", "") or "").strip()
         if current_department and current_department not in {
             value for value, _label in EMPLOYEE_DEPARTMENT_CHOICES if value

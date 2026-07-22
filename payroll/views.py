@@ -1430,11 +1430,14 @@ def payroll_template_settings(request):
 def employee_list(request):
     search_query = request.GET.get("q", "").strip()
     selected_status = request.GET.get("status", "").strip()
+    selected_leave_status = request.GET.get("leave_status", "").strip()
     selected_payment_method = request.GET.get("payment_method", "").strip()
     selected_department = request.GET.get("department", "").strip()
     employees = Employee.objects.all()
     if selected_status in {Employee.STATUS_ACTIVE, Employee.STATUS_INACTIVE}:
         employees = employees.filter(status=selected_status)
+    if selected_leave_status in {Employee.LEAVE_STATUS_NONE, Employee.LEAVE_STATUS_ON_LEAVE}:
+        employees = employees.filter(leave_status=selected_leave_status)
     valid_payment_methods = {
         Employee.PAYMENT_METHOD_GIRO,
         Employee.PAYMENT_METHOD_CASH,
@@ -1480,11 +1483,14 @@ def employee_list(request):
             "search_query": search_query,
             "result_count": employees.count(),
             "selected_status": selected_status,
+            "selected_leave_status": selected_leave_status,
             "selected_payment_method": selected_payment_method,
             "selected_department": selected_department,
             "department_options": department_options,
             "active_status_value": Employee.STATUS_ACTIVE,
             "inactive_status_value": Employee.STATUS_INACTIVE,
+            "leave_none_value": Employee.LEAVE_STATUS_NONE,
+            "leave_on_leave_value": Employee.LEAVE_STATUS_ON_LEAVE,
             "giro_payment_value": Employee.PAYMENT_METHOD_GIRO,
             "cash_payment_value": Employee.PAYMENT_METHOD_CASH,
             "cheque_payment_value": Employee.PAYMENT_METHOD_CHEQUE,

@@ -12,6 +12,12 @@ class Employee(models.Model):
         (STATUS_ACTIVE, "Active"),
         (STATUS_INACTIVE, "Inactive"),
     ]
+    LEAVE_STATUS_NONE = "none"
+    LEAVE_STATUS_ON_LEAVE = "on_leave"
+    LEAVE_STATUS_CHOICES = [
+        (LEAVE_STATUS_NONE, "Available"),
+        (LEAVE_STATUS_ON_LEAVE, "On Leave"),
+    ]
     LEGAL_STATUS_CITIZEN = "citizen"
     LEGAL_STATUS_PR = "pr"
     LEGAL_STATUS_WP = "work_permit"
@@ -73,6 +79,7 @@ class Employee(models.Model):
         validators=[MinValueValidator(0)],
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    leave_status = models.CharField(max_length=20, choices=LEAVE_STATUS_CHOICES, default=LEAVE_STATUS_NONE)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
