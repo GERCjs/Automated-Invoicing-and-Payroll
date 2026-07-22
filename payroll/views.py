@@ -29,7 +29,14 @@ from core.audit import get_client_ip, log_event
 from core.models import AuditLog
 from notifications.models import EmailDeliveryLog
 
-from .forms import EmployeeForm, EmployeeUploadForm, PayrollRecordForm, PayrollTemplateSettingsForm, PayrollUploadForm
+from .forms import (
+    EMPLOYEE_DEPARTMENT_CHOICES,
+    EmployeeForm,
+    EmployeeUploadForm,
+    PayrollRecordForm,
+    PayrollTemplateSettingsForm,
+    PayrollUploadForm,
+)
 from .models import Employee, PayrollRecord, PayrollTemplateSettings
 from .services import (
     PAYROLL_UPLOAD_COLUMN_LABELS,
@@ -181,14 +188,38 @@ def _generate_next_employee_code():
 def payroll_employee_lookup(request):
     employee_id = (request.GET.get("employee_id") or "").strip()
     if not employee_id:
-        return JsonResponse({"ok": False, "employee_name": "", "reason": "missing_employee_id"})
+        return JsonResponse(
+            {
+                "ok": False,
+                "employee_name": "",
+                "basic_salary": "",
+                "department": "",
+                "reason": "missing_employee_id",
+            }
+        )
 
     employee = Employee.objects.filter(employee_code=employee_id).first()
     if employee is None:
-        return JsonResponse({"ok": False, "employee_name": "", "reason": "employee_not_found"})
+        return JsonResponse(
+            {
+                "ok": False,
+                "employee_name": "",
+                "basic_salary": "",
+                "department": "",
+                "reason": "employee_not_found",
+            }
+        )
 
     employee_name = f"{employee.first_name} {employee.last_name}".strip()
-    return JsonResponse({"ok": True, "employee_name": employee_name, "reason": "found"})
+    return JsonResponse(
+        {
+            "ok": True,
+            "employee_name": employee_name,
+            "basic_salary": f"{employee.base_salary:.2f}",
+            "department": employee.department or "",
+            "reason": "found",
+        }
+    )
 
 
 @login_required
@@ -1203,6 +1234,7 @@ def employee_list(request):
     search_query = request.GET.get("q", "").strip()
     selected_status = request.GET.get("status", "").strip()
     selected_payment_method = request.GET.get("payment_method", "").strip()
+    selected_department = request.GET.get("department", "").strip()
     employees = Employee.objects.all()
     if selected_status in {Employee.STATUS_ACTIVE, Employee.STATUS_INACTIVE}:
         employees = employees.filter(status=selected_status)
@@ -1217,6 +1249,25 @@ def employee_list(request):
             employees = employees.filter(Q(payment_method="") | Q(payment_method__isnull=True))
         else:
             employees = employees.filter(payment_method=selected_payment_method)
+    department_options = []
+    seen_departments = set()
+    for department_value, _department_label in EMPLOYEE_DEPARTMENT_CHOICES:
+        if department_value and department_value not in seen_departments:
+            department_options.append(department_value)
+            seen_departments.add(department_value)
+    existing_departments = (
+        Employee.objects.exclude(department="")
+        .exclude(department__isnull=True)
+        .order_by("department")
+        .values_list("department", flat=True)
+        .distinct()
+    )
+    for department_value in existing_departments:
+        if department_value not in seen_departments:
+            department_options.append(department_value)
+            seen_departments.add(department_value)
+    if selected_department:
+        employees = employees.filter(department=selected_department)
     if search_query:
         employees = employees.filter(
             Q(employee_code__icontains=search_query)
@@ -1233,6 +1284,8 @@ def employee_list(request):
             "result_count": employees.count(),
             "selected_status": selected_status,
             "selected_payment_method": selected_payment_method,
+            "selected_department": selected_department,
+            "department_options": department_options,
             "active_status_value": Employee.STATUS_ACTIVE,
             "inactive_status_value": Employee.STATUS_INACTIVE,
             "giro_payment_value": Employee.PAYMENT_METHOD_GIRO,

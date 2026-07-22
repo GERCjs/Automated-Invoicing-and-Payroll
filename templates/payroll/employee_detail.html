@@ -23,6 +23,7 @@
             <div class="col-md-6"><strong>First Name:</strong> {{ employee.first_name }}</div>
             <div class="col-md-6"><strong>Last Name:</strong> {{ employee.last_name }}</div>
             <div class="col-md-6"><strong>Email:</strong> {{ employee.email }}</div>
+            <div class="col-md-6"><strong>Department:</strong> {{ employee.department|default:"-" }}</div>
             <div class="col-md-6"><strong>Job Title:</strong> {{ employee.job_title|default:"-" }}</div>
             <div class="col-md-6"><strong>Legal Status:</strong> {{ employee.get_legal_status_display|default:"-" }}</div>
             <div class="col-md-6"><strong>Gender:</strong> {{ employee.get_gender_display|default:"-" }}</div>
@@ -42,6 +43,7 @@
         <h2 class="section-heading">Payment & Bank</h2>
         <div class="row g-3">
             <div class="col-md-6"><strong>Payment Method:</strong> {{ employee.get_payment_method_display|default:"-" }}</div>
+            <div class="col-md-6"><strong>Base Salary:</strong> SGD {{ employee.base_salary }}</div>
             <div class="col-md-6"><strong>Bank:</strong> {{ employee.bank_name|default:"-" }}</div>
             <div class="col-md-6"><strong>Bank Account Number:</strong> {{ employee.bank_account_number|default:"-" }}</div>
             <div class="col-md-6"><strong>Bank Branch Code:</strong> {{ employee.bank_branch_code|default:"-" }}</div>

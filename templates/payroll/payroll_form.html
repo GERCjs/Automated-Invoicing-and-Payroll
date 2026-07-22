@@ -23,11 +23,17 @@
             {% endif %}
             <div class="row g-3">
                 <div class="col-md-6">
-                    <label class="form-label">Employee ID</label>
+                    <label class="form-label">Employee</label>
                     {{ form.employee_id }}
                     {% for error in form.employee_id.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                    <div class="form-text">Select an employee to load the saved payroll setup defaults.</div>
                 </div>
                 <div class="col-md-6"><label class="form-label">Employee Name</label>{{ form.employee_name }}</div>
+                <div class="col-md-3">
+                    <label class="form-label">Department</label>
+                    <input type="text" class="form-control" id="employee-department-display" value="" readonly tabindex="-1">
+                    <div class="form-text">Shown from the employee profile for quick reference.</div>
+                </div>
                 <div class="col-md-3"><label class="form-label">Basic Salary</label>{{ form.basic_salary }}</div>
                 <div class="col-md-3"><label class="form-label">Physical Products Commission</label>{{ form.physical_products_commission }}</div>
                 <div class="col-md-3"><label class="form-label">Credit Commission</label>{{ form.credit_commission }}</div>
@@ -67,6 +73,7 @@
 (() => {
     const employeeIdInput = document.getElementById("id_employee_id");
     const employeeNameInput = document.getElementById("id_employee_name");
+    const departmentDisplayInput = document.getElementById("employee-department-display");
     const basicSalaryInput = document.getElementById("id_basic_salary");
     const physicalProductsInput = document.getElementById("id_physical_products_commission");
     const creditCommissionInput = document.getElementById("id_credit_commission");
@@ -81,6 +88,7 @@
 
     let debounceTimer = null;
     let lookupDebounceTimer = null;
+    let previousEmployeeId = (employeeIdInput.value || "").trim();
     const previewUrl = "{% url 'payroll-cpf-preview' %}";
     const lookupUrl = "{% url 'payroll-employee-lookup' %}";
 
@@ -89,6 +97,7 @@
         const employeeId = (employeeIdInput.value || "").trim();
         if (!employeeId) {
             employeeNameInput.value = "";
+            if (departmentDisplayInput) departmentDisplayInput.value = "";
             return;
         }
         const params = new URLSearchParams({ employee_id: employeeId });
@@ -97,8 +106,15 @@
             .then((data) => {
                 if (data && data.ok && data.employee_name !== undefined) {
                     employeeNameInput.value = data.employee_name;
+                    if (departmentDisplayInput) departmentDisplayInput.value = data.department || "";
+                    const employeeChanged = employeeId !== previousEmployeeId;
+                    if ((!basicSalaryInput.value || employeeChanged) && data.basic_salary !== undefined) {
+                        basicSalaryInput.value = data.basic_salary;
+                    }
+                    previousEmployeeId = employeeId;
                 } else if (data && data.reason === "employee_not_found") {
                     employeeNameInput.value = "";
+                    if (departmentDisplayInput) departmentDisplayInput.value = "";
                 }
             })
             .catch(() => {});

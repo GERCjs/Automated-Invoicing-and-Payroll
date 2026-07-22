@@ -1163,8 +1163,31 @@ class PayrollDuplicatePreventionTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<select name="employee_id"', html=False)
-        self.assertContains(response, "Select an employee ID")
+        self.assertContains(response, "Select an employee")
         self.assertContains(response, f"{self.employee.employee_code} - Alex Tan")
+
+    def test_employee_lookup_returns_saved_payroll_setup_defaults(self):
+        self.employee.department = "Finance"
+        self.employee.base_salary = Decimal("3456.78")
+        self.employee.save(update_fields=["department", "base_salary", "updated_at"])
+        self.client.force_login(get_user_model().objects.get(username="payroll_hr"))
+
+        response = self.client.get(
+            reverse("payroll-employee-lookup"),
+            {"employee_id": self.employee.employee_code},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "ok": True,
+                "employee_name": "Alex Tan",
+                "basic_salary": "3456.78",
+                "department": "Finance",
+                "reason": "found",
+            },
+        )
 
     def test_staff_and_customer_cannot_use_manual_payroll_creation_or_upload_confirmation(self):
         for username, role in [
@@ -1178,6 +1201,53 @@ class PayrollDuplicatePreventionTests(TestCase):
                 self.assertEqual(create_response.status_code, 403)
                 self.assertEqual(upload_response.status_code, 403)
                 self.client.logout()
+
+
+class EmployeeDepartmentWorkflowTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.hr_user = user_model.objects.create_user(username="employee_filter_hr", password="pass12345")
+        UserRole.objects.filter(user=self.hr_user).update(role=HR)
+        self.client.force_login(self.hr_user)
+        self.finance_employee = Employee.objects.create(
+            employee_code="STF-300001",
+            first_name="Fiona",
+            last_name="Ng",
+            email="fiona.ng@example.com",
+            date_of_birth=date(1991, 4, 2),
+            date_of_appointment=date(2025, 1, 1),
+            hire_date=date(2025, 1, 1),
+            department="Finance",
+            base_salary=3000,
+        )
+        self.it_employee = Employee.objects.create(
+            employee_code="STF-300002",
+            first_name="Ivan",
+            last_name="Lee",
+            email="ivan.lee@example.com",
+            date_of_birth=date(1993, 6, 14),
+            date_of_appointment=date(2025, 2, 1),
+            hire_date=date(2025, 2, 1),
+            department="IT",
+            base_salary=3200,
+        )
+
+    def test_employee_create_form_shows_department_and_base_salary_fields(self):
+        response = self.client.get(reverse("employee-create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="department"', html=False)
+        self.assertContains(response, ">Finance<", html=False)
+        self.assertContains(response, 'name="base_salary"', html=False)
+        self.assertContains(response, "default salary used when creating monthly payroll records")
+
+    def test_employee_list_can_filter_by_department(self):
+        response = self.client.get(reverse("employee-list"), {"department": "Finance"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.finance_employee.employee_code)
+        self.assertNotContains(response, self.it_employee.employee_code)
+        self.assertContains(response, "Department: Finance")
 
 
 class PayslipPdfAccessTests(TestCase):

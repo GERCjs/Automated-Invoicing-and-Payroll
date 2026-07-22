@@ -8,6 +8,16 @@ from PIL import UnidentifiedImageError
 
 from .models import Employee, PayrollRecord, PayrollTemplateSettings
 
+EMPLOYEE_DEPARTMENT_CHOICES = [
+    ("", "Select Department"),
+    ("IT", "IT"),
+    ("Finance", "Finance"),
+    ("Logistics", "Logistics"),
+    ("HR", "HR"),
+    ("Sales", "Sales"),
+    ("Operations", "Operations"),
+]
+
 
 def _format_file_size_limit(max_bytes: int) -> str:
     if max_bytes >= 1024 * 1024:
@@ -39,7 +49,7 @@ class EmployeeUploadForm(forms.Form):
 
 class PayrollRecordForm(forms.ModelForm):
     DUPLICATE_ERROR = "A payroll record already exists for this employee and payment date."
-    EMPLOYEE_PLACEHOLDER = [("", "Select an employee ID")]
+    EMPLOYEE_PLACEHOLDER = [("", "Select an employee")]
 
     employee_id = forms.ChoiceField(
         choices=EMPLOYEE_PLACEHOLDER,
@@ -202,6 +212,7 @@ SINGAPORE_BANK_CHOICES = [
 
 class EmployeeForm(forms.ModelForm):
     bank_name = forms.ChoiceField(choices=SINGAPORE_BANK_CHOICES, required=False)
+    department = forms.ChoiceField(choices=EMPLOYEE_DEPARTMENT_CHOICES, required=False)
     date_of_birth = forms.DateField(
         required=False,
         input_formats=["%d-%m-%Y"],
@@ -226,11 +237,13 @@ class EmployeeForm(forms.ModelForm):
             "gender",
             "race",
             "religion",
+            "department",
             "sdl_exempt",
             "cpf_exempt",
             "job_title",
             "email",
             "payment_method",
+            "base_salary",
             "status",
             "bank_name",
             "bank_account_number",
@@ -245,11 +258,13 @@ class EmployeeForm(forms.ModelForm):
             "gender": forms.Select(attrs={"class": "form-select"}),
             "race": forms.TextInput(attrs={"class": "form-control"}),
             "religion": forms.TextInput(attrs={"class": "form-control"}),
+            "department": forms.Select(attrs={"class": "form-select"}),
             "sdl_exempt": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "cpf_exempt": forms.CheckboxInput(attrs={"class": "form-check-input"}),
             "job_title": forms.TextInput(attrs={"class": "form-control"}),
             "email": forms.EmailInput(attrs={"class": "form-control"}),
             "payment_method": forms.Select(attrs={"class": "form-select"}),
+            "base_salary": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
             "status": forms.Select(attrs={"class": "form-select"}),
             "bank_account_number": forms.TextInput(attrs={"class": "form-control"}),
             "bank_branch_code": forms.TextInput(attrs={"class": "form-control"}),
@@ -260,6 +275,15 @@ class EmployeeForm(forms.ModelForm):
         self._linked_user = getattr(self.instance, "user", None)
         self.fields["date_of_appointment"].required = True
         self.fields["bank_name"].widget.attrs["class"] = "form-select"
+        self.fields["department"].widget.attrs["class"] = "form-select"
+        current_department = (getattr(self.instance, "department", "") or "").strip()
+        if current_department and current_department not in {
+            value for value, _label in EMPLOYEE_DEPARTMENT_CHOICES if value
+        }:
+            self.fields["department"].choices = [
+                *EMPLOYEE_DEPARTMENT_CHOICES,
+                (current_department, current_department),
+            ]
         if self.instance and self.instance.pk:
             if self.instance.date_of_birth:
                 self.initial["date_of_birth"] = self.instance.date_of_birth.strftime("%d-%m-%Y")
