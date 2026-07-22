@@ -103,12 +103,6 @@
                     {{ form.job_title }}
                     {% for error in form.job_title.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label">Base Salary</label>
-                    {{ form.base_salary }}
-                    {% for error in form.base_salary.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
-                    <div class="form-text">This becomes the default salary used when creating monthly payroll records.</div>
-                </div>
                 <div class="col-md-4">
                     <label class="form-label">Payment Method</label>
                     {{ form.payment_method }}

@@ -1,10 +1,10 @@
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
 from datetime import date, datetime
-from pathlib import Path
 import re
 
 from openpyxl import Workbook
+from openpyxl.worksheet.datavalidation import DataValidation
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -43,6 +43,7 @@ from .services import (
     PAYROLL_UPLOAD_COLUMN_LABELS,
     TEMPLATE_HEADERS,
     cpf_for_2026,
+    default_template_row,
     parse_and_validate_payroll_excel,
 )
 
@@ -267,11 +268,13 @@ def payroll_employee_lookup(request):
         )
 
     employee_name = f"{employee.first_name} {employee.last_name}".strip()
+    payroll_setup = PayrollSetup.objects.filter(employee=employee, is_active=True).first()
+    salary_source = payroll_setup.basic_salary if payroll_setup is not None else employee.base_salary
     return JsonResponse(
         {
             "ok": True,
             "employee_name": employee_name,
-            "basic_salary": f"{employee.base_salary:.2f}",
+            "basic_salary": f"{salary_source:.2f}",
             "department": employee.department or "",
             "reason": "found",
         }
@@ -1082,6 +1085,21 @@ def payroll_upload_preview(request):
             if not preview_rows and not invalid_rows:
                 messages.warning(request, "No data rows were found in the uploaded file.")
             else:
+                if preview_rows and invalid_rows:
+                    messages.warning(
+                        request,
+                        f"Payroll upload preview ready. {valid_count} valid row(s) and {invalid_count} invalid row(s) found.",
+                    )
+                elif preview_rows:
+                    messages.success(
+                        request,
+                        f"Payroll upload preview ready. {valid_count} valid row(s) found.",
+                    )
+                else:
+                    messages.warning(
+                        request,
+                        f"Payroll upload preview found {invalid_count} invalid row(s). Review the errors below.",
+                    )
                 request.session["payroll_upload_preview"] = {
                     "payment_date": form.cleaned_data["payment_date"].isoformat(),
                     "rows": [_serialize_preview_row(r) for r in preview_rows],
@@ -1334,9 +1352,17 @@ def payroll_upload_confirm_save(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_template_download(request):
-    template_path = Path(__file__).resolve().parent / "payroll_upload_template.xlsx"
-    response = FileResponse(
-        template_path.open("rb"),
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Payroll Template"
+    worksheet.append([PAYROLL_UPLOAD_COLUMN_LABELS[header] for header in TEMPLATE_HEADERS])
+    worksheet.append(default_template_row())
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    response = HttpResponse(
+        output.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     response["Content-Disposition"] = 'attachment; filename="payroll_upload_template.xlsx"'
@@ -1509,6 +1535,7 @@ def _serialize_employee_preview_row(row):
         "gender": row["gender"],
         "race": row["race"],
         "religion": row["religion"],
+        "department": row["department"],
         "sdl_exempt": row["sdl_exempt"],
         "cpf_exempt": row["cpf_exempt"],
         "job_title": row["job_title"],
@@ -1577,6 +1604,7 @@ def employee_upload_preview(request):
                 "gender",
                 "race",
                 "religion",
+                "department",
                 "sdl_exempt",
                 "cpf_exempt",
                 "job_title",
@@ -1619,6 +1647,28 @@ def employee_upload_preview(request):
                     row_errors.append("Email is required.")
                 elif "@" not in parsed_row["email"] or "." not in parsed_row["email"].split("@")[-1]:
                     row_errors.append("Email must be a valid email address.")
+                if not parsed_row["nric"]:
+                    row_errors.append("NRIC is required.")
+                if not parsed_row["legal_status"]:
+                    row_errors.append("Legal status is required.")
+                if not parsed_row["gender"]:
+                    row_errors.append("Gender is required.")
+                if not parsed_row["race"]:
+                    row_errors.append("Race is required.")
+                if not parsed_row["religion"]:
+                    row_errors.append("Religion is required.")
+                if not parsed_row["department"]:
+                    row_errors.append("Department is required.")
+                if not parsed_row["job_title"]:
+                    row_errors.append("Job title is required.")
+                if not parsed_row["payment_method"]:
+                    row_errors.append("Payment method is required.")
+                if not parsed_row["bank_name"]:
+                    row_errors.append("Bank name is required.")
+                if not parsed_row["bank_account_number"]:
+                    row_errors.append("Bank account number is required.")
+                if not parsed_row["bank_branch_code"]:
+                    row_errors.append("Bank branch code is required.")
 
                 for date_field in ("date_of_birth", "date_of_appointment"):
                     raw_value = parsed_row[date_field]
@@ -1788,6 +1838,7 @@ def employee_upload_confirm_save(request):
                 gender=parsed["gender"],
                 race=parsed["race"],
                 religion=parsed["religion"],
+                department=parsed["department"],
                 sdl_exempt=parsed["sdl_exempt"],
                 cpf_exempt=parsed["cpf_exempt"],
                 job_title=parsed["job_title"],
@@ -1824,6 +1875,7 @@ def employee_template_download(request):
     workbook = Workbook()
     worksheet = workbook.active
     worksheet.title = "Employee Template"
+    reference_sheet = workbook.create_sheet(title="Reference Lists")
     headers = [
         "employee_code",
         "nric",
@@ -1835,6 +1887,7 @@ def employee_template_download(request):
         "gender",
         "race",
         "religion",
+        "department",
         "sdl_exempt",
         "cpf_exempt",
         "job_title",
@@ -1857,6 +1910,7 @@ def employee_template_download(request):
             "male",
             "Chinese",
             "Buddhist",
+            "IT",
             "FALSE",
             "FALSE",
             "Therapist",
@@ -1870,6 +1924,40 @@ def employee_template_download(request):
     # Keep date columns explicitly in DD-MM-YYYY format.
     worksheet["E2"].number_format = "DD-MM-YYYY"
     worksheet["F2"].number_format = "DD-MM-YYYY"
+
+    reference_lists = {
+        "A": [choice[0] for choice in Employee.LEGAL_STATUS_CHOICES if choice[0]],
+        "B": [choice[0] for choice in Employee.GENDER_CHOICES if choice[0]],
+        "C": [choice[0] for choice in EMPLOYEE_DEPARTMENT_CHOICES if choice[0]],
+        "D": [choice[0] for choice in Employee.PAYMENT_METHOD_CHOICES if choice[0]],
+        "E": [choice[0] for choice in EmployeeForm.base_fields["bank_name"].choices if choice[0]],
+        "F": ["TRUE", "FALSE"],
+    }
+    for column_letter, values in reference_lists.items():
+        for index, value in enumerate(values, start=1):
+            reference_sheet[f"{column_letter}{index}"] = value
+
+    dropdown_map = {
+        "G": "Reference Lists!$A$1:$A$5",   # legal_status
+        "H": "Reference Lists!$B$1:$B$2",   # gender
+        "K": "Reference Lists!$C$1:$C$6",   # department
+        "L": "Reference Lists!$F$1:$F$2",   # sdl_exempt
+        "M": "Reference Lists!$F$1:$F$2",   # cpf_exempt
+        "P": "Reference Lists!$D$1:$D$3",   # payment_method
+        "Q": "Reference Lists!$E$1:$E$20",  # bank_name
+    }
+    for column_letter, formula_range in dropdown_map.items():
+        validation = DataValidation(
+            type="list",
+            formula1=f"='{formula_range.split('!')[0]}'!{formula_range.split('!')[1]}",
+            allow_blank=False,
+        )
+        validation.prompt = "Select a value from the dropdown list."
+        validation.error = "Choose one of the allowed values from the dropdown."
+        worksheet.add_data_validation(validation)
+        validation.add(f"{column_letter}2:{column_letter}200")
+
+    reference_sheet.sheet_state = "hidden"
 
     output = BytesIO()
     workbook.save(output)
@@ -1886,7 +1974,15 @@ def employee_template_download(request):
 @role_required(SUPERADMIN, ADMIN, HR)
 def employee_detail(request, pk):
     employee = get_object_or_404(Employee, pk=pk)
-    return render(request, "payroll/employee_detail.html", {"employee": employee})
+    payroll_setup = PayrollSetup.objects.filter(employee=employee, is_active=True).first()
+    return render(
+        request,
+        "payroll/employee_detail.html",
+        {
+            "employee": employee,
+            "payroll_setup": payroll_setup,
+        },
+    )
 
 
 @login_required

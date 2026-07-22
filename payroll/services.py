@@ -15,8 +15,6 @@ TEMPLATE_HEADERS = [
     "employee_code",
     "employee_name",
     "employee_birthofdate",
-    "working_days",
-    "no_pay_leave_days",
     "basic_salary",
     "physical_products_commission",
     "credit_commission",
@@ -30,8 +28,6 @@ PAYROLL_UPLOAD_COLUMN_LABELS = {
     "employee_code": "Employee Code",
     "employee_name": "Employee Name",
     "employee_birthofdate": "Employee Birthofdate",
-    "working_days": "Working Days",
-    "no_pay_leave_days": "No Pay Leave Days",
     "basic_salary": "Basic Salary",
     "physical_products_commission": "Physical Products Commission",
     "credit_commission": "Credit Commission",
@@ -164,18 +160,6 @@ def parse_payroll_excel(uploaded_file, payment_date: date) -> list[dict[str, Any
             if age < 0:
                 row_errors.append("Employee birthofdate cannot be after payment date.")
 
-        working_days = _parse_decimal_field(
-            row[index_map["working_days"]],
-            "Working days",
-            row_errors,
-            default="0",
-        )
-        no_pay_leave_days = _parse_decimal_field(
-            row[index_map["no_pay_leave_days"]],
-            "No pay leave days",
-            row_errors,
-            default="0",
-        )
         basic_salary = _parse_decimal_field(row[index_map["basic_salary"]], "Basic salary", row_errors)
         physical_products_commission = _parse_decimal_field(
             row[index_map["physical_products_commission"]],
@@ -226,8 +210,6 @@ def parse_payroll_excel(uploaded_file, payment_date: date) -> list[dict[str, Any
                 "employee_code": employee_code,
                 "employee_name": employee_name,
                 "employee_birthofdate": employee_birthofdate.strftime("%d-%m-%Y"),
-                "working_days": working_days,
-                "no_pay_leave_days": no_pay_leave_days,
                 "basic_salary": money(basic_salary),
                 "physical_products_commission": money(physical_products_commission),
                 "credit_commission": money(credit_commission),
@@ -271,18 +253,6 @@ def parse_and_validate_payroll_excel(uploaded_file, payment_date: date) -> dict[
             reasons.append("Employee name is required.")
         if row.get("basic_salary") is not None and row.get("basic_salary", Decimal("0")) < 0:
             reasons.append("Basic salary cannot be negative.")
-        if row.get("working_days") is not None and row.get("working_days", Decimal("0")) < 0:
-            reasons.append("Working days cannot be negative.")
-        if row.get("no_pay_leave_days") is not None and row.get("no_pay_leave_days", Decimal("0")) < 0:
-            reasons.append("No pay leave days cannot be negative.")
-        if (
-            row.get("working_days") is not None
-            and row.get("no_pay_leave_days") is not None
-            and row.get("working_days", Decimal("0")) >= 0
-            and row.get("no_pay_leave_days", Decimal("0")) >= 0
-            and row.get("no_pay_leave_days", Decimal("0")) > row.get("working_days", Decimal("0"))
-        ):
-            reasons.append("No pay leave days cannot be more than working days.")
         if row.get("physical_products_commission") is not None and row.get("physical_products_commission", Decimal("0")) < 0:
             reasons.append("Physical products commission cannot be negative.")
         if row.get("credit_commission") is not None and row.get("credit_commission", Decimal("0")) < 0:
@@ -321,8 +291,6 @@ def default_template_row() -> list[Any]:
         "STF-000001",
         "Alex Tan",
         "01-01-1990",
-        27,
-        0,
         3000,
         15.9,
         325,

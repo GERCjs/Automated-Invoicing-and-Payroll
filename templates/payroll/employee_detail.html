@@ -43,7 +43,7 @@
         <h2 class="section-heading">Payment & Bank</h2>
         <div class="row g-3">
             <div class="col-md-6"><strong>Payment Method:</strong> {{ employee.get_payment_method_display|default:"-" }}</div>
-            <div class="col-md-6"><strong>Base Salary:</strong> SGD {{ employee.base_salary }}</div>
+            <div class="col-md-6"><strong>Payroll Setup Salary:</strong> {% if payroll_setup %}SGD {{ payroll_setup.basic_salary }}{% else %}-{% endif %}</div>
             <div class="col-md-6"><strong>Bank:</strong> {{ employee.bank_name|default:"-" }}</div>
             <div class="col-md-6"><strong>Bank Account Number:</strong> {{ employee.bank_account_number|default:"-" }}</div>
             <div class="col-md-6"><strong>Bank Branch Code:</strong> {{ employee.bank_branch_code|default:"-" }}</div>

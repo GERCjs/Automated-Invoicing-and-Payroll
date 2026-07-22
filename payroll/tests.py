@@ -170,8 +170,6 @@ class PayrollUploadPreviewTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -181,7 +179,7 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Test"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 3000, 15.9, 325, 700, 139.45, 0, "Test"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -199,8 +197,6 @@ class PayrollUploadPreviewTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -210,8 +206,8 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Row 1"])
-        sheet.append(["STF-000002", "Jamie Lim", "01-01-1995", 26, 0, 3200, 50, 120, 450, 100, 20, "Row 2"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 3000, 15.9, 325, 700, 139.45, 0, "Row 1"])
+        sheet.append(["STF-000002", "Jamie Lim", "01-01-1995", 3200, 50, 120, 450, 100, 20, "Row 2"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -229,8 +225,6 @@ class PayrollUploadPreviewTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -240,7 +234,7 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -258,8 +252,6 @@ class PayrollUploadPreviewTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -269,8 +261,8 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 10, 20, 30, 5, 0, "Row 1"])
-        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 10, 20, 30, 5, 0, "Row 2"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 3000, 10, 20, 30, 5, 0, "Row 1"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 3000, 10, 20, 30, 5, 0, "Row 2"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -288,8 +280,6 @@ class PayrollUploadPreviewTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -299,7 +289,7 @@ class PayrollUploadPreviewTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000001", "Wrong Name", "02-02-1990", 27, 0, 3000, 10, 20, 30, 5, 0, "Mismatch"])
+        sheet.append(["STF-000001", "Wrong Name", "02-02-1990", 3000, 10, 20, 30, 5, 0, "Mismatch"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -527,8 +517,6 @@ class PayrollInvalidRowDownloadTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -538,7 +526,7 @@ class PayrollInvalidRowDownloadTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Valid"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 3000, 15.9, 325, 700, 139.45, 0, "Valid"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -556,8 +544,6 @@ class PayrollInvalidRowDownloadTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -567,7 +553,7 @@ class PayrollInvalidRowDownloadTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
+        sheet.append(["STF-000001", "Alex Tan", "01-01-1990", "abc", 15.9, 325, 700, 139.45, 0, "Bad salary"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -585,8 +571,6 @@ class PayrollInvalidRowDownloadTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -596,7 +580,7 @@ class PayrollInvalidRowDownloadTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["", "", "01-01-1990", 27, 0, "abc", 15.9, 325, 700, 139.45, 0, "Bad row"])
+        sheet.append(["", "", "01-01-1990", "abc", 15.9, 325, 700, 139.45, 0, "Bad row"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -803,6 +787,7 @@ class EmployeeUploadPreviewValidationTests(TestCase):
                 "gender",
                 "race",
                 "religion",
+                "department",
                 "sdl_exempt",
                 "cpf_exempt",
                 "job_title",
@@ -839,6 +824,7 @@ class EmployeeUploadPreviewValidationTests(TestCase):
                     "male",
                     "Chinese",
                     "Buddhist",
+                    "IT",
                     "FALSE",
                     "FALSE",
                     "Therapist",
@@ -859,6 +845,7 @@ class EmployeeUploadPreviewValidationTests(TestCase):
                     "female",
                     "Chinese",
                     "Christian",
+                    "Finance",
                     "FALSE",
                     "FALSE",
                     "Manager",
@@ -892,6 +879,7 @@ class EmployeeUploadPreviewValidationTests(TestCase):
                     "female",
                     "Chinese",
                     "Buddhist",
+                    "HR",
                     "FALSE",
                     "FALSE",
                     "Therapist",
@@ -988,8 +976,6 @@ class PayrollDuplicatePreventionTests(TestCase):
                 "employee_code",
                 "employee_name",
                 "employee_birthofdate",
-                "working_days",
-                "no_pay_leave_days",
                 "basic_salary",
                 "physical_products_commission",
                 "credit_commission",
@@ -999,8 +985,8 @@ class PayrollDuplicatePreventionTests(TestCase):
                 "notes",
             ]
         )
-        sheet.append(["STF-000010", "Alex Tan", "01-01-1990", 27, 0, 3000, 15.9, 325, 700, 139.45, 0, "Row 1"])
-        sheet.append(["STF-000011", "Jamie Lim", "02-02-1992", 26, 0, 3200, 50, 120, 450, 100, 20, "Row 2"])
+        sheet.append(["STF-000010", "Alex Tan", "01-01-1990", 3000, 15.9, 325, 700, 139.45, 0, "Row 1"])
+        sheet.append(["STF-000011", "Jamie Lim", "02-02-1992", 3200, 50, 120, 450, 100, 20, "Row 2"])
         output = BytesIO()
         workbook.save(output)
         output.seek(0)
@@ -1358,14 +1344,14 @@ class EmployeeDepartmentWorkflowTests(TestCase):
             base_salary=3200,
         )
 
-    def test_employee_create_form_shows_department_and_base_salary_fields(self):
+    def test_employee_create_form_shows_department_field_and_hides_base_salary_field(self):
         response = self.client.get(reverse("employee-create"))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="department"', html=False)
         self.assertContains(response, ">Finance<", html=False)
-        self.assertContains(response, 'name="base_salary"', html=False)
-        self.assertContains(response, "default salary used when creating monthly payroll records")
+        self.assertNotContains(response, 'name="base_salary"', html=False)
+        self.assertNotContains(response, "default salary used when creating monthly payroll records")
 
     def test_employee_list_can_filter_by_department(self):
         response = self.client.get(reverse("employee-list"), {"department": "Finance"})
@@ -1397,7 +1383,6 @@ class EmployeeDepartmentWorkflowTests(TestCase):
             "religion",
             "department",
             "job_title",
-            "base_salary",
             "payment_method",
             "bank_name",
             "bank_account_number",
@@ -1427,7 +1412,6 @@ class EmployeeDepartmentWorkflowTests(TestCase):
             "religion",
             "department",
             "job_title",
-            "base_salary",
             "payment_method",
             "bank_name",
             "bank_account_number",

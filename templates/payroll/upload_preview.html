@@ -6,7 +6,7 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Payroll Excel Upload</h1>
-        <p class="page-subtitle">Preview payslip calculations, net pay, and CPF contributions before saving. Employee code must be in STF-000000 format.</p>
+        <p class="page-subtitle">Preview payslip calculations, net pay, and CPF contributions before saving. Bulk import follows the same salary fields as single payroll creation. Employee code must be in STF-000000 format.</p>
     </div>
 </div>
 
@@ -62,9 +62,6 @@
         <span class="text-muted">Employee: {{ row.employee_name }}</span>
     </div>
     <div class="card-body p-0">
-        <div class="p-3 border-bottom">
-            <div><strong>Working days:</strong> {{ row.working_days }} | <strong>No pay leave:</strong> {{ row.no_pay_leave_days }}</div>
-        </div>
         <div class="table-responsive">
             <table class="table table-clean mb-0 align-middle">
                 <thead>

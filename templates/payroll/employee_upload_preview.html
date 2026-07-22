@@ -55,6 +55,7 @@
                     <th>Employee Code</th>
                     <th>Name</th>
                     <th>Email</th>
+                    <th>Department</th>
                     <th>Appointment Date</th>
                     <th>Job Title</th>
                 </tr>
@@ -66,6 +67,7 @@
                     <td>{{ row.employee_code }}</td>
                     <td>{{ row.first_name }} {{ row.last_name }}</td>
                     <td>{{ row.email }}</td>
+                    <td>{{ row.department }}</td>
                     <td>{{ row.date_of_appointment }}</td>
                     <td>{{ row.job_title|default:"-" }}</td>
                 </tr>
