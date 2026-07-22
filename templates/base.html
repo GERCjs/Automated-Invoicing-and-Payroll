@@ -19,7 +19,7 @@
         .auth-page { background: #f6f6f6 !important; }
         a, a:visited { text-decoration: none !important; }
     </style>
-    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260719b">
+    <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260722a">
 </head>
 <body class="portal-body d-flex flex-column min-vh-100">
 <div class="portal-shell d-flex flex-column flex-grow-1">
@@ -91,11 +91,12 @@
 
                 {% if current_user_role == "superadmin" or current_user_role == "admin" or current_user_role == "hr" %}
                 <div class="dropdown">
-                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'payroll-list' or current_url_name == 'payroll-dashboard' or current_url_name == 'employee-dashboard' or current_url_name == 'payroll-create' or current_url_name == 'payroll-detail' or current_url_name == 'payroll-edit' or current_url_name == 'payroll-delete' or current_url_name == 'payroll-upload-preview' or current_url_name == 'payroll-template-settings' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                    <button class="portal-nav-link dropdown-toggle{% if current_url_name == 'payroll-list' or current_url_name == 'payroll-dashboard' or current_url_name == 'employee-dashboard' or current_url_name == 'payroll-create' or current_url_name == 'payroll-detail' or current_url_name == 'payroll-edit' or current_url_name == 'payroll-delete' or current_url_name == 'payroll-upload-preview' or current_url_name == 'payroll-template-settings' or current_url_name == 'payroll-setup-list' or current_url_name == 'payroll-setup-create' or current_url_name == 'payroll-setup-edit' %} is-active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                         Payroll
                     </button>
                     <ul class="dropdown-menu">
                         <li><a href="{% url 'payroll-dashboard' %}" class="dropdown-item">Payroll Officer Dashboard</a></li>
+                        <li><a href="{% url 'payroll-setup-list' %}" class="dropdown-item">View Payroll Setup</a></li>
                         <li><a href="{% url 'payroll-list' %}" class="dropdown-item">View Payroll List</a></li>
                         <li><a href="{% url 'payroll-create' %}" class="dropdown-item">Create Payroll Record</a></li>
                         <li><a href="{% url 'payroll-upload-preview' %}" class="dropdown-item">Bulk Add Payroll Record</a></li>

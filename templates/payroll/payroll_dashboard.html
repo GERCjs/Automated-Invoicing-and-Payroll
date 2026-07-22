@@ -23,6 +23,7 @@
                 </div>
                 <div class="payroll-dashboard-action-group">
                     <a href="{% url 'payroll-create' %}" class="btn btn-primary">Create Payslip Record</a>
+                    <a href="{% url 'payroll-setup-list' %}" class="btn btn-outline-dark">View Payroll Setups</a>
                     <a href="{% url 'payroll-upload-preview' %}" class="btn btn-outline-primary">Bulk Add Payslips</a>
                     <a href="{% url 'payroll-list' %}{{ payroll_list_query }}" class="btn btn-outline-dark">View Payroll List</a>
                     <a href="{% url 'payroll-report' %}{{ payroll_report_query }}" class="btn btn-outline-secondary">Payroll / Payslip Report</a>
@@ -174,25 +175,21 @@
         <div class="row g-3 report-kpi-grid mb-4">
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-success h-100">
-                    <div class="card-body">
+                    <div class="card-body d-flex flex-column h-100">
                         <div class="report-kpi-label">Active Employees</div>
                         <div class="report-kpi-value">{{ active_employee_count }}</div>
                         <div class="small text-muted">Employees currently marked active and available for payroll processing.</div>
-                        <div class="d-flex justify-content-start mt-3">
-                            <a href="{% url 'employee-list' %}?status=active" class="report-link">View list</a>
-                        </div>
+                        <a href="{% url 'employee-list' %}?status=active" class="report-kpi-link mt-auto">View list</a>
                     </div>
                 </div>
             </div>
             <div class="col-12 col-md-6 col-xl-3">
                 <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
-                    <div class="card-body">
+                    <div class="card-body d-flex flex-column h-100">
                         <div class="report-kpi-label">Inactive Employees</div>
                         <div class="report-kpi-value">{{ employee_status_values.1 }}</div>
                         <div class="small text-muted">Employees currently marked inactive and excluded from active payroll processing.</div>
-                        <div class="d-flex justify-content-start mt-3">
-                            <a href="{% url 'employee-list' %}?status=inactive" class="report-link">View list</a>
-                        </div>
+                        <a href="{% url 'employee-list' %}?status=inactive" class="report-kpi-link mt-auto">View list</a>
                     </div>
                 </div>
             </div>

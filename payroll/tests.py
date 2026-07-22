@@ -16,7 +16,7 @@ from accounts.models import UserRole
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from core.models import AuditLog
 from notifications.models import EmailDeliveryLog
-from payroll.models import Employee, PayrollRecord
+from payroll.models import Employee, PayrollRecord, PayrollSetup
 
 
 class PayrollTestEnvironmentTests(TestCase):
@@ -1168,6 +1168,7 @@ class PayrollDuplicatePreventionTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<select name="employee_id"', html=False)
+        self.assertContains(response, 'name="payment_date"', html=False)
         self.assertContains(response, "Select an employee")
         self.assertContains(response, f"{self.employee.employee_code} - Alex Tan")
 
@@ -1206,6 +1207,126 @@ class PayrollDuplicatePreventionTests(TestCase):
                 self.assertEqual(create_response.status_code, 403)
                 self.assertEqual(upload_response.status_code, 403)
                 self.client.logout()
+
+
+class PayrollSetupAutomationTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.hr_user = user_model.objects.create_user(username="payroll_setup_hr", password="pass12345")
+        UserRole.objects.filter(user=self.hr_user).update(role=HR)
+        self.employee = Employee.objects.create(
+            employee_code="STF-400001",
+            first_name="Ariana",
+            last_name="Low",
+            email="ariana.low@example.com",
+            date_of_birth=date(1990, 3, 15),
+            hire_date=date(2025, 1, 1),
+            status=Employee.STATUS_ACTIVE,
+            base_salary=4200,
+        )
+        self.employee_without_dob = Employee.objects.create(
+            employee_code="STF-400002",
+            first_name="Brandon",
+            last_name="Ng",
+            email="brandon.ng@example.com",
+            hire_date=date(2025, 1, 1),
+            status=Employee.STATUS_ACTIVE,
+            base_salary=3900,
+        )
+
+    def test_hr_can_create_payroll_setup(self):
+        self.client.force_login(self.hr_user)
+
+        response = self.client.post(
+            reverse("payroll-setup-create"),
+            {
+                "employee": self.employee.pk,
+                "basic_salary": "4200.00",
+                "physical_products_commission": "100.00",
+                "credit_commission": "50.00",
+                "services_commission": "75.00",
+                "loan_deduction": "20.00",
+                "other_deductions": "10.00",
+                "payment_date_type": PayrollSetup.PAYMENT_DATE_LAST_DAY,
+                "is_active": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(PayrollSetup.objects.filter(employee=self.employee).exists())
+
+    def test_generate_monthly_creates_payroll_history_from_setups(self):
+        PayrollSetup.objects.create(
+            employee=self.employee,
+            basic_salary=Decimal("4200.00"),
+            physical_products_commission=Decimal("100.00"),
+            credit_commission=Decimal("50.00"),
+            services_commission=Decimal("75.00"),
+            loan_deduction=Decimal("20.00"),
+            other_deductions=Decimal("10.00"),
+            payment_date_type=PayrollSetup.PAYMENT_DATE_LAST_DAY,
+            created_by=self.hr_user,
+            updated_by=self.hr_user,
+        )
+        self.client.force_login(self.hr_user)
+
+        response = self.client.post(
+            reverse("payroll-generate-monthly"),
+            {"month": "2026-07"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            PayrollRecord.objects.filter(
+                employee_id=self.employee.employee_code,
+                payment_date=date(2026, 7, 31),
+            ).exists()
+        )
+
+    def test_generate_monthly_skips_duplicate_records_and_missing_dob(self):
+        PayrollSetup.objects.create(
+            employee=self.employee,
+            basic_salary=Decimal("4200.00"),
+            payment_date_type=PayrollSetup.PAYMENT_DATE_LAST_DAY,
+            created_by=self.hr_user,
+            updated_by=self.hr_user,
+        )
+        PayrollSetup.objects.create(
+            employee=self.employee_without_dob,
+            basic_salary=Decimal("3900.00"),
+            payment_date_type=PayrollSetup.PAYMENT_DATE_LAST_DAY,
+            created_by=self.hr_user,
+            updated_by=self.hr_user,
+        )
+        PayrollRecord.objects.create(
+            employee_name="Ariana Low",
+            employee_id=self.employee.employee_code,
+            basic_salary=4200,
+            allowances=0,
+            deductions=0,
+            cpf_contribution=840,
+            net_salary=3360,
+            payment_date=date(2026, 7, 31),
+        )
+        self.client.force_login(self.hr_user)
+
+        response = self.client.post(
+            reverse("payroll-generate-monthly"),
+            {"month": "2026-07"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            PayrollRecord.objects.filter(
+                employee_id=self.employee.employee_code,
+                payment_date=date(2026, 7, 31),
+            ).count(),
+            1,
+        )
+        self.assertContains(response, "Created 0, skipped 1 duplicate(s), 1 missing DOB")
 
 
 class EmployeeDepartmentWorkflowTests(TestCase):
@@ -1253,6 +1374,66 @@ class EmployeeDepartmentWorkflowTests(TestCase):
         self.assertContains(response, self.finance_employee.employee_code)
         self.assertNotContains(response, self.it_employee.employee_code)
         self.assertContains(response, "Department: Finance")
+
+    def test_employee_create_requires_all_visible_profile_fields(self):
+        response = self.client.post(
+            reverse("employee-create"),
+            {
+                "employee_code": "STF-300099",
+                "email": "missing.fields@example.com",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        for field_name in [
+            "nric",
+            "first_name",
+            "last_name",
+            "date_of_birth",
+            "date_of_appointment",
+            "legal_status",
+            "gender",
+            "race",
+            "religion",
+            "department",
+            "job_title",
+            "base_salary",
+            "payment_method",
+            "bank_name",
+            "bank_account_number",
+            "bank_branch_code",
+        ]:
+            self.assertIn(field_name, response.context["form"].errors)
+
+    def test_employee_edit_requires_all_visible_profile_fields(self):
+        response = self.client.post(
+            reverse("employee-edit", args=[self.finance_employee.pk]),
+            {
+                "employee_code": self.finance_employee.employee_code,
+                "email": self.finance_employee.email,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        for field_name in [
+            "nric",
+            "first_name",
+            "last_name",
+            "date_of_birth",
+            "date_of_appointment",
+            "legal_status",
+            "gender",
+            "race",
+            "religion",
+            "department",
+            "job_title",
+            "base_salary",
+            "payment_method",
+            "bank_name",
+            "bank_account_number",
+            "bank_branch_code",
+        ]:
+            self.assertIn(field_name, response.context["form"].errors)
 
 
 class PayslipPdfAccessTests(TestCase):

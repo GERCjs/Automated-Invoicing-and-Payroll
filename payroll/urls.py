@@ -5,7 +5,11 @@ from . import views
 urlpatterns = [
     path("", views.payroll_list, name="payroll-list"),
     path("dashboard/", views.payroll_dashboard, name="payroll-dashboard"),
+    path("dashboard/generate-monthly/", views.payroll_generate_monthly, name="payroll-generate-monthly"),
     path("template-settings/", views.payroll_template_settings, name="payroll-template-settings"),
+    path("setups/", views.payroll_setup_list, name="payroll-setup-list"),
+    path("setups/create/", views.payroll_setup_create, name="payroll-setup-create"),
+    path("setups/<int:pk>/edit/", views.payroll_setup_edit, name="payroll-setup-edit"),
     path("employees/dashboard/", views.employee_dashboard, name="employee-dashboard"),
     path("employees/", views.employee_list, name="employee-list"),
     path("employees/create/", views.employee_create, name="employee-create"),

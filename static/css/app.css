@@ -1007,12 +1007,30 @@ textarea.form-control:focus {
     min-height: 46px;
 }
 
-.employee-list-container {
-    max-width: 1520px;
+.employee-list-container,
+.payroll-list-container,
+.payroll-setup-list-container {
+    max-width: 1540px;
 }
 
-.employee-list-page .card-body {
+.payroll-list-page .card-body,
+.employee-list-page .card-body,
+.payroll-setup-list-page .card-body {
     padding: 1.25rem 1.35rem;
+}
+
+.payroll-list-page .table-clean thead th,
+.payroll-list-page .table-clean tbody td,
+.employee-list-page .table-clean thead th,
+.employee-list-page .table-clean tbody td,
+.payroll-setup-list-page .table-clean thead th,
+.payroll-setup-list-page .table-clean tbody td {
+    padding: 0.95rem 1rem;
+}
+
+.payroll-list-page .table-clean th:last-child,
+.payroll-list-page .table-clean td:last-child {
+    min-width: 210px;
 }
 
 .employee-list-page .table-clean th:last-child,
@@ -1020,8 +1038,13 @@ textarea.form-control:focus {
     min-width: 190px;
 }
 
+.payroll-setup-list-page .table-clean th:last-child,
+.payroll-setup-list-page .table-clean td:last-child {
+    min-width: 140px;
+}
+
 .employee-list-page .employee-action-group {
-    min-width: 170px;
+    min-width: 185px;
 }
 
 .employee-list-page .employee-action-group form {

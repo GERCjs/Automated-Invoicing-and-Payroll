@@ -6,7 +6,7 @@ from django.db.models.fields.files import FieldFile
 from PIL import Image as PilImage
 from PIL import UnidentifiedImageError
 
-from .models import Employee, PayrollRecord, PayrollTemplateSettings
+from .models import Employee, PayrollRecord, PayrollSetup, PayrollTemplateSettings
 
 EMPLOYEE_DEPARTMENT_CHOICES = [
     ("", "Select Department"),
@@ -186,6 +186,83 @@ class PayrollRecordForm(forms.ModelForm):
             self.fields["other_deductions"].initial = self.instance.other_deductions or 0
 
 
+class PayrollSetupForm(forms.ModelForm):
+    DAY_OF_MONTH_CHOICES = [("", "Select day")] + [(day, f"{day:02d}") for day in range(1, 32)]
+
+    employee = forms.ModelChoiceField(
+        queryset=Employee.objects.none(),
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+    estimated_cpf_contribution = forms.DecimalField(
+        required=False,
+        decimal_places=2,
+        max_digits=12,
+        initial=0,
+        widget=forms.NumberInput(
+            attrs={
+                "class": "form-control",
+                "step": "0.01",
+                "readonly": "readonly",
+                "tabindex": "-1",
+            }
+        ),
+    )
+    payment_day_of_month = forms.TypedChoiceField(
+        required=False,
+        choices=DAY_OF_MONTH_CHOICES,
+        coerce=int,
+        empty_value=None,
+        widget=forms.Select(attrs={"class": "form-select"}),
+    )
+
+    class Meta:
+        model = PayrollSetup
+        fields = [
+            "employee",
+            "basic_salary",
+            "physical_products_commission",
+            "credit_commission",
+            "services_commission",
+            "loan_deduction",
+            "other_deductions",
+            "payment_date_type",
+            "payment_day_of_month",
+            "is_active",
+        ]
+        widgets = {
+            "basic_salary": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "physical_products_commission": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "credit_commission": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "services_commission": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "loan_deduction": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "other_deductions": forms.NumberInput(attrs={"class": "form-control", "step": "0.01", "min": "0"}),
+            "payment_date_type": forms.Select(attrs={"class": "form-select"}),
+            "is_active": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        available_employees = Employee.objects.order_by("employee_code")
+        if self.instance and self.instance.pk:
+            self.fields["employee"].queryset = available_employees
+            self.initial["employee"] = self.instance.employee
+        else:
+            setup_employee_ids = PayrollSetup.objects.values_list("employee_id", flat=True)
+            self.fields["employee"].queryset = available_employees.exclude(pk__in=setup_employee_ids)
+        if not (self.instance and self.instance.pk):
+            self.fields["basic_salary"].initial = "0.00"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        payment_date_type = cleaned_data.get("payment_date_type")
+        payment_day_of_month = cleaned_data.get("payment_day_of_month")
+        if payment_date_type == PayrollSetup.PAYMENT_DATE_SPECIFIC_DAY and payment_day_of_month is None:
+            self.add_error("payment_day_of_month", "Enter the payment day of month for this setup.")
+        elif payment_date_type != PayrollSetup.PAYMENT_DATE_SPECIFIC_DAY:
+            cleaned_data["payment_day_of_month"] = None
+        return cleaned_data
+
+
 SINGAPORE_BANK_CHOICES = [
     ("", "Select Bank"),
     ("DBS Bank", "DBS Bank"),
@@ -273,9 +350,33 @@ class EmployeeForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._linked_user = getattr(self.instance, "user", None)
-        self.fields["date_of_appointment"].required = True
+        required_on_create = [
+            "employee_code",
+            "email",
+            "nric",
+            "first_name",
+            "last_name",
+            "date_of_birth",
+            "date_of_appointment",
+            "legal_status",
+            "gender",
+            "race",
+            "religion",
+            "department",
+            "job_title",
+            "base_salary",
+            "payment_method",
+            "bank_name",
+            "bank_account_number",
+            "bank_branch_code",
+        ]
+        for field_name in required_on_create:
+            self.fields[field_name].required = True
         self.fields["bank_name"].widget.attrs["class"] = "form-select"
         self.fields["department"].widget.attrs["class"] = "form-select"
+        self.fields["status"].required = False
+        if not (self.instance and self.instance.pk):
+            self.fields["status"].initial = Employee.STATUS_ACTIVE
         current_department = (getattr(self.instance, "department", "") or "").strip()
         if current_department and current_department not in {
             value for value, _label in EMPLOYEE_DEPARTMENT_CHOICES if value
@@ -294,6 +395,7 @@ class EmployeeForm(forms.ModelForm):
         cleaned_data = super().clean()
         email = (cleaned_data.get("email") or "").strip()
         self._linked_user = None
+
         if not email:
             return cleaned_data
 

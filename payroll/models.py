@@ -38,7 +38,6 @@ class Employee(models.Model):
         (PAYMENT_METHOD_CHEQUE, "Cheque"),
         (PAYMENT_METHOD_GIRO, "GIRO"),
     ]
-
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -334,6 +333,86 @@ class PayrollRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.employee_id} - {self.employee_name}"
+
+
+class PayrollSetup(models.Model):
+    PAYMENT_DATE_LAST_DAY = "last_day"
+    PAYMENT_DATE_SPECIFIC_DAY = "specific_day"
+    PAYMENT_DATE_CHOICES = [
+        (PAYMENT_DATE_LAST_DAY, "Last day of month"),
+        (PAYMENT_DATE_SPECIFIC_DAY, "Specific day of month"),
+    ]
+
+    employee = models.OneToOneField(Employee, on_delete=models.CASCADE, related_name="payroll_setup")
+    basic_salary = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+    physical_products_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    credit_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    services_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    loan_deduction = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    other_deductions = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    payment_date_type = models.CharField(
+        max_length=20,
+        choices=PAYMENT_DATE_CHOICES,
+        default=PAYMENT_DATE_LAST_DAY,
+    )
+    payment_day_of_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payroll_setups_created",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payroll_setups_updated",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "payroll_setup"
+        ordering = ["employee__employee_code"]
+        indexes = [
+            models.Index(fields=["payment_date_type"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Payroll setup - {self.employee.employee_code}"
 
 
 class PayrollTemplateSettings(models.Model):

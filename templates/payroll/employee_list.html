@@ -19,19 +19,22 @@
 
 <div class="card mb-3">
     <div class="card-body">
-        <form method="get" class="row g-2 align-items-center">
-            <div class="col-md-6 col-lg-5">
-                <input type="text" class="form-control" name="q" value="{{ search_query }}" placeholder="Search employee code, name, or email">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-6 col-lg-4">
+                <label class="form-label mb-1" for="employeeSearch">Employee Search</label>
+                <input id="employeeSearch" type="text" class="form-control" name="q" value="{{ search_query }}" placeholder="Search employee code, name, or email">
             </div>
             <div class="col-md-3 col-lg-2">
-                <select name="status" class="form-select">
+                <label class="form-label mb-1" for="employeeStatus">Status</label>
+                <select id="employeeStatus" name="status" class="form-select">
                     <option value="">All Statuses</option>
                     <option value="{{ active_status_value }}" {% if selected_status == active_status_value %}selected{% endif %}>Active</option>
                     <option value="{{ inactive_status_value }}" {% if selected_status == inactive_status_value %}selected{% endif %}>Inactive</option>
                 </select>
             </div>
-            <div class="col-md-4 col-lg-3">
-                <select name="payment_method" class="form-select">
+            <div class="col-md-4 col-lg-2">
+                <label class="form-label mb-1" for="employeePaymentMethod">Payment Method</label>
+                <select id="employeePaymentMethod" name="payment_method" class="form-select">
                     <option value="">All Payment Methods</option>
                     <option value="{{ giro_payment_value }}" {% if selected_payment_method == giro_payment_value %}selected{% endif %}>GIRO</option>
                     <option value="{{ cash_payment_value }}" {% if selected_payment_method == cash_payment_value %}selected{% endif %}>Cash</option>
@@ -40,15 +43,20 @@
                 </select>
             </div>
             <div class="col-md-4 col-lg-2">
-                <select name="department" class="form-select">
+                <label class="form-label mb-1" for="employeeDepartment">Department</label>
+                <select id="employeeDepartment" name="department" class="form-select">
                     <option value="">All Departments</option>
                     {% for department in department_options %}
                     <option value="{{ department }}" {% if selected_department == department %}selected{% endif %}>{{ department }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-auto"><button type="submit" class="btn btn-outline-primary">Search</button></div>
-            <div class="col-auto"><a href="{% url 'employee-list' %}" class="btn btn-outline-secondary">Reset</a></div>
+            <div class="col-md-auto">
+                <button type="submit" class="btn btn-outline-primary">Search</button>
+            </div>
+            <div class="col-md-auto">
+                <a href="{% url 'employee-list' %}" class="btn btn-outline-secondary">Reset</a>
+            </div>
         </form>
         <p class="text-muted mb-0 mt-2">{% if search_query %}Search: "{{ search_query }}" | {% endif %}{% if selected_status %}Status: {{ selected_status|title }} | {% endif %}{% if selected_payment_method %}Payment Method: {% if selected_payment_method == giro_payment_value %}GIRO{% elif selected_payment_method == cash_payment_value %}Cash{% elif selected_payment_method == cheque_payment_value %}Cheque{% else %}Not Set{% endif %} | {% endif %}{% if selected_department %}Department: {{ selected_department }} | {% endif %}Results: {{ result_count }}</p>
     </div>
@@ -59,8 +67,7 @@
         <table class="table table-clean table-hover mb-0">
             <thead>
                 <tr>
-                    <th>Employee Code</th>
-                    <th>Name</th>
+                    <th>Employee</th>
                     <th>Email</th>
                     <th>Department</th>
                     <th>Job Title</th>
@@ -73,8 +80,10 @@
             <tbody>
                 {% for employee in employees %}
                 <tr>
-                    <td>{{ employee.employee_code }}</td>
-                    <td>{{ employee.first_name }} {{ employee.last_name }}</td>
+                    <td>
+                        <div>{{ employee.first_name }} {{ employee.last_name }}</div>
+                        <div class="text-muted small">{{ employee.employee_code }}</div>
+                    </td>
                     <td>{{ employee.email }}</td>
                     <td>{{ employee.department|default:"-" }}</td>
                     <td>{{ employee.job_title|default:"-" }}</td>
@@ -97,7 +106,7 @@
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="9" class="text-center py-4"><div class="empty-state">No employees found.</div></td></tr>
+                <tr><td colspan="8" class="text-center py-4"><div class="empty-state">No employees found.</div></td></tr>
                 {% endfor %}
             </tbody>
         </table>

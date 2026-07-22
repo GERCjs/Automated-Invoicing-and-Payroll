@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_edit %}Edit Payroll Setup{% else %}Create Payroll Setup{% endif %} | Automated Invoicing & Payroll{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{% if is_edit %}Edit Payroll Setup{% else %}Create Payroll Setup{% endif %}</h1>
+        <p class="page-subtitle">Save recurring payroll defaults for an employee, then generate monthly payroll history from this setup.</p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-4">
+        <form method="post" novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger mb-3">
+                {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Employee</label>
+                    {{ form.employee }}
+                    {% for error in form.employee.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Basic Salary</label>
+                    {{ form.basic_salary }}
+                    {% for error in form.basic_salary.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Estimated Employee CPF</label>
+                    {{ form.estimated_cpf_contribution }}
+                    <div id="setup-cpf-calc-status" class="small text-muted mt-1"></div>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Payment Rule</label>
+                    {{ form.payment_date_type }}
+                    {% for error in form.payment_date_type.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3" id="paymentDayOfMonthField">
+                    <label class="form-label">Payment Day of Month</label>
+                    {{ form.payment_day_of_month }}
+                    <div class="form-text">Only used for a specific monthly day. If the chosen day does not exist in a month, payroll uses that month's last day.</div>
+                    {% for error in form.payment_day_of_month.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Physical Products Commission</label>
+                    {{ form.physical_products_commission }}
+                    {% for error in form.physical_products_commission.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Credit Commission</label>
+                    {{ form.credit_commission }}
+                    {% for error in form.credit_commission.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Services Commission</label>
+                    {{ form.services_commission }}
+                    {% for error in form.services_commission.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Loan Deduction</label>
+                    {{ form.loan_deduction }}
+                    {% for error in form.loan_deduction.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Other Deductions</label>
+                    {{ form.other_deductions }}
+                    {% for error in form.other_deductions.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        {{ form.is_active }}
+                        <label class="form-check-label" for="{{ form.is_active.id_for_label }}">Active payroll setup</label>
+                    </div>
+                </div>
+            </div>
+
+            {% if form.errors %}
+            <div class="alert alert-danger mt-3 mb-0">Please correct the highlighted fields.</div>
+            {% endif %}
+
+            <div class="d-flex gap-2 mt-4">
+                <a href="{% url 'payroll-setup-list' %}" class="btn btn-outline-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">Save Payroll Setup</button>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+(() => {
+    const paymentTypeInput = document.getElementById("id_payment_date_type");
+    const paymentDayField = document.getElementById("paymentDayOfMonthField");
+    const paymentDayInput = document.getElementById("id_payment_day_of_month");
+    const employeeInput = document.getElementById("id_employee");
+    const basicSalaryInput = document.getElementById("id_basic_salary");
+    const physicalProductsInput = document.getElementById("id_physical_products_commission");
+    const creditCommissionInput = document.getElementById("id_credit_commission");
+    const servicesCommissionInput = document.getElementById("id_services_commission");
+    const cpfPreviewInput = document.getElementById("id_estimated_cpf_contribution");
+    const cpfStatusNode = document.getElementById("setup-cpf-calc-status");
+    if (!paymentTypeInput || !paymentDayField) return;
+
+    const cpfPreviewUrl = "{% url 'payroll-cpf-preview' %}";
+
+    const syncPaymentDayField = () => {
+        paymentDayField.style.display = paymentTypeInput.value === "specific_day" ? "" : "none";
+    };
+
+    const buildPreviewPaymentDate = () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const monthIndex = now.getMonth();
+        const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+        let targetDay = lastDay;
+        if (paymentTypeInput.value === "specific_day") {
+            const requestedDay = Number(paymentDayInput?.value || 0);
+            targetDay = requestedDay > 0 ? Math.min(requestedDay, lastDay) : lastDay;
+        }
+        return `${String(targetDay).padStart(2, "0")}-${String(monthIndex + 1).padStart(2, "0")}-${year}`;
+    };
+
+    const refreshCpfPreview = () => {
+        const employeeId = (employeeInput?.value || "").trim();
+        const basicSalary = (basicSalaryInput?.value || "").trim();
+        const physicalProducts = (physicalProductsInput?.value || "").trim();
+        const creditCommission = (creditCommissionInput?.value || "").trim();
+        const servicesCommission = (servicesCommissionInput?.value || "").trim();
+        if (!cpfPreviewInput) {
+            return;
+        }
+        if (!employeeId || !basicSalary) {
+            cpfPreviewInput.value = "0.00";
+            if (cpfStatusNode) {
+                cpfStatusNode.textContent = "Select an employee and enter salary values to preview CPF.";
+            }
+            return;
+        }
+
+        const params = new URLSearchParams({
+            employee_id: employeeId,
+            basic_salary: basicSalary,
+            physical_products_commission: physicalProducts || "0",
+            credit_commission: creditCommission || "0",
+            services_commission: servicesCommission || "0",
+            payment_date: buildPreviewPaymentDate(),
+        });
+        fetch(`${cpfPreviewUrl}?${params.toString()}`, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+            .then((response) => response.json())
+            .then((data) => {
+                if (data && data.ok && data.cpf_contribution !== undefined) {
+                    cpfPreviewInput.value = data.cpf_contribution;
+                    if (cpfStatusNode) {
+                        cpfStatusNode.textContent = "Estimated from employee DOB and the current payment rule.";
+                    }
+                } else {
+                    cpfPreviewInput.value = "0.00";
+                    if (cpfStatusNode) {
+                        if (data && data.reason === "missing_dob") {
+                            cpfStatusNode.textContent = "CPF preview unavailable because the employee DOB is missing.";
+                        } else {
+                            cpfStatusNode.textContent = "Unable to preview CPF yet.";
+                        }
+                    }
+                }
+            })
+            .catch(() => {
+                cpfPreviewInput.value = "0.00";
+                if (cpfStatusNode) {
+                    cpfStatusNode.textContent = "Failed to calculate CPF preview.";
+                }
+            });
+    };
+
+    paymentTypeInput.addEventListener("change", syncPaymentDayField);
+    paymentTypeInput.addEventListener("change", refreshCpfPreview);
+    paymentDayInput?.addEventListener("input", refreshCpfPreview);
+    paymentDayInput?.addEventListener("change", refreshCpfPreview);
+    employeeInput?.addEventListener("change", refreshCpfPreview);
+    basicSalaryInput?.addEventListener("input", refreshCpfPreview);
+    physicalProductsInput?.addEventListener("input", refreshCpfPreview);
+    creditCommissionInput?.addEventListener("input", refreshCpfPreview);
+    servicesCommissionInput?.addEventListener("input", refreshCpfPreview);
+    syncPaymentDayField();
+    refreshCpfPreview();
+})();
+</script>
+{% endblock %}

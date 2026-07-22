@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Payroll Setup | Automated Invoicing & Payroll{% endblock %}
+{% block page_container_class %}container-fluid px-4 px-xl-5 payroll-setup-list-container{% endblock %}
+
+{% block content %}
+<div class="payroll-setup-list-page">
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Payroll Setup</h1>
+        <p class="page-subtitle">Save payroll defaults once, then generate monthly payroll history from these setups.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{% url 'payroll-dashboard' %}" class="btn btn-outline-dark">Payroll Officer Dashboard</a>
+        <a href="{% url 'payroll-setup-create' %}" class="btn btn-primary">Create Payroll Setup</a>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="post" action="{% url 'payroll-generate-monthly' %}" class="row g-2 align-items-end">
+            {% csrf_token %}
+            <div class="col-md-4 col-lg-3">
+                <label class="form-label mb-1" for="payrollSetupGenerateMonth">Payroll Month</label>
+                <input
+                    id="payrollSetupGenerateMonth"
+                    type="month"
+                    class="form-control"
+                    name="month"
+                    value="{% now 'Y-m' %}"
+                >
+            </div>
+            <div class="col-md-auto">
+                <button type="submit" class="btn btn-success">Generate Monthly Payroll</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-6 col-lg-4">
+                <label class="form-label mb-1" for="payrollSetupSearch">Employee Search</label>
+                <input
+                    id="payrollSetupSearch"
+                    type="text"
+                    class="form-control"
+                    name="q"
+                    value="{{ search_query }}"
+                    placeholder="Search employee name or employee ID"
+                >
+            </div>
+            <div class="col-md-auto">
+                <button type="submit" class="btn btn-outline-primary">Search</button>
+            </div>
+            <div class="col-md-auto">
+                <a href="{% url 'payroll-setup-list' %}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+        </form>
+        <p class="text-muted mb-0 mt-2">
+            {% if search_query %}Search: "{{ search_query }}" | {% endif %}
+            Results: {{ result_count }}
+        </p>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-clean table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th class="text-end">Basic Salary</th>
+                    <th>Payment Rule</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payroll_setup in payroll_setups %}
+                <tr>
+                    <td>
+                        <div>{{ payroll_setup.employee.first_name }} {{ payroll_setup.employee.last_name }}</div>
+                        <div class="text-muted small">{{ payroll_setup.employee.employee_code }}</div>
+                    </td>
+                    <td>{{ payroll_setup.employee.department|default:"-" }}</td>
+                    <td class="text-end">SGD {{ payroll_setup.basic_salary }}</td>
+                    <td>
+                        {% if payroll_setup.payment_date_type == "specific_day" %}
+                            Day {{ payroll_setup.payment_day_of_month }} of month
+                        {% else %}
+                            Last day of month
+                        {% endif %}
+                    </td>
+                    <td>{% if payroll_setup.is_active %}Active{% else %}Inactive{% endif %}</td>
+                    <td class="text-end">
+                        <a href="{% url 'payroll-setup-edit' payroll_setup.pk %}" class="btn btn-sm btn-outline-dark">Edit</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-center py-4"><div class="empty-state">No payroll setups found.</div></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</div>
+{% endblock %}

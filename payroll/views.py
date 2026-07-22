@@ -34,10 +34,11 @@ from .forms import (
     EmployeeForm,
     EmployeeUploadForm,
     PayrollRecordForm,
+    PayrollSetupForm,
     PayrollTemplateSettingsForm,
     PayrollUploadForm,
 )
-from .models import Employee, PayrollRecord, PayrollTemplateSettings
+from .models import Employee, PayrollRecord, PayrollSetup, PayrollTemplateSettings
 from .services import (
     PAYROLL_UPLOAD_COLUMN_LABELS,
     TEMPLATE_HEADERS,
@@ -183,6 +184,61 @@ def _generate_next_employee_code():
     return f"STF-{number:06d}"
 
 
+def _resolve_setup_payment_date(payroll_setup: PayrollSetup, month_start: date) -> date:
+    if payroll_setup.payment_date_type == PayrollSetup.PAYMENT_DATE_SPECIFIC_DAY:
+        if month_start.month == 12:
+            next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+        else:
+            next_month = month_start.replace(month=month_start.month + 1, day=1)
+        month_end = next_month - timezone.timedelta(days=1)
+        target_day = payroll_setup.payment_day_of_month or month_end.day
+        return month_start.replace(day=min(target_day, month_end.day))
+
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1, day=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1, day=1)
+    return next_month - timezone.timedelta(days=1)
+
+
+def _build_payroll_record_from_setup(payroll_setup: PayrollSetup, payment_date: date, created_by):
+    employee = payroll_setup.employee
+    total_allowances = (
+        payroll_setup.physical_products_commission
+        + payroll_setup.credit_commission
+        + payroll_setup.services_commission
+    )
+    total_deductions = payroll_setup.loan_deduction + payroll_setup.other_deductions
+    total_earnings = payroll_setup.basic_salary + total_allowances
+    if employee.cpf_exempt:
+        employee_cpf = Decimal("0")
+    else:
+        age = payment_date.year - employee.date_of_birth.year - (
+            (payment_date.month, payment_date.day) < (employee.date_of_birth.month, employee.date_of_birth.day)
+        )
+        employee_cpf = cpf_for_2026(total_earnings, age).employee_amount
+
+    return PayrollRecord(
+        employee_name=f"{employee.first_name} {employee.last_name}".strip(),
+        employee_id=employee.employee_code,
+        basic_salary=payroll_setup.basic_salary,
+        allowances=total_allowances,
+        physical_products_commission=payroll_setup.physical_products_commission,
+        credit_commission=payroll_setup.credit_commission,
+        services_commission=payroll_setup.services_commission,
+        deductions=total_deductions,
+        loan_deduction=payroll_setup.loan_deduction,
+        other_deductions=payroll_setup.other_deductions,
+        cpf_contribution=employee_cpf,
+        net_salary=total_earnings - total_deductions - employee_cpf,
+        payment_date=payment_date,
+        nric=(employee.nric or "")[:9],
+        cpf_exempted=employee.cpf_exempt,
+        sdl_exempted=employee.sdl_exempt,
+        created_by=created_by,
+    )
+
+
 @login_required
 @role_required(SUPERADMIN, ADMIN, HR)
 def payroll_employee_lookup(request):
@@ -268,7 +324,10 @@ def payroll_cpf_preview(request):
             }
         )
 
-    employee = Employee.objects.filter(employee_code=employee_id).first()
+    employee_filters = Q(employee_code=employee_id)
+    if employee_id.isdigit():
+        employee_filters |= Q(pk=int(employee_id))
+    employee = Employee.objects.filter(employee_filters).first()
     if employee is None:
         return JsonResponse(
             {
@@ -429,6 +488,11 @@ def payroll_dashboard(request):
         duplicate_rows_skipped_count = int((saved_upload_for_selected_month.metadata or {}).get("skipped_duplicate_count") or 0)
 
     active_employees = Employee.objects.filter(status=Employee.STATUS_ACTIVE)
+    active_employee_setup_count = PayrollSetup.objects.filter(
+        is_active=True,
+        employee__status=Employee.STATUS_ACTIVE,
+    ).count()
+    employees_without_setup_count = active_employees.exclude(payroll_setup__isnull=False).count()
     paid_employee_codes = list(month_records.values_list("employee_id", flat=True).distinct())
     missing_payroll_records = active_employees.exclude(employee_code__in=paid_employee_codes).order_by("employee_code")
     missing_payroll_records_count = missing_payroll_records.count()
@@ -571,6 +635,8 @@ def payroll_dashboard(request):
             "payroll_list_query": f'?month={selected_month}',
             "payroll_report_query": f'?month={selected_month}',
             "recent_action_records": recent_action_records,
+            "active_employee_setup_count": active_employee_setup_count,
+            "employees_without_setup_count": employees_without_setup_count,
         },
     )
 
@@ -609,6 +675,148 @@ def payroll_list(request):
             "result_count": payslip_records.count(),
         },
     )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def payroll_setup_list(request):
+    search_query = request.GET.get("q", "").strip()
+    payroll_setups = PayrollSetup.objects.select_related("employee").all()
+    if search_query:
+        payroll_setups = payroll_setups.filter(
+            Q(employee__employee_code__icontains=search_query)
+            | Q(employee__first_name__icontains=search_query)
+            | Q(employee__last_name__icontains=search_query)
+        )
+    return render(
+        request,
+        "payroll/payroll_setup_list.html",
+        {
+            "payroll_setups": payroll_setups,
+            "search_query": search_query,
+            "result_count": payroll_setups.count(),
+        },
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def payroll_setup_create(request):
+    if request.method == "POST":
+        form = PayrollSetupForm(request.POST)
+        if form.is_valid():
+            payroll_setup = form.save(commit=False)
+            payroll_setup.created_by = request.user
+            payroll_setup.updated_by = request.user
+            payroll_setup.save()
+            log_event(
+                action="payroll.setup.created",
+                user=request.user,
+                target_type="payroll_setup",
+                target_id=str(payroll_setup.id),
+                metadata={"employee_id": payroll_setup.employee.employee_code},
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Payroll setup saved successfully.")
+            return redirect("payroll-setup-list")
+    else:
+        form = PayrollSetupForm()
+    return render(request, "payroll/payroll_setup_form.html", {"form": form, "is_edit": False})
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def payroll_setup_edit(request, pk):
+    payroll_setup = get_object_or_404(PayrollSetup, pk=pk)
+    if request.method == "POST":
+        form = PayrollSetupForm(request.POST, instance=payroll_setup)
+        if form.is_valid():
+            payroll_setup = form.save(commit=False)
+            payroll_setup.updated_by = request.user
+            payroll_setup.save()
+            log_event(
+                action="payroll.setup.updated",
+                user=request.user,
+                target_type="payroll_setup",
+                target_id=str(payroll_setup.id),
+                metadata={"employee_id": payroll_setup.employee.employee_code},
+                ip_address=get_client_ip(request),
+            )
+            messages.success(request, "Payroll setup updated successfully.")
+            return redirect("payroll-setup-list")
+    else:
+        form = PayrollSetupForm(instance=payroll_setup)
+    return render(
+        request,
+        "payroll/payroll_setup_form.html",
+        {"form": form, "is_edit": True, "payroll_setup": payroll_setup},
+    )
+
+
+@login_required
+@role_required(SUPERADMIN, ADMIN, HR)
+def payroll_generate_monthly(request):
+    if request.method != "POST":
+        return redirect("payroll-setup-list")
+
+    selected_month, month_start, _month_end = _parse_month_filter(request.POST.get("month"))
+    if not selected_month or month_start is None:
+        messages.error(request, "Select a valid payroll month before generating payroll.")
+        return redirect("payroll-setup-list")
+
+    payroll_setups = PayrollSetup.objects.select_related("employee").filter(
+        is_active=True,
+        employee__status=Employee.STATUS_ACTIVE,
+    )
+    skipped_missing_setup = Employee.objects.filter(status=Employee.STATUS_ACTIVE, payroll_setup__isnull=True).count()
+    created_count = 0
+    skipped_duplicates = 0
+    skipped_missing_dob = 0
+    skipped_not_hired = 0
+
+    for payroll_setup in payroll_setups:
+        employee = payroll_setup.employee
+        if not employee.date_of_birth:
+            skipped_missing_dob += 1
+            continue
+
+        payment_date = _resolve_setup_payment_date(payroll_setup, month_start)
+        if employee.hire_date and payment_date < employee.hire_date:
+            skipped_not_hired += 1
+            continue
+
+        if PayrollRecord.objects.filter(employee_id=employee.employee_code, payment_date=payment_date).exists():
+            skipped_duplicates += 1
+            continue
+
+        payslip_record = _build_payroll_record_from_setup(payroll_setup, payment_date, request.user)
+        try:
+            with transaction.atomic():
+                payslip_record.save()
+        except IntegrityError:
+            skipped_duplicates += 1
+            continue
+
+        log_event(
+            action="payroll.record.generated",
+            user=request.user,
+            target_type="payroll_record",
+            target_id=str(payslip_record.id),
+            metadata={"employee_id": payslip_record.employee_id, "payment_date": payment_date.isoformat()},
+            ip_address=get_client_ip(request),
+        )
+        created_count += 1
+
+    messages.success(
+        request,
+        (
+            f"Monthly payroll generation complete for {month_start.strftime('%B %Y')}. "
+            f"Created {created_count}, skipped {skipped_duplicates} duplicate(s), "
+            f"{skipped_missing_dob} missing DOB, {skipped_not_hired} not yet hired, "
+            f"{skipped_missing_setup} without setup."
+        ),
+    )
+    return redirect("payroll-setup-list")
 
 
 @login_required
