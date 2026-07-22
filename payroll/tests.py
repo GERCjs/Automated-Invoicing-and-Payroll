@@ -1818,6 +1818,36 @@ class MyPayslipsViewTests(TestCase):
             ).exists()
         )
 
+    def test_staff_my_payslips_supports_date_range_filters(self):
+        PayrollRecord.objects.create(
+            employee_name="List One",
+            employee_id=self.staff_employee.employee_code,
+            basic_salary=2100,
+            allowances=100,
+            deductions=50,
+            cpf_contribution=420,
+            net_salary=1730,
+            payment_date=date(2026, 6, 24),
+        )
+
+        self.client.login(username="staff_list_1", password="pass12345")
+        response = self.client.get(
+            reverse("my-payslips"),
+            {
+                "date_from": "2026-05-01",
+                "date_to": "2026-05-31",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="date_from"', html=False)
+        self.assertContains(response, 'value="2026-05-01"', html=False)
+        self.assertContains(response, 'name="date_to"', html=False)
+        self.assertContains(response, 'value="2026-05-31"', html=False)
+        self.assertContains(response, "Results: 1")
+        self.assertContains(response, "2026-05-24")
+        self.assertNotContains(response, "2026-06-24")
+
 
 @override_settings(
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",

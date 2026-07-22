@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 
 {% block title %}{{ page_title }} | Automated Invoicing & Payroll{% endblock %}
+{% block page_container_class %}container-fluid px-4 px-xl-5 my-support-requests-container{% endblock %}
 
 {% block content %}
+<div class="my-support-requests-page">
 <div class="page-header">
     <div>
         <h1 class="page-title">{{ page_title }}</h1>
@@ -144,4 +146,5 @@ document.querySelectorAll("[data-ticket-url]").forEach((row) => {
     });
 });
 </script>
+</div>
 {% endblock %}

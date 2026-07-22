@@ -1,8 +1,11 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}My Payslips | Automated Invoicing & Payroll{% endblock %}
+{% block page_container_class %}container-fluid px-4 px-xl-5 my-payslips-container{% endblock %}
 
 {% block content %}
+<div class="my-payslips-page">
 <div class="page-header">
     <div>
         <h1 class="page-title">My Payslips</h1>
@@ -15,6 +18,49 @@
 </div>
 
 {% if employee %}
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-end" data-date-range-form>
+            <div class="col-md-4 col-lg-3">
+                <label class="form-label mb-1" for="myPayslipDateFrom">Start Date</label>
+                <input
+                    id="myPayslipDateFrom"
+                    type="date"
+                    class="form-control"
+                    name="date_from"
+                    value="{{ date_from }}"
+                    data-date-from
+                >
+            </div>
+            <div class="col-md-4 col-lg-3">
+                <label class="form-label mb-1" for="myPayslipDateTo">End Date</label>
+                <input
+                    id="myPayslipDateTo"
+                    type="date"
+                    class="form-control"
+                    name="date_to"
+                    value="{{ date_to }}"
+                    data-date-to
+                >
+            </div>
+            <div class="col-md-auto">
+                <button type="submit" class="btn btn-outline-primary">Search</button>
+            </div>
+            <div class="col-md-auto">
+                <a href="{% url 'my-payslips' %}" class="btn btn-outline-secondary">Reset</a>
+            </div>
+            <div class="col-12">
+                <div class="form-text text-danger{% if not date_filter_error %} d-none{% endif %}" data-date-error>{{ date_filter_error }}</div>
+            </div>
+        </form>
+        <p class="text-muted mb-0 mt-2">
+            {% if date_from %}From: {{ date_from }} | {% endif %}
+            {% if date_to %}To: {{ date_to }} | {% endif %}
+            Results: {{ result_count }}
+        </p>
+    </div>
+</div>
+
 <div class="card">
     <div class="table-responsive">
         <table class="table table-clean table-hover mb-0">
@@ -59,4 +105,6 @@
     Your account is not linked to an employee profile yet. Ask admin to link your account in Employees.
 </div>
 {% endif %}
+<script src="{% static 'js/date-range-filters.js' %}"></script>
+</div>
 {% endblock %}

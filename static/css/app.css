@@ -1009,13 +1009,18 @@ textarea.form-control:focus {
 
 .employee-list-container,
 .payroll-list-container,
-.payroll-setup-list-container {
+.payroll-setup-list-container,
+.my-payslips-container,
+.my-support-requests-container {
     max-width: 1540px;
 }
 
 .payroll-list-page .card-body,
 .employee-list-page .card-body,
-.payroll-setup-list-page .card-body {
+.payroll-setup-list-page .card-body,
+.my-payslips-page .card-body,
+.my-support-requests-page .card-body,
+.my-support-requests-page .card-header {
     padding: 1.25rem 1.35rem;
 }
 
@@ -1024,7 +1029,11 @@ textarea.form-control:focus {
 .employee-list-page .table-clean thead th,
 .employee-list-page .table-clean tbody td,
 .payroll-setup-list-page .table-clean thead th,
-.payroll-setup-list-page .table-clean tbody td {
+.payroll-setup-list-page .table-clean tbody td,
+.my-payslips-page .table-clean thead th,
+.my-payslips-page .table-clean tbody td,
+.my-support-requests-page .table-clean thead th,
+.my-support-requests-page .table-clean tbody td {
     padding: 0.95rem 1rem;
 }
 
@@ -1040,6 +1049,16 @@ textarea.form-control:focus {
 
 .payroll-setup-list-page .table-clean th:last-child,
 .payroll-setup-list-page .table-clean td:last-child {
+    min-width: 140px;
+}
+
+.my-payslips-page .table-clean th:last-child,
+.my-payslips-page .table-clean td:last-child {
+    min-width: 240px;
+}
+
+.my-support-requests-page .table-clean th:first-child,
+.my-support-requests-page .table-clean td:first-child {
     min-width: 140px;
 }
 

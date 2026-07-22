@@ -2057,13 +2057,29 @@ def my_payslips(request):
             },
         )
 
+    raw_date_from = (request.GET.get("date_from") or "").strip()
+    raw_date_to = (request.GET.get("date_to") or "").strip()
+    date_from, date_to, filter_date_from, filter_date_to, date_filter_error = _parse_date_range(
+        raw_date_from,
+        raw_date_to,
+    )
+
     payslip_records = PayrollRecord.objects.filter(employee_id=employee.employee_code)
+    if filter_date_from:
+        payslip_records = payslip_records.filter(payment_date__gte=filter_date_from)
+    if filter_date_to:
+        payslip_records = payslip_records.filter(payment_date__lte=filter_date_to)
+
     return render(
         request,
         "payroll/my_payslips.html",
         {
             "employee": employee,
             "payslip_records": payslip_records,
+            "date_from": raw_date_from if raw_date_from else (date_from.isoformat() if date_from else ""),
+            "date_to": raw_date_to if raw_date_to else (date_to.isoformat() if date_to else ""),
+            "date_filter_error": date_filter_error,
+            "result_count": payslip_records.count(),
         },
     )
 
