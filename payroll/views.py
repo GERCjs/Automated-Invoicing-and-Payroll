@@ -443,31 +443,12 @@ def payroll_dashboard(request):
         | Q(bank_account_number="")
     )
 
-    payment_method_counts = {
-        row["payment_method"] or "unset": row["total"]
-        for row in employees.values("payment_method").annotate(total=Count("id"))
-    }
-    payment_method_labels = ["GIRO", "Cash", "Cheque", "Not Set"]
-    payment_method_values = [
-        payment_method_counts.get(Employee.PAYMENT_METHOD_GIRO, 0),
-        payment_method_counts.get(Employee.PAYMENT_METHOD_CASH, 0),
-        payment_method_counts.get(Employee.PAYMENT_METHOD_CHEQUE, 0),
-        payment_method_counts.get("unset", 0),
-    ]
-    giro_employees = employees.filter(payment_method=Employee.PAYMENT_METHOD_GIRO)
-    cash_employees = employees.filter(payment_method=Employee.PAYMENT_METHOD_CASH)
-    cheque_employees = employees.filter(payment_method=Employee.PAYMENT_METHOD_CHEQUE)
-    unset_payment_employees = employees.filter(Q(payment_method="") | Q(payment_method__isnull=True))
-
     employee_status_labels = ["Active", "Inactive"]
     employee_status_values = [
         active_employees.count(),
         inactive_employees.count(),
     ]
 
-    hiring_month_starts = _recent_month_starts(month_start, total_months=6)
-    hiring_trend_labels = [month.strftime("%b %Y") for month in hiring_month_starts]
-    hiring_month_keys = [month.strftime("%Y-%m") for month in hiring_month_starts]
     hiring_rows = list(
         employees.annotate(month=TruncMonth("hire_date"))
         .values("month")
@@ -475,12 +456,21 @@ def payroll_dashboard(request):
         .order_by("month")
     )
     hiring_map = {}
+    latest_hiring_month = None
     for row in hiring_rows:
         month_value = row.get("month")
         if not month_value:
             continue
+        latest_hiring_month = month_value
         hiring_map[month_value.strftime("%Y-%m")] = int(row.get("total") or 0)
+    hiring_month_starts = _recent_month_starts(month_start, total_months=6)
+    hiring_month_keys = [month.strftime("%Y-%m") for month in hiring_month_starts]
     hiring_trend_values = [hiring_map.get(month_key, 0) for month_key in hiring_month_keys]
+    if not any(hiring_trend_values) and latest_hiring_month is not None:
+        hiring_month_starts = _recent_month_starts(latest_hiring_month, total_months=6)
+        hiring_month_keys = [month.strftime("%Y-%m") for month in hiring_month_starts]
+        hiring_trend_values = [hiring_map.get(month_key, 0) for month_key in hiring_month_keys]
+    hiring_trend_labels = [month.strftime("%b %Y") for month in hiring_month_starts]
 
     recent_payslip_records = list(month_records.only(
         "employee_name",
@@ -495,23 +485,6 @@ def payroll_dashboard(request):
 
     payroll_chart_summary = _build_chart_summary(payroll_trend_labels, payroll_trend_values)
     reporting_period_label = month_start.strftime("%B %Y")
-    secondary_summary_items = [
-        {
-            "label": "Emailed Payslips",
-            "value": str(delivery_status_totals["emailed"]),
-            "note": "Payslip records with a successful email delivery log in the selected month.",
-        },
-        {
-            "label": "Downloaded Payslips",
-            "value": str(delivery_status_totals["downloaded"]),
-            "note": "Payroll records downloaded as PDF for follow-up or manual distribution.",
-        },
-        {
-            "label": "Failed Emails",
-            "value": str(delivery_status_totals["failed"]),
-            "note": "Payslip emails that failed and may need corrected addresses or a resend.",
-        },
-    ]
     attention_items = []
     if invalid_upload_rows_count:
         attention_items.append(
@@ -590,20 +563,10 @@ def payroll_dashboard(request):
             "payroll_chart_summary": payroll_chart_summary,
             "pay_mix_labels": pay_mix_labels,
             "pay_mix_values": pay_mix_values,
-            "payment_method_labels": payment_method_labels,
-            "payment_method_values": payment_method_values,
-            "giro_employees": giro_employees.order_by("first_name", "last_name", "employee_code"),
-            "cash_employees": cash_employees.order_by("first_name", "last_name", "employee_code"),
-            "cheque_employees": cheque_employees.order_by("first_name", "last_name", "employee_code"),
-            "unset_payment_employees": unset_payment_employees.order_by("first_name", "last_name", "employee_code"),
             "employee_status_labels": employee_status_labels,
             "employee_status_values": employee_status_values,
-            "active_employees": active_employees.order_by("first_name", "last_name", "employee_code"),
-            "inactive_employees": inactive_employees.order_by("first_name", "last_name", "employee_code"),
             "hiring_trend_labels": hiring_trend_labels,
             "hiring_trend_values": hiring_trend_values,
-            "delivery_status_totals": delivery_status_totals,
-            "secondary_summary_items": secondary_summary_items,
             "attention_items": attention_items,
             "payroll_list_query": f'?month={selected_month}',
             "payroll_report_query": f'?month={selected_month}',

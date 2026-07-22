@@ -115,12 +115,8 @@ class EmployeeDashboardTests(TestCase):
         self.assertContains(response, "Payroll Officer Dashboard")
         self.assertContains(response, "Active Employees")
         self.assertContains(response, "New Employees This Month")
-        self.assertContains(response, "Missing Payment Setup")
+        self.assertContains(response, "Inactive Employees")
         self.assertContains(response, "Employees Without Payroll This Month")
-        self.assertContains(response, "GIRO")
-        self.assertContains(response, "Cash")
-        self.assertContains(response, "Cheque")
-        self.assertContains(response, "Payment Method Distribution")
         self.assertContains(response, "Employee Status Overview")
         self.assertContains(response, "Hiring Trend")
         self.assertContains(response, 'name="month"', html=False)
@@ -128,8 +124,17 @@ class EmployeeDashboardTests(TestCase):
         self.assertContains(response, "js/report_charts.js")
         self.assertEqual(response.context["active_employee_count"], 2)
         self.assertEqual(response.context["new_employee_count"], 2)
-        self.assertEqual(response.context["missing_payment_setup_count"], 1)
+        self.assertEqual(response.context["employee_status_values"][1], 1)
         self.assertEqual(response.context["employees_without_payroll_count"], 1)
+
+    def test_hiring_trend_falls_back_to_latest_hiring_window_when_selected_month_has_no_recent_hires(self):
+        self.client.force_login(self.hr_user)
+
+        response = self.client.get(reverse("employee-dashboard"), data={"month": "2026-12"}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(any(value > 0 for value in response.context["hiring_trend_values"]))
+        self.assertIn("Jul 2026", response.context["hiring_trend_labels"])
 
 
 class PayrollUploadPreviewTests(TestCase):
