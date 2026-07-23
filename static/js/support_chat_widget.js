@@ -164,6 +164,11 @@
             setOpen(false);
             return;
         }
+        if (awaitingMoreHelp) {
+            resetChat();
+            setOpen(false);
+            return;
+        }
         const shouldExit = window.confirm("Exit chat? Your current chat will restart.");
         if (!shouldExit) {
             return;
