@@ -8,12 +8,13 @@
         <h1 class="page-title">Audit Logs</h1>
         <p class="page-subtitle">Key system actions recorded for review and accountability.</p>
     </div>
-    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
+    <a href="{{ back_url }}" class="btn btn-outline-secondary">Back</a>
 </div>
 
 <div class="card">
     <div class="card-header">
         <form method="get" class="row g-2 align-items-end">
+            {% if return_url %}<input type="hidden" name="next" value="{{ return_url }}">{% endif %}
             <div class="col-md-2">
                 <label class="form-label small">Role</label>
                 <select name="role" class="form-select form-select-sm">

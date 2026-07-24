@@ -390,9 +390,13 @@ a:visited {
 .status-badge {
     border: 1px solid transparent;
     border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
     font-weight: 600;
     letter-spacing: 0;
+    line-height: 1.15;
     padding: 0.42em 0.72em;
+    white-space: nowrap;
 }
 
 .badge.bg-success,
@@ -1437,6 +1441,95 @@ textarea.form-control:focus {
     grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.admin-security-report-page .card,
+.admin-security-report-page .dashboard-card {
+    border-radius: 16px;
+}
+
+.admin-security-report-page .admin-security-report-filters .form-control {
+    min-height: 46px;
+}
+
+.admin-security-report-page .admin-security-report-filter-actions .btn {
+    min-height: 44px;
+}
+
+.admin-security-report-page .admin-security-report-date-message {
+    min-height: 1.2rem;
+}
+
+.admin-security-report-page .report-kpi-card .card-body {
+    min-height: 220px;
+}
+
+.admin-security-report-page .report-summary-strip {
+    gap: 1rem;
+}
+
+.admin-security-report-page .report-summary-card {
+    border-top: 4px solid #d8e0ea;
+    min-height: 155px;
+    padding: 1.1rem 1.15rem;
+}
+
+.admin-security-report-page .admin-security-settings-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-security-report-page .admin-security-support-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-security-report-page .admin-security-settings-strip .report-summary-card {
+    box-shadow: none;
+    min-height: 112px;
+}
+
+.admin-security-report-page .admin-security-support-strip .report-summary-card {
+    box-shadow: none;
+    min-height: 130px;
+}
+
+.admin-security-report-page .report-attention-table .table th,
+.admin-security-report-page .report-attention-table .table td {
+    padding: 0.95rem 1rem;
+}
+
+.admin-security-report-page .report-attention-table .table {
+    min-width: 980px;
+    table-layout: auto;
+}
+
+.admin-security-report-page .report-attention-table .table th:first-child,
+.admin-security-report-page .report-attention-table .table td:first-child {
+    min-width: 11.5rem;
+    white-space: nowrap;
+}
+
+.admin-security-report-page .report-attention-table .table th:last-child,
+.admin-security-report-page .report-attention-table .table td:last-child {
+    min-width: 9rem;
+}
+
+.admin-security-report-page .report-attention-table .status-badge {
+    flex: 0 0 auto;
+    min-width: max-content;
+    white-space: nowrap !important;
+}
+
+.email-log-type,
+.email-log-reference {
+    white-space: nowrap;
+}
+
+.delivery-log-error {
+    display: block;
+    max-width: 38rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .invoice-dashboard-page .card,
 .invoice-dashboard-page .dashboard-card {
     border-radius: 16px;
@@ -2006,7 +2099,17 @@ textarea.form-control:focus {
     outline-offset: -2px;
 }
 
+.support-ticket-detail-page-readonly .page-header {
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 66.666667%;
+}
+
 @media (max-width: 991.98px) {
+    .support-ticket-detail-page-readonly .page-header {
+        max-width: 100%;
+    }
+
     .report-summary-strip {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -2020,6 +2123,11 @@ textarea.form-control:focus {
     }
 
     .payment-report-page .payment-report-chart-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .admin-security-report-page .admin-security-settings-strip,
+    .admin-security-report-page .admin-security-support-strip {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -2086,6 +2194,11 @@ textarea.form-control:focus {
     }
 
     .payment-report-page .payment-report-chart-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-security-report-page .admin-security-settings-strip,
+    .admin-security-report-page .admin-security-support-strip {
         grid-template-columns: 1fr;
     }
 

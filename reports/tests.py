@@ -12,6 +12,7 @@ from core.models import AuditLog
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog, PaymentReminderSettings
 from payments.models import PaymentRecord, PaymentRefund
+from support.models import SupportTicket, SupportTicketSettings
 
 
 User = get_user_model()
@@ -510,6 +511,7 @@ class AdminSecurityReportTests(TestCase):
         self.assertContains(response, "Requires Investigation")
         self.assertContains(response, "User Summary")
         self.assertContains(response, "Admin Activity Summary")
+        self.assertContains(response, "Support Ticket Health")
         self.assertContains(response, "Reminder and Announcement Tools")
         self.assertContains(response, "Recent Suspicious Activities")
         self.assertContains(response, "Recent Failed Email Deliveries")
@@ -517,9 +519,34 @@ class AdminSecurityReportTests(TestCase):
         self.assertContains(response, "Recent Role Changes")
         self.assertContains(response, "Recent Password Changes")
         self.assertContains(response, "Review Suspicious Activity")
+        self.assertContains(response, "Review Items Below")
         self.assertContains(response, "Open Reminder Settings")
         self.assertContains(response, "Send Announcement")
         self.assertNotContains(response, ">Open<")
+
+    def test_admin_security_report_surfaces_overdue_support_tickets(self):
+        SupportTicketSettings.objects.update_or_create(pk=1, defaults={"response_target_days": 3})
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Invoice total looks wrong",
+            message="Please check this invoice.",
+            status=SupportTicket.STATUS_OPEN,
+            priority=SupportTicket.PRIORITY_MEDIUM,
+            created_by=self._make_user("security_support_customer", CUSTOMER),
+        )
+        SupportTicket.objects.filter(pk=ticket.pk).update(
+            created_at=timezone.now() - timedelta(days=4),
+        )
+        admin = self._make_user("security_support_admin", ADMIN)
+        self.client.force_login(admin)
+
+        response = self.client.get(reverse("admin-security-report"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["overdue_support_ticket_count"], 1)
+        self.assertContains(response, "Overdue&nbsp;tickets", html=False)
+        self.assertContains(response, "Support Ticket Health")
+        self.assertContains(response, "Invoice total looks wrong")
 
     def test_admin_security_report_shows_failed_email_section_when_failure_exists(self):
         EmailDeliveryLog.objects.create(

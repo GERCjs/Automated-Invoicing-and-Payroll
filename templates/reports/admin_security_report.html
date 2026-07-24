@@ -2,527 +2,604 @@
 {% load static %}
 
 {% block title %}Admin & Security Report{% endblock %}
+{% block page_container_class %}container-xl management-dashboard-container{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Admin &amp; Security Report</h1>
-        <p class="page-subtitle">Use this report to investigate failed logins, suspended accounts, permission problems and email delivery failures.</p>
-    </div>
-    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Admin Dashboard</a>
-</div>
+<div class="report-page management-dashboard-page admin-security-report-page">
+    <section class="report-header report-section">
+        <div>
+            <h1 class="page-title">Admin &amp; Security Report</h1>
+            <p class="page-subtitle">Use this report to investigate failed logins, suspended accounts, permission problems and email delivery failures.</p>
+            <div class="report-header-meta">
+                <span class="report-period">Reporting period: {{ reporting_period_label }}</span>
+                <span class="report-period">Last updated: {{ report_generated_at|date:"d M Y, g:i A" }}</span>
+            </div>
+        </div>
+        <div class="report-header-actions">
+            <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back to Admin Dashboard</a>
+        </div>
+    </section>
 
-<div class="card mb-3">
-    <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-            <h2 class="section-heading mb-0">Filters</h2>
-            {% if has_active_filters %}
-            <a href="{% url 'admin-security-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
-            {% endif %}
-        </div>
-        <form id="adminSecurityReportFilterForm" method="get" class="row g-3 align-items-end" data-date-range-form>
-            <div class="col-md-4">
-                <label for="eventDateFrom" class="form-label">Event Date From</label>
-                <input
-                    id="eventDateFrom"
-                    type="date"
-                    name="date_from"
-                    value="{{ date_from }}"
-                    class="form-control"
-                    data-date-from
-                >
-            </div>
-            <div class="col-md-4">
-                <label for="eventDateTo" class="form-label">Event Date To</label>
-                <input
-                    id="eventDateTo"
-                    type="date"
-                    name="date_to"
-                    value="{{ date_to }}"
-                    class="form-control"
-                    data-date-to
-                >
-            </div>
-            <div class="col-md-4">
-                <div class="d-flex flex-wrap gap-2">
-                    <button type="submit" class="btn btn-primary">Apply Filters</button>
-                    <a href="{% url 'admin-security-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
-                </div>
-            </div>
-            <div class="col-12">
-                <div
-                    id="adminSecurityReportDateMessage"
-                    class="form-text text-danger{% if not date_filter_error %} d-none{% endif %}"
-                    data-date-error
-                >{{ date_filter_error }}</div>
-            </div>
-        </form>
-        {% if has_active_filters and active_filter_badges %}
-        <div class="d-flex flex-wrap gap-2 mt-3">
-            {% for badge in active_filter_badges %}
-            <span class="badge bg-secondary">{{ badge }}</span>
-            {% endfor %}
-        </div>
-        {% endif %}
-    </div>
-</div>
-
-<div class="row g-3 mb-3">
-    <div class="col-md-6 col-xl">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Failed Logins</div>
-                <div class="h4 mb-2 text-warning">{{ failed_login_attempts_count }}</div>
-                <a href="{{ suspicious_failed_url }}" class="btn btn-sm btn-outline-warning">Review Failed Logins</a>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Permission Denied Events</div>
-                <div class="h4 mb-2 text-danger">{{ permission_denied_count }}</div>
-                <a href="{{ permission_denied_audit_url }}" class="btn btn-sm btn-outline-danger">View Audit Details</a>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Suspended Accounts</div>
-                <div class="h4 mb-2">{{ suspended_accounts_count }}</div>
-                <a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-secondary">Review Suspicious Activity</a>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Failed Email Deliveries</div>
-                <div class="h4 mb-2 {% if failed_email_deliveries_count %}text-danger{% endif %}">{{ failed_email_deliveries_count }}</div>
-                <a href="{{ failed_email_logs_url }}" class="btn btn-sm btn-outline-danger">Review Failed Emails</a>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6 col-xl">
-        <div class="dashboard-card h-100">
-            <div class="card-body">
-                <div class="text-muted small">Requires Investigation</div>
-                <div class="h4 mb-2">{{ requires_investigation_count }}</div>
-                <a href="{{ audit_log_url }}" class="btn btn-sm btn-outline-dark">View Audit Details</a>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header">Requires Investigation</div>
-    <div class="card-body">
-        <div class="table-responsive">
-            <table class="table table-clean table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th>Issue</th>
-                        <th>What is happening?</th>
-                        <th>Count</th>
-                        <th>Suggested next step</th>
-                        <th class="text-end">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% if failed_login_attempts_count %}
-                    <tr>
-                        <td>Failed login attempts</td>
-                        <td>Some users could not sign in successfully and may need investigation.</td>
-                        <td>{{ failed_login_attempts_count }}</td>
-                        <td>Review recent failed logins and suspend any account with repeated suspicious attempts.</td>
-                        <td class="text-end"><a href="{{ suspicious_failed_url }}" class="btn btn-sm btn-outline-warning">Review Failed Logins</a></td>
-                    </tr>
+    <section class="report-section">
+        <div class="card">
+            <div class="card-body admin-security-report-filters">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                    <div>
+                        <div class="report-summary-label">Date Filters</div>
+                        <div class="text-muted small">Filter admin, security, and email events by event date. Same-day, From-only, and To-only ranges are supported.</div>
+                    </div>
+                    {% if has_active_filters %}
+                    <a href="{% url 'admin-security-report' %}" class="btn btn-outline-secondary btn-sm">Clear Filters</a>
                     {% endif %}
-                    {% if permission_denied_count %}
-                    <tr>
-                        <td>Permission denied events</td>
-                        <td>Users tried to open pages without the required role or permission.</td>
-                        <td>{{ permission_denied_count }}</td>
-                        <td>Check whether the access attempt was harmless or needs follow-up.</td>
-                        <td class="text-end"><a href="{{ permission_denied_audit_url }}" class="btn btn-sm btn-outline-danger">View Audit Details</a></td>
-                    </tr>
-                    {% endif %}
-                    {% if failed_email_deliveries_count %}
-                    <tr>
-                        <td>Failed email deliveries</td>
-                        <td>Some reminder, invoice or announcement emails could not be delivered.</td>
-                        <td>{{ failed_email_deliveries_count }}</td>
-                        <td>Review the failed delivery log and correct recipient or SMTP issues.</td>
-                        <td class="text-end"><a href="{{ failed_email_logs_url }}" class="btn btn-sm btn-outline-danger">Review Failed Emails</a></td>
-                    </tr>
-                    {% endif %}
-                    {% if suspended_accounts_count %}
-                    <tr>
-                        <td>Suspended accounts</td>
-                        <td>Some accounts are currently suspended and may need restoration or continued containment.</td>
-                        <td>{{ suspended_accounts_count }}</td>
-                        <td>Check flagged accounts and decide whether to keep them suspended or restore them.</td>
-                        <td class="text-end"><a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-secondary">Review Suspicious Activity</a></td>
-                    </tr>
-                    {% endif %}
-                    {% if not failed_login_attempts_count and not permission_denied_count and not failed_email_deliveries_count and not suspended_accounts_count %}
-                    <tr><td colspan="5" class="text-center py-3"><div class="empty-state">No urgent admin or security issues were found from the current records.</div></td></tr>
-                    {% endif %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<div class="card mb-3">
-    <div class="card-header">User Summary</div>
-    <div class="card-body">
-        <div class="row g-3 mb-3">
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Total Users</div>
-                    <div class="h4 mb-0">{{ total_users }}</div>
                 </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">New Users This Month</div>
-                    <div class="h4 mb-0">{{ new_users_this_month }}</div>
-                </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Active Users</div>
-                    <div class="h4 mb-0 text-success">{{ active_users_count }}</div>
-                </div>
-            </div>
-            <div class="col-md-3 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Suspended / Inactive</div>
-                    <div class="h4 mb-0 text-danger">{{ suspended_or_inactive_users_count }}</div>
-                </div>
-            </div>
-        </div>
-        <div class="table-responsive">
-            <table class="table table-clean mb-0">
-                <thead>
-                    <tr>
-                        <th>Role</th>
-                        <th class="text-end">Count</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in users_by_role %}
-                    <tr>
-                        <td>{{ row.label }}</td>
-                        <td class="text-end">{{ row.count }}</td>
-                    </tr>
-                    {% empty %}
-                    <tr><td colspan="2" class="text-center py-3">No role summary available.</td></tr>
+                <form id="adminSecurityReportFilterForm" method="get" class="row g-3 align-items-end" data-date-range-form>
+                    <div class="col-md-4 col-xl-3">
+                        <label for="eventDateFrom" class="form-label">Event Date From</label>
+                        <input
+                            id="eventDateFrom"
+                            type="date"
+                            name="date_from"
+                            value="{{ date_from }}"
+                            class="form-control"
+                            data-date-from
+                        >
+                    </div>
+                    <div class="col-md-4 col-xl-3">
+                        <label for="eventDateTo" class="form-label">Event Date To</label>
+                        <input
+                            id="eventDateTo"
+                            type="date"
+                            name="date_to"
+                            value="{{ date_to }}"
+                            class="form-control"
+                            data-date-to
+                        >
+                    </div>
+                    <div class="col-md-4 col-xl-6">
+                        <div class="d-flex flex-wrap gap-2 admin-security-report-filter-actions">
+                            <button type="submit" class="btn btn-primary">Apply Filters</button>
+                            <a href="{% url 'admin-security-report' %}" class="btn btn-outline-secondary">Clear Filters</a>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div
+                            id="adminSecurityReportDateMessage"
+                            class="form-text text-danger admin-security-report-date-message{% if not date_filter_error %} d-none{% endif %}"
+                            data-date-error
+                        >{{ date_filter_error }}</div>
+                    </div>
+                </form>
+                {% if has_active_filters and active_filter_badges %}
+                <div class="d-flex flex-wrap gap-2 mt-3">
+                    {% for badge in active_filter_badges %}
+                    <span class="report-period">{{ badge }}</span>
                     {% endfor %}
-                </tbody>
-            </table>
+                </div>
+                {% endif %}
+            </div>
         </div>
-    </div>
-</div>
+    </section>
 
-<h2 class="section-heading mb-3">Useful Charts</h2>
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Users by Role</div>
-            <div class="report-chart-body">
-                <canvas id="usersByRoleChart" class="report-chart-canvas" aria-label="Users by role chart" role="img"></canvas>
-                <div id="usersByRoleChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+    <section class="report-section">
+        <div class="row g-3 report-kpi-grid">
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-warning h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Failed Logins</div>
+                        <div class="report-kpi-value">{{ failed_login_attempts_count }}</div>
+                        <div class="small text-muted">Unsuccessful login attempts that may show forgotten passwords or suspicious access.</div>
+                        <a href="{{ suspicious_failed_url }}" class="report-kpi-link">Review Failed Logins</a>
+                    </div>
+                </div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Shows how user accounts are distributed across the system roles.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Account Status Breakdown</div>
-            <div class="report-chart-body">
-                <canvas id="accountStatusChart" class="report-chart-canvas" aria-label="Account status breakdown chart" role="img"></canvas>
-                <div id="accountStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Permission Denied</div>
+                        <div class="report-kpi-value">{{ permission_denied_count }}</div>
+                        <div class="small text-muted">Access attempts blocked because the user did not have the required role.</div>
+                        <a href="{{ permission_denied_audit_url }}" class="report-kpi-link">View Audit Details</a>
+                    </div>
+                </div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Visible totals: Active {{ active_users_count }}, Suspended or inactive {{ suspended_or_inactive_only_count }}, Unverified {{ unverified_users_count }}.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Failed Login Attempts Trend (Last 7 Days)</div>
-            <div class="report-chart-body">
-                <canvas id="failedLoginTrendChart" class="report-chart-canvas" aria-label="Failed login attempts trend chart" role="img"></canvas>
-                <div id="failedLoginTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-danger h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Failed Emails</div>
+                        <div class="report-kpi-value">{{ failed_email_deliveries_count }}</div>
+                        <div class="small text-muted">Reminder, announcement, invoice, or support emails that failed to deliver.</div>
+                        <a href="{{ failed_email_logs_url }}" class="report-kpi-link">Review Failed Emails</a>
+                    </div>
+                </div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Shows whether failed login activity is increasing and needs immediate investigation.</div>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="report-chart-card">
-            <div class="report-chart-header">Admin Action Summary</div>
-            <div class="report-chart-body">
-                <canvas id="adminActionSummaryChart" class="report-chart-canvas" aria-label="Admin action summary chart" role="img"></canvas>
-                <div id="adminActionSummaryChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+            <div class="col-12 col-md-6 col-xl-3">
+                <div class="dashboard-card report-kpi-card report-kpi-card-neutral h-100">
+                    <div class="card-body">
+                        <div class="report-kpi-label">Requires Investigation</div>
+                        <div class="report-kpi-value">{{ requires_investigation_count }}</div>
+                        <div class="small text-muted">Combined count of suspicious activity, failed emails, suspended accounts, and overdue support tickets.</div>
+                        <a href="#requiresInvestigation" class="report-kpi-link">Review Items Below</a>
+                    </div>
+                </div>
             </div>
-            <div class="px-3 pb-3 text-muted small">Summarises key admin actions such as account creation, role changes and password resets.</div>
         </div>
-    </div>
-</div>
+    </section>
 
-<h2 class="section-heading mb-3">Detailed Records</h2>
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span>Recent Suspicious Activities</span>
-                <a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-secondary">Review Suspicious Activity</a>
+    <section id="requiresInvestigation" class="report-section">
+        <h2 class="section-heading mb-3">User Summary</h2>
+        <div class="report-summary-strip">
+            <div class="report-summary-card">
+                <div class="report-summary-label">Total Users</div>
+                <div class="report-summary-value">{{ total_users }}</div>
+                <div class="report-summary-note">All accounts currently registered in the system.</div>
             </div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>User</th>
-                            <th>Event</th>
-                            <th class="text-end">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for log in recent_suspicious_activities %}
-                        <tr>
-                            <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
-                            <td>{{ log.user.username|default:"System" }}</td>
-                            <td>{{ log.action }}</td>
-                            <td class="text-end"><a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-primary">Review Suspicious Activity</a></td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No suspicious activity was found for the current records.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div class="report-summary-card">
+                <div class="report-summary-label">New Users This Month</div>
+                <div class="report-summary-value">{{ new_users_this_month }}</div>
+                <div class="report-summary-note">New accounts created during the current month.</div>
+            </div>
+            <div class="report-summary-card">
+                <div class="report-summary-label">Active Users</div>
+                <div class="report-summary-value text-success">{{ active_users_count }}</div>
+                <div class="report-summary-note">Accounts that are active and not suspended.</div>
+            </div>
+            <div class="report-summary-card">
+                <div class="report-summary-label">Suspended / Inactive</div>
+                <div class="report-summary-value text-danger">{{ suspended_or_inactive_users_count }}</div>
+                <div class="report-summary-note">{{ suspended_accounts_count }} account(s) are currently suspended.</div>
             </div>
         </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span>Recent Failed Email Deliveries</span>
-                <a href="{{ failed_email_logs_url }}" class="btn btn-sm btn-outline-danger">Review Failed Emails</a>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Attempted At</th>
-                            <th>Recipient</th>
-                            <th>Template</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for log in recent_failed_email_logs %}
-                        <tr>
-                            <td>{{ log.attempted_at|date:"d M Y, H:i" }}</td>
-                            <td>{{ log.recipient_email }}</td>
-                            <td>{{ log.template_key }}</td>
-                            <td>{{ log.get_status_display }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No failed email deliveries were found.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
+    </section>
 
-<div class="card mb-3">
-    <div class="card-header">Admin Activity Summary</div>
-    <div class="card-body">
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Requires Investigation</span>
+                <span class="text-muted small">Items below need Admin or SuperAdmin follow-up.</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive report-attention-table">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Issue</th>
+                                <th>What is happening?</th>
+                                <th class="text-end">Count</th>
+                                <th>Suggested next step</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if failed_login_attempts_count %}
+                            <tr>
+                                <td><span class="status-badge status-warning">Failed&nbsp;logins</span></td>
+                                <td>Some users could not sign in successfully and may need investigation.</td>
+                                <td class="text-end">{{ failed_login_attempts_count }}</td>
+                                <td>Review recent failed logins and suspend any account with repeated suspicious attempts.</td>
+                                <td class="text-end"><a href="{{ suspicious_failed_url }}" class="report-link">Review Failed Logins</a></td>
+                            </tr>
+                            {% endif %}
+                            {% if permission_denied_count %}
+                            <tr>
+                                <td><span class="status-badge status-danger">Permission&nbsp;denied</span></td>
+                                <td>Users tried to open pages without the required role or permission.</td>
+                                <td class="text-end">{{ permission_denied_count }}</td>
+                                <td>Check whether the access attempt was harmless or needs follow-up.</td>
+                                <td class="text-end"><a href="{{ permission_denied_audit_url }}" class="report-link">View Audit Details</a></td>
+                            </tr>
+                            {% endif %}
+                            {% if failed_email_deliveries_count %}
+                            <tr>
+                                <td><span class="status-badge status-danger">Failed&nbsp;emails</span></td>
+                                <td>Some reminder, invoice, announcement, or support emails could not be delivered.</td>
+                                <td class="text-end">{{ failed_email_deliveries_count }}</td>
+                                <td>Review the failed delivery log and correct recipient or SMTP issues.</td>
+                                <td class="text-end"><a href="{{ failed_email_logs_url }}" class="report-link">Review Failed Emails</a></td>
+                            </tr>
+                            {% endif %}
+                            {% if overdue_support_ticket_count %}
+                            <tr>
+                                <td><span class="status-badge status-danger">Overdue&nbsp;tickets</span></td>
+                                <td>Some unresolved support tickets have reached the response target.</td>
+                                <td class="text-end">{{ overdue_support_ticket_count }}</td>
+                                <td>Review the oldest unresolved tickets and update the requester.</td>
+                                <td class="text-end"><a href="{{ support_ticket_url }}" class="report-link">View Support Tickets</a></td>
+                            </tr>
+                            {% endif %}
+                            {% if suspended_accounts_count %}
+                            <tr>
+                                <td><span class="status-badge status-neutral">Suspended&nbsp;accounts</span></td>
+                                <td>Some accounts are currently suspended and may need restoration or continued containment.</td>
+                                <td class="text-end">{{ suspended_accounts_count }}</td>
+                                <td>Check flagged accounts and decide whether to keep them suspended or restore them.</td>
+                                <td class="text-end"><a href="{{ suspicious_activity_url }}" class="report-link">Review Suspicious Activity</a></td>
+                            </tr>
+                            {% endif %}
+                            {% if not failed_login_attempts_count and not permission_denied_count and not failed_email_deliveries_count and not overdue_support_ticket_count and not suspended_accounts_count %}
+                            <tr><td colspan="5"><div class="report-empty-state m-3">No urgent admin or security issues were found from the current records.</div></td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Support Ticket Health</span>
+                <a href="{{ support_ticket_url }}" class="btn btn-sm btn-outline-secondary">View Support Tickets</a>
+            </div>
+            <div class="card-body">
+                <div class="report-summary-strip admin-security-support-strip">
+                    <div class="report-summary-card">
+                        <div class="report-summary-label">Open Tickets</div>
+                        <div class="report-summary-value">{{ open_support_ticket_count }}</div>
+                        <div class="report-summary-note">New support requests that still need officer follow-up.</div>
+                    </div>
+                    <div class="report-summary-card">
+                        <div class="report-summary-label">In Progress</div>
+                        <div class="report-summary-value">{{ in_progress_support_ticket_count }}</div>
+                        <div class="report-summary-note">Tickets already assigned or being handled.</div>
+                    </div>
+                    <div class="report-summary-card">
+                        <div class="report-summary-label">Reached Response Target</div>
+                        <div class="report-summary-value text-danger">{{ overdue_support_ticket_count }}</div>
+                        <div class="report-summary-note">Unresolved tickets at or beyond {{ support_response_target_days }} day(s).</div>
+                    </div>
+                </div>
+                {% if recent_overdue_support_tickets %}
+                <div class="table-responsive mt-3">
+                    <table class="table table-clean table-hover table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th>Created</th>
+                                <th>Category</th>
+                                <th>Subject</th>
+                                <th class="text-end">Age</th>
+                                <th>Assigned To</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ticket in recent_overdue_support_tickets %}
+                            <tr>
+                                <td class="text-nowrap">{{ ticket.created_at|date:"d M Y, H:i" }}</td>
+                                <td>{{ ticket.get_category_display }}</td>
+                                <td><a href="{% url 'support-ticket-detail' ticket.id %}?next={{ report_return_url|urlencode }}" class="report-link">{{ ticket.subject }}</a></td>
+                                <td class="text-end">{{ ticket.unresolved_age_days }}d</td>
+                                <td>{{ ticket.assigned_display }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="report-empty-state mt-3">No support tickets have reached the response target.</div>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
         <div class="row g-3">
-            <div class="col-lg-4">
+            <div class="col-12 col-xl-5">
                 <div class="card h-100">
-                    <div class="card-header bg-light">Recent Account Creations</div>
-                    <div class="table-responsive">
-                        <table class="table table-clean table-sm mb-0">
-                            <thead>
-                                <tr><th>Time</th><th>Action</th></tr>
-                            </thead>
-                            <tbody>
-                                {% for log in recent_account_creations %}
-                                <tr>
-                                    <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
-                                    <td><span class="text-muted small">{{ log.action }}</span></td>
-                                </tr>
-                                {% empty %}
-                                <tr><td colspan="2" class="text-center py-3">No recent account creations.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    <div class="card-header">Users by Role</div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-clean mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Role</th>
+                                        <th class="text-end">Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in users_by_role %}
+                                    <tr>
+                                        <td>{{ row.label }}</td>
+                                        <td class="text-end">{{ row.count }}</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr><td colspan="2" class="text-center py-3">No role summary available.</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="col-lg-4">
+            <div class="col-12 col-xl-7">
                 <div class="card h-100">
-                    <div class="card-header bg-light">Recent Role Changes</div>
-                    <div class="table-responsive">
-                        <table class="table table-clean table-sm mb-0">
-                            <thead>
-                                <tr><th>Time</th><th>Action</th></tr>
-                            </thead>
-                            <tbody>
-                                {% for log in recent_role_changes %}
-                                <tr>
-                                    <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
-                                    <td><span class="text-muted small">{{ log.action }}</span></td>
-                                </tr>
-                                {% empty %}
-                                <tr><td colspan="2" class="text-center py-3">No recent role changes.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            <div class="col-lg-4">
-                <div class="card h-100">
-                    <div class="card-header bg-light">Recent Password Changes</div>
-                    <div class="table-responsive">
-                        <table class="table table-clean table-sm mb-0">
-                            <thead>
-                                <tr><th>Time</th><th>Action</th></tr>
-                            </thead>
-                            <tbody>
-                                {% for log in recent_password_changes %}
-                                <tr>
-                                    <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
-                                    <td><span class="text-muted small">{{ log.action }}</span></td>
-                                </tr>
-                                {% empty %}
-                                <tr><td colspan="2" class="text-center py-3">No recent password changes logged.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    <div class="card-header">Reminder and Announcement Tools</div>
+                    <div class="card-body">
+                        <div class="report-summary-strip admin-security-settings-strip">
+                            <div class="report-summary-card">
+                                <div class="report-summary-label">Before Due</div>
+                                <div class="report-summary-note">{% if reminder_settings.before_due_reminders_enabled %}Enabled, {{ reminder_settings.reminder_days_before_due }} day(s) before{% else %}Disabled{% endif %}</div>
+                            </div>
+                            <div class="report-summary-card">
+                                <div class="report-summary-label">After Due</div>
+                                <div class="report-summary-note">{% if reminder_settings.after_due_reminders_enabled %}Enabled, {{ reminder_settings.after_due_days }} day(s) after{% else %}Disabled{% endif %}</div>
+                            </div>
+                            <div class="report-summary-card">
+                                <div class="report-summary-label">Repeat Overdue</div>
+                                <div class="report-summary-note">{% if reminder_settings.overdue_repeat_enabled %}Every {{ reminder_settings.overdue_repeat_days }} day(s){% else %}Disabled{% endif %}</div>
+                            </div>
+                            <div class="report-summary-card">
+                                <div class="report-summary-label">Reminder Emails Sent</div>
+                                <div class="report-summary-value">{{ reminder_emails_sent_count }}</div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-3">
+                            <a href="{{ reminder_settings_url }}" class="btn btn-sm btn-outline-dark">Open Reminder Settings</a>
+                            <a href="{{ announcement_email_url }}" class="btn btn-sm btn-outline-primary">Send Announcement</a>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+    </section>
 
-        <div class="card mt-3">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span>Recent Admin Actions</span>
+    <section class="report-section">
+        <h2 class="section-heading mb-3">Useful Charts</h2>
+        <div class="row g-3">
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Users by Role</div>
+                    <div class="report-chart-body">
+                        <canvas id="usersByRoleChart" class="report-chart-canvas" aria-label="Users by role chart" role="img"></canvas>
+                        <div id="usersByRoleChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Shows how user accounts are distributed across the system roles.</div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Account Status Breakdown</div>
+                    <div class="report-chart-body">
+                        <canvas id="accountStatusChart" class="report-chart-canvas" aria-label="Account status breakdown chart" role="img"></canvas>
+                        <div id="accountStatusChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Visible totals: Active {{ active_users_count }}, Suspended or inactive {{ suspended_or_inactive_only_count }}, Unverified {{ unverified_users_count }}.</div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Failed Login Attempts Trend</div>
+                    <div class="report-chart-body">
+                        <canvas id="failedLoginTrendChart" class="report-chart-canvas" aria-label="Failed login attempts trend chart" role="img"></canvas>
+                        <div id="failedLoginTrendChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Shows whether failed login activity is increasing and needs immediate investigation.</div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="report-chart-card">
+                    <div class="report-chart-header">Admin Action Summary</div>
+                    <div class="report-chart-body">
+                        <canvas id="adminActionSummaryChart" class="report-chart-canvas" aria-label="Admin action summary chart" role="img"></canvas>
+                        <div id="adminActionSummaryChartEmpty" class="report-chart-empty d-none">No data available yet</div>
+                    </div>
+                    <div class="px-3 pb-3 text-muted small">Summarises key admin actions such as account creation, role changes, suspensions, and password resets.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <h2 class="section-heading mb-3">Detailed Records</h2>
+        <div class="row g-3">
+            <div class="col-12 col-xl-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <span>Recent Suspicious Activities</span>
+                        <a href="{{ suspicious_activity_url }}" class="btn btn-sm btn-outline-secondary">Review Suspicious Activity</a>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-clean table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>User</th>
+                                        <th>Event</th>
+                                        <th class="text-end">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for log in recent_suspicious_activities %}
+                                    <tr>
+                                        <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
+                                        <td>{{ log.user.username|default:"System" }}</td>
+                                        <td>{{ log.action }}</td>
+                                        <td class="text-end"><a href="{{ suspicious_activity_url }}" class="report-link">Review</a></td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr><td colspan="4"><div class="report-empty-state m-3">No suspicious activity was found for the current records.</div></td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <span>Recent Failed Email Deliveries</span>
+                        <a href="{{ failed_email_logs_url }}" class="btn btn-sm btn-outline-danger">Review Failed Emails</a>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-clean table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Attempted At</th>
+                                        <th>Recipient</th>
+                                        <th>Template</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for log in recent_failed_email_logs %}
+                                    <tr>
+                                        <td>{{ log.attempted_at|date:"d M Y, H:i" }}</td>
+                                        <td>{{ log.recipient_email }}</td>
+                                        <td>{{ log.template_key }}</td>
+                                        <td>{{ log.get_status_display }}</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr><td colspan="4"><div class="report-empty-state m-3">No failed email deliveries were found.</div></td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span>Admin Activity Summary</span>
                 <a href="{{ audit_log_url }}" class="btn btn-sm btn-outline-dark">View Audit Details</a>
             </div>
-            <div class="table-responsive">
-                <table class="table table-clean table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Actor</th>
-                            <th>Action</th>
-                            <th>Target</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for log in recent_admin_actions %}
-                        <tr>
-                            <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
-                            <td>{{ log.user.username|default:"System" }}</td>
-                            <td><span class="text-muted small">{{ log.action }}</span></td>
-                            <td>{{ log.target_type }} {{ log.target_id }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="4" class="text-center py-3">No recent admin actions.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-lg-4">
+                        <div class="card h-100">
+                            <div class="card-header bg-light">Recent Account Creations</div>
+                            <div class="table-responsive">
+                                <table class="table table-clean table-sm mb-0">
+                                    <thead>
+                                        <tr><th>Time</th><th>Action</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for log in recent_account_creations %}
+                                        <tr>
+                                            <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
+                                            <td><span class="text-muted small">{{ log.action }}</span></td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr><td colspan="2" class="text-center py-3">No recent account creations.</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="card h-100">
+                            <div class="card-header bg-light">Recent Role Changes</div>
+                            <div class="table-responsive">
+                                <table class="table table-clean table-sm mb-0">
+                                    <thead>
+                                        <tr><th>Time</th><th>Action</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for log in recent_role_changes %}
+                                        <tr>
+                                            <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
+                                            <td><span class="text-muted small">{{ log.action }}</span></td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr><td colspan="2" class="text-center py-3">No recent role changes.</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="card h-100">
+                            <div class="card-header bg-light">Recent Password Changes</div>
+                            <div class="table-responsive">
+                                <table class="table table-clean table-sm mb-0">
+                                    <thead>
+                                        <tr><th>Time</th><th>Action</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for log in recent_password_changes %}
+                                        <tr>
+                                            <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
+                                            <td><span class="text-muted small">{{ log.action }}</span></td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr><td colspan="2" class="text-center py-3">No recent password changes logged.</td></tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
-<div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Reminder and Announcement Tools</span>
-        <div class="d-flex flex-wrap gap-2">
-            <a href="{{ reminder_settings_url }}" class="btn btn-sm btn-outline-dark">Open Reminder Settings</a>
-            <a href="{{ announcement_email_url }}" class="btn btn-sm btn-outline-primary">Send Announcement</a>
-        </div>
-    </div>
-    <div class="card-body">
-        <div class="row g-3 mb-3">
-            <div class="col-md-4 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Reminder Before Due Date</div>
-                    <div class="fw-semibold">
-                        {% if reminder_settings.before_due_reminders_enabled %}Enabled ({{ reminder_settings.reminder_days_before_due }} day(s) before){% else %}Disabled{% endif %}
+                <div class="card mt-3">
+                    <div class="card-header">Recent Admin Actions</div>
+                    <div class="table-responsive">
+                        <table class="table table-clean table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Actor</th>
+                                    <th>Action</th>
+                                    <th>Target</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for log in recent_admin_actions %}
+                                <tr>
+                                    <td>{{ log.created_at|date:"d M Y, H:i" }}</td>
+                                    <td>{{ log.user.username|default:"System" }}</td>
+                                    <td><span class="text-muted small">{{ log.action }}</span></td>
+                                    <td>{{ log.target_type }} {{ log.target_id }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="4" class="text-center py-3">No recent admin actions.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                </div>
-            </div>
-            <div class="col-md-4 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Reminder On Due Date</div>
-                    <div class="fw-semibold">{% if reminder_settings.due_date_reminders_enabled %}Enabled{% else %}Disabled{% endif %}</div>
-                </div>
-            </div>
-            <div class="col-md-4 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Reminder After Due Date</div>
-                    <div class="fw-semibold">
-                        {% if reminder_settings.after_due_reminders_enabled %}Enabled ({{ reminder_settings.after_due_days }} day(s) after){% else %}Disabled{% endif %}
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Repeat Overdue Reminder</div>
-                    <div class="fw-semibold">
-                        {% if reminder_settings.overdue_repeat_enabled %}Enabled (every {{ reminder_settings.overdue_repeat_days }} day(s)){% else %}Disabled{% endif %}
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Reminder Emails Sent</div>
-                    <div class="h4 mb-0">{{ reminder_emails_sent_count }}</div>
-                </div>
-            </div>
-            <div class="col-md-4 col-sm-6">
-                <div class="sub-kpi h-100">
-                    <div class="text-muted small">Announcement Email Setting</div>
-                    <div class="fw-semibold">{% if reminder_settings.mass_email_enabled %}Enabled{% else %}Disabled{% endif %}</div>
                 </div>
             </div>
         </div>
+    </section>
 
-        <div class="table-responsive">
-            <table class="table table-clean table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th>Attempted At</th>
-                        <th>Recipient</th>
-                        <th>Template</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for log in recent_reminder_email_logs %}
-                    <tr>
-                        <td>{{ log.attempted_at|date:"d M Y, H:i" }}</td>
-                        <td>{{ log.recipient_email }}</td>
-                        <td>{{ log.template_key }}</td>
-                        <td>{{ log.get_status_display }}</td>
-                    </tr>
-                    {% empty %}
-                    <tr><td colspan="4" class="text-center py-3">No reminder email logs found.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+    <section class="report-section">
+        <div class="card">
+            <div class="card-header">Recent Reminder Email Logs</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-clean table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Attempted At</th>
+                                <th>Recipient</th>
+                                <th>Template</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in recent_reminder_email_logs %}
+                            <tr>
+                                <td>{{ log.attempted_at|date:"d M Y, H:i" }}</td>
+                                <td>{{ log.recipient_email }}</td>
+                                <td>{{ log.template_key }}</td>
+                                <td>{{ log.get_status_display }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="4"><div class="report-empty-state m-3">No reminder email logs found.</div></td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
-    </div>
+    </section>
 </div>
 
 {{ users_by_role_chart|json_script:"users-by-role-data" }}

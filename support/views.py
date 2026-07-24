@@ -6,6 +6,7 @@ from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from accounts.permissions import get_user_role, role_required
@@ -29,6 +30,21 @@ INVOICE_PAYMENT_CATEGORIES = {
     SupportTicket.CATEGORY_INVOICE,
     SupportTicket.CATEGORY_PAYMENT,
 }
+SUPPORT_REQUEST_WRONG_ACCOUNT_MESSAGE = (
+    "This support request belongs to another account. "
+    "Please log out and sign in using the account that received the email."
+)
+
+
+def _safe_next_url(request):
+    next_url = (request.GET.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return ""
 
 
 def _ticket_base_queryset():
@@ -138,6 +154,7 @@ def _build_ticket_list_context(
         ticket.response_target_breached = _is_response_target_breached(ticket, response_target_days)
     sla_breached_count = sum(1 for ticket in ticket_list if ticket.response_target_breached)
     role = get_user_role(request.user)
+    return_url = _safe_next_url(request)
     return {
         "tickets": ticket_list,
         "can_handle_tickets": role in TICKET_HANDLER_ROLES,
@@ -152,7 +169,8 @@ def _build_ticket_list_context(
         "page_subtitle": page_subtitle,
         "show_requester_details": show_requester_details,
         "show_assignment": show_assignment,
-        "back_url": _ticket_list_back_url_for(request.user),
+        "back_url": return_url or _ticket_list_back_url_for(request.user),
+        "return_url": return_url,
         **selected_filters,
     }
 
@@ -201,6 +219,32 @@ def _validated_customer_invoice_reference(user, category, raw_invoice_id="", raw
     if invoice is None:
         return ""
     return invoice.invoice_number
+
+
+def _validated_staff_payslip_reference(user, category, raw_payslip_id="", raw_reference=""):
+    related_reference = (raw_reference or "").strip()[:100]
+    if category != SupportTicket.CATEGORY_PAYROLL:
+        return related_reference
+
+    payslip_queryset = _staff_payslip_queryset_for(user).only("id", "employee_id", "payment_date")
+    payslip = None
+    if str(raw_payslip_id).isdigit():
+        payslip = payslip_queryset.filter(pk=int(raw_payslip_id)).first()
+    elif related_reference:
+        employee_id, _, payment_date = related_reference.partition(" / ")
+        if employee_id.strip() and payment_date.strip():
+            try:
+                parsed_payment_date = date.fromisoformat(payment_date.strip())
+            except ValueError:
+                parsed_payment_date = None
+            if parsed_payment_date is not None:
+                payslip = payslip_queryset.filter(
+                    employee_id=employee_id.strip(),
+                    payment_date=parsed_payment_date,
+                ).first()
+    if payslip is None:
+        return ""
+    return f"{payslip.employee_id} / {payslip.payment_date:%Y-%m-%d}"
 
 
 def _invoice_for_ticket_reference(ticket):
@@ -281,6 +325,26 @@ def _can_manage_ticket(user, ticket):
     if role == HR and ticket.category == SupportTicket.CATEGORY_PAYROLL:
         return True
     return False
+
+
+def _wrong_support_request_account_response(request, ticket_id):
+    log_event(
+        action="auth.permission_denied",
+        user=request.user if request.user.is_authenticated else None,
+        target_type="support_ticket",
+        target_id=str(ticket_id),
+        metadata={
+            "path": request.path,
+            "reason": "support_ticket_wrong_requester_account",
+        },
+        ip_address=get_client_ip(request),
+    )
+    return render(
+        request,
+        "403.html",
+        {"permission_message": SUPPORT_REQUEST_WRONG_ACCOUNT_MESSAGE},
+        status=403,
+    )
 
 
 def _internal_ticket_back_url_for(user):
@@ -530,6 +594,23 @@ def support_ticket_chat_create(request):
                 },
                 status=400,
             )
+    elif role == STAFF:
+        related_reference = _validated_staff_payslip_reference(
+            request.user,
+            category,
+            raw_payslip_id=request.POST.get("invoice_id", ""),
+            raw_reference=related_reference,
+        )
+        if category == SupportTicket.CATEGORY_PAYROLL and not related_reference:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "errors": {
+                        "related_reference": ["Select one of your payslips before sending this request."],
+                    },
+                },
+                status=400,
+            )
 
     subject = _chat_subject_from(message, issue_label, related_reference)
     priority = _chat_priority_for(category, issue_label, message)
@@ -700,9 +781,10 @@ def support_ticket_detail(request, ticket_id):
             "ticket": ticket,
             "form": form,
             "can_manage": can_manage,
+            "detail_page_title": ticket.subject,
             "support_ticket_sla_days": response_target_days,
             "related_reference_url": _reference_url_for(request.user, ticket),
-            "back_url": _internal_ticket_back_url_for(request.user),
+            "back_url": _safe_next_url(request) or _internal_ticket_back_url_for(request.user),
             "back_label": "Back",
             "show_requester_details": True,
         },
@@ -710,9 +792,15 @@ def support_ticket_detail(request, ticket_id):
 
 
 @login_required
-@role_required(CUSTOMER, STAFF)
 def customer_support_ticket_detail(request, ticket_id):
-    ticket = get_object_or_404(_customer_ticket_queryset_for(request.user), pk=ticket_id)
+    role = get_user_role(request.user)
+    if role not in {CUSTOMER, STAFF}:
+        return _wrong_support_request_account_response(request, ticket_id)
+
+    ticket = _ticket_base_queryset().filter(pk=ticket_id).first()
+    if ticket is None or ticket.created_by_id != request.user.id:
+        return _wrong_support_request_account_response(request, ticket_id)
+
     response_target_days = get_support_ticket_response_target_days()
     ticket.response_target_breached = _is_response_target_breached(ticket, response_target_days)
     return render(
@@ -722,10 +810,11 @@ def customer_support_ticket_detail(request, ticket_id):
             "ticket": ticket,
             "form": None,
             "can_manage": False,
+            "detail_page_title": "Support Request",
             "support_ticket_sla_days": response_target_days,
             "related_reference_url": _reference_url_for(request.user, ticket),
-            "back_url": reverse("customer-support-ticket-list"),
-            "back_label": "Back to My Support Requests",
+            "back_url": _safe_next_url(request) or reverse("customer-support-ticket-list"),
+            "back_label": "Back",
             "show_requester_details": False,
         },
     )
@@ -735,6 +824,7 @@ def customer_support_ticket_detail(request, ticket_id):
 @role_required(SUPERADMIN, ADMIN)
 def support_ticket_settings_update(request):
     support_settings = SupportTicketSettings.load()
+    back_url = reverse("support-ticket-list")
     if request.method == "POST":
         form = SupportTicketSettingsForm(request.POST, instance=support_settings)
         if form.is_valid():
@@ -750,7 +840,7 @@ def support_ticket_settings_update(request):
                 ip_address=get_client_ip(request),
             )
             messages.success(request, "Support ticket settings updated.")
-            return redirect("support-ticket-list")
+            return redirect(back_url)
     else:
         form = SupportTicketSettingsForm(instance=support_settings)
 
@@ -759,5 +849,6 @@ def support_ticket_settings_update(request):
         "support/settings.html",
         {
             "form": form,
+            "back_url": back_url,
         },
     )

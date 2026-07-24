@@ -10,7 +10,7 @@
                 <h1 class="page-title">Support Ticket Settings</h1>
                 <p class="page-subtitle">Set when unresolved support tickets should be highlighted for follow-up.</p>
             </div>
-            <a href="{% url 'support-ticket-list' %}" class="btn btn-outline-secondary">Back to Support Tickets</a>
+            <a href="{{ back_url }}" class="btn btn-outline-secondary">Back to Support Tickets</a>
         </div>
 
         <div class="card">
@@ -26,7 +26,7 @@
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">Save Settings</button>
-                        <a href="{% url 'support-ticket-list' %}" class="btn btn-outline-secondary">Cancel</a>
+                        <a href="{{ back_url }}" class="btn btn-outline-secondary">Cancel</a>
                     </div>
                 </form>
             </div>

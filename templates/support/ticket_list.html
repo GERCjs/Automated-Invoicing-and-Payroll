@@ -29,6 +29,7 @@
 <div class="card">
     <div class="card-header">
         <form method="get" class="row g-2 align-items-end">
+            {% if return_url %}<input type="hidden" name="next" value="{{ return_url }}">{% endif %}
             <div class="col-md-2">
                 <label class="form-label small">Status</label>
                 <select name="status" class="form-select form-select-sm">
@@ -88,7 +89,7 @@
             </thead>
             <tbody>
                 {% for ticket in tickets %}
-                <tr class="support-ticket-row {% if ticket.response_target_breached %}support-ticket-overdue{% endif %}" data-ticket-url="{% url detail_url_name ticket.id %}" role="link" tabindex="0">
+                <tr class="support-ticket-row {% if ticket.response_target_breached %}support-ticket-overdue{% endif %}" data-ticket-url="{% url detail_url_name ticket.id %}{% if return_url %}?next={{ return_url|urlencode }}{% endif %}" role="link" tabindex="0">
                     <td class="text-nowrap">{{ ticket.created_at|date:"Y-m-d H:i" }}</td>
                     {% if show_requester_details %}
                     <td>

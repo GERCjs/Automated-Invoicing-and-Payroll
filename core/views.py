@@ -8,6 +8,7 @@ from django.db.models.functions import TruncMonth
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from accounts.permissions import get_role_landing_route_name, get_user_role, role_required
 from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, ROLE_CHOICES, SUPERADMIN
@@ -210,6 +211,17 @@ def _query_string(params: dict) -> str:
     if not cleaned:
         return ""
     return f"?{urlencode(cleaned)}"
+
+
+def _safe_next_url(request):
+    next_url = (request.GET.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return ""
 
 
 def _build_chart_summary(month_labels, values):
@@ -597,6 +609,7 @@ def audit_log_list(request):
     selected_role = request.GET.get("role", "").strip()
     selected_action = request.GET.get("action", "").strip()
     search_query = request.GET.get("q", "").strip()
+    return_url = _safe_next_url(request)
     selected_action_display = "" if selected_action in NOISY_AUDIT_ACTIONS else selected_action
 
     logs = (
@@ -637,6 +650,8 @@ def audit_log_list(request):
             "selected_role": selected_role,
             "selected_action": selected_action_display,
             "search_query": search_query,
+            "back_url": return_url or reverse("admin-dashboard"),
+            "return_url": return_url,
         },
     )
 
@@ -646,6 +661,7 @@ def audit_log_list(request):
 def validation_error_list(request):
     selected_module = request.GET.get("module", "").strip()
     search_query = request.GET.get("q", "").strip()
+    return_url = _safe_next_url(request)
 
     errors = ImportRowError.objects.select_related("import_job").order_by("-created_at", "-id")
     if selected_module:
@@ -665,6 +681,8 @@ def validation_error_list(request):
             "module_choices": ImportJob.MODULE_CHOICES,
             "selected_module": selected_module,
             "search_query": search_query,
+            "back_url": return_url or reverse("admin-dashboard"),
+            "return_url": return_url,
         },
     )
 

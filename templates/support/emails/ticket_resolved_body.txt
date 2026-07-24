@@ -12,7 +12,7 @@ Status: {{ ticket.get_status_display }}
 {% endif %}You can review the request here:
 {{ ticket_url }}
 
-If you still need help, please open the request in the portal and submit a new support message.
+If you still need help, please submit a new support request.
 
 {{ company_name }}
 {{ company_email }}

@@ -81,6 +81,26 @@ class EmailDeliveryLog(models.Model):
     def __str__(self) -> str:
         return f"{self.recipient_email} - {self.status}"
 
+    @property
+    def display_error_message(self):
+        message = (self.error_message or "").strip()
+        if not message:
+            return ""
+
+        lowered_message = message.lower()
+        if "errno 101" in lowered_message or "network is unreachable" in lowered_message:
+            return "Email server/network could not be reached."
+        if "you can only send testing emails" in lowered_message or "resend.com/domains" in lowered_message:
+            return "Email provider rejected the recipient. Verify the sender domain or use an allowed test recipient."
+        if "connection refused" in lowered_message:
+            return "Email server refused the connection."
+        if "timed out" in lowered_message or "timeout" in lowered_message:
+            return "Email server connection timed out."
+        if "authentication" in lowered_message or "credentials" in lowered_message:
+            return "Email server login failed. Check the SMTP account settings."
+
+        return message
+
 
 class PaymentReminderSettings(models.Model):
     before_due_reminders_enabled = models.BooleanField(default=True)

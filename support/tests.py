@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF
+from accounts.roles import ADMIN, CUSTOMER, FINANCE, HR, STAFF, SUPERADMIN
 from invoicing.models import Customer, Invoice
 from notifications.models import EmailDeliveryLog
 from payroll.models import Employee, PayrollRecord
@@ -178,6 +178,90 @@ class SupportTicketFlowTests(TestCase):
         self.assertContains(response, "My payslip looks wrong")
         self.assertContains(response, "STF-000777 / 2026-06-30")
 
+    def test_staff_can_create_chat_ticket_for_own_payslip(self):
+        staff = self._make_user("chat_staff", STAFF)
+        Employee.objects.create(
+            user=staff,
+            employee_code="STF-000888",
+            first_name="Chat",
+            last_name="Staff",
+            email=staff.email,
+            hire_date=date(2026, 1, 1),
+            base_salary="3000.00",
+        )
+        payslip = PayrollRecord.objects.create(
+            employee_name="Chat Staff",
+            employee_id="STF-000888",
+            basic_salary="3000.00",
+            net_salary="2800.00",
+            payment_date=date(2026, 6, 30),
+        )
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("support-ticket-chat-create"),
+            data={
+                "category": SupportTicket.CATEGORY_PAYROLL,
+                "issue_label": "My payslip looks wrong",
+                "invoice_id": payslip.id,
+                "related_reference": "STF-000888 / 2026-06-30",
+                "message": "The deduction amount looks incorrect.",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        ticket = SupportTicket.objects.get(related_reference="STF-000888 / 2026-06-30")
+        self.assertEqual(ticket.created_by, staff)
+        self.assertEqual(ticket.category, SupportTicket.CATEGORY_PAYROLL)
+        self.assertEqual(ticket.assigned_role, SupportTicket.ASSIGNED_ROLE_PAYROLL)
+        self.assertEqual(ticket.status, SupportTicket.STATUS_IN_PROGRESS)
+
+    def test_staff_cannot_create_chat_ticket_for_another_staffs_payslip(self):
+        staff = self._make_user("chat_staff_owner", STAFF)
+        other_staff = self._make_user("chat_staff_other", STAFF)
+        Employee.objects.create(
+            user=staff,
+            employee_code="STF-000901",
+            first_name="Owner",
+            last_name="Staff",
+            email=staff.email,
+            hire_date=date(2026, 1, 1),
+            base_salary="3000.00",
+        )
+        Employee.objects.create(
+            user=other_staff,
+            employee_code="STF-000902",
+            first_name="Other",
+            last_name="Staff",
+            email=other_staff.email,
+            hire_date=date(2026, 1, 1),
+            base_salary="3000.00",
+        )
+        other_payslip = PayrollRecord.objects.create(
+            employee_name="Other Staff",
+            employee_id="STF-000902",
+            basic_salary="3000.00",
+            net_salary="2800.00",
+            payment_date=date(2026, 6, 30),
+        )
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("support-ticket-chat-create"),
+            data={
+                "category": SupportTicket.CATEGORY_PAYROLL,
+                "issue_label": "My payslip looks wrong",
+                "invoice_id": other_payslip.id,
+                "related_reference": "STF-000902 / 2026-06-30",
+                "message": "Trying to submit another staff payslip.",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(SupportTicket.objects.filter(message__icontains="another staff payslip").exists())
+
     def test_staff_can_view_own_support_requests(self):
         staff = self._make_user("ticket_staff", STAFF)
         own_ticket = SupportTicket.objects.create(
@@ -261,7 +345,32 @@ class SupportTicketFlowTests(TestCase):
 
         response = self.client.get(reverse("customer-support-ticket-detail", args=[other_ticket.id]))
 
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(
+            response,
+            "This support request belongs to another account. Please log out and sign in using the account that received the email.",
+            status_code=403,
+        )
+
+    def test_internal_user_opening_customer_ticket_email_link_sees_wrong_account_message(self):
+        customer = self._make_user("ticket_email_customer", CUSTOMER)
+        superadmin = self._make_user("ticket_email_superadmin", SUPERADMIN)
+        ticket = SupportTicket.objects.create(
+            category=SupportTicket.CATEGORY_INVOICE,
+            subject="Resolved email link",
+            message="This was sent from email.",
+            created_by=customer,
+        )
+        self.client.force_login(superadmin)
+
+        response = self.client.get(reverse("customer-support-ticket-detail", args=[ticket.id]))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(
+            response,
+            "This support request belongs to another account. Please log out and sign in using the account that received the email.",
+            status_code=403,
+        )
 
     def test_customer_ticket_detail_shows_reference_status_message_and_resolution_note(self):
         customer = self._make_user("detail_customer", CUSTOMER)
@@ -557,6 +666,26 @@ class SupportTicketFlowTests(TestCase):
 
         self.assertRedirects(response, reverse("support-ticket-list"))
         self.assertEqual(SupportTicketSettings.load().response_target_days, 5)
+
+    def test_finance_and_payroll_cannot_update_support_response_target_setting(self):
+        finance = self._make_user("response_target_finance", FINANCE)
+        payroll = self._make_user("response_target_payroll", HR)
+
+        self.client.force_login(finance)
+        finance_response = self.client.post(
+            reverse("support-ticket-settings-update"),
+            data={"response_target_days": 4},
+        )
+        self.assertEqual(finance_response.status_code, 403)
+        self.assertEqual(SupportTicketSettings.load().response_target_days, 3)
+
+        self.client.force_login(payroll)
+        payroll_response = self.client.post(
+            reverse("support-ticket-settings-update"),
+            data={"response_target_days": 6},
+        )
+        self.assertEqual(payroll_response.status_code, 403)
+        self.assertEqual(SupportTicketSettings.load().response_target_days, 3)
 
     def test_response_target_setting_controls_overdue_highlight(self):
         admin = self._make_user("custom_sla_admin", ADMIN)

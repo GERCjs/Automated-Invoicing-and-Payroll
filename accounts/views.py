@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.dateparse import parse_date
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from core.audit import get_client_ip, log_event
 from core.models import AuditLog
@@ -35,6 +36,17 @@ from .roles import ADMIN, CUSTOMER, ROLE_CHOICES, STAFF, SUPERADMIN
 User = get_user_model()
 # Template key used when saving verification email logs.
 VERIFICATION_EMAIL_TEMPLATE_KEY = "account_verification_email_v1"
+
+
+def _safe_next_url(request):
+    next_url = (request.GET.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return ""
 
 
 def _send_verification_email(request, user, *, triggered_by=None):
@@ -960,24 +972,36 @@ def mass_email_send(request):
 @login_required
 @role_required(SUPERADMIN, ADMIN)
 def email_delivery_log_list(request):
-    # List recent operational email logs.
+    # List recent email logs across all automated and admin-triggered emails.
     selected_type = request.GET.get("type", "").strip()
     selected_status = request.GET.get("status", "").strip()
     search_query = request.GET.get("q", "").strip()
+    return_url = _safe_next_url(request)
     date_from = parse_date(request.GET.get("date_from", "").strip())
     date_to = parse_date(request.GET.get("date_to", "").strip())
 
-    logs = EmailDeliveryLog.objects.select_related("triggered_by").filter(
-        Q(template_key="admin_mass_email")
-        | Q(template_key__startswith="payment_reminder_")
-        | Q(template_key="support_ticket_resolved_v1")
-    )
+    logs = EmailDeliveryLog.objects.select_related("triggered_by").all()
     if selected_type == "mass":
         logs = logs.filter(template_key="admin_mass_email")
     elif selected_type == "reminder":
         logs = logs.filter(template_key__startswith="payment_reminder_")
     elif selected_type == "support":
         logs = logs.filter(template_key="support_ticket_resolved_v1")
+    elif selected_type == "invoice":
+        logs = logs.filter(template_key="invoice_email_v1")
+    elif selected_type == "payment":
+        logs = logs.filter(
+            Q(template_key__icontains="payment")
+            | Q(template_key__icontains="refund")
+            | Q(template_key__startswith="bank_transfer_")
+        ).exclude(template_key__startswith="payment_reminder_")
+    elif selected_type == "payroll":
+        logs = logs.filter(
+            Q(template_key="payroll_payslip")
+            | Q(template_key="payroll_payslip_email_v1")
+        )
+    elif selected_type == "account":
+        logs = logs.filter(template_key=VERIFICATION_EMAIL_TEMPLATE_KEY)
     if selected_status:
         logs = logs.filter(status=selected_status)
     if date_from:
@@ -1004,6 +1028,8 @@ def email_delivery_log_list(request):
             "date_from": date_from.isoformat() if date_from else "",
             "date_to": date_to.isoformat() if date_to else "",
             "status_choices": EmailDeliveryLog.STATUS_CHOICES,
+            "back_url": return_url or reverse("admin-dashboard"),
+            "return_url": return_url,
         },
     )
 
@@ -1015,6 +1041,7 @@ def suspicious_activity_list(request):
     selected_role = request.GET.get("role", "").strip()
     search_query = request.GET.get("q", "").strip()
     selected_reason = request.GET.get("reason", "").strip()
+    return_url = _safe_next_url(request)
     recent_since = timezone.now() - timezone.timedelta(days=7)
 
     # Suspicious activity is limited to the most recent 7 days.
@@ -1122,6 +1149,8 @@ def suspicious_activity_list(request):
             "selected_role": selected_role,
             "selected_reason": selected_reason,
             "search_query": search_query,
+            "back_url": return_url or reverse("admin-dashboard"),
+            "return_url": return_url,
         },
     )
 

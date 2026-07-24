@@ -1108,6 +1108,55 @@ class AnnouncementEmailTests(TestCase):
         self.assertContains(response, "Announcement Email")
         self.assertContains(response, "Send Announcement")
 
+    def test_delivery_logs_show_all_failed_email_types_by_default(self):
+        EmailDeliveryLog.objects.create(
+            recipient_email="invoice-failed@example.com",
+            subject="Invoice Email",
+            template_key="invoice_email_v1",
+            status=EmailDeliveryLog.STATUS_FAILED,
+            error_message="[Errno 101] Network is unreachable",
+            related_object_type="invoice",
+            related_object_id="INV-TEST-001",
+        )
+        EmailDeliveryLog.objects.create(
+            recipient_email="payment-failed@example.com",
+            subject="Payment Email",
+            template_key="stripe_payment_failed_v1",
+            status=EmailDeliveryLog.STATUS_FAILED,
+            related_object_type="payment",
+            related_object_id="PAY-TEST-001",
+        )
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.get(reverse("email-delivery-log-list"), data={"status": "failed"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "invoice-failed@example.com")
+        self.assertContains(response, "payment-failed@example.com")
+        self.assertContains(response, "Invoice Email")
+        self.assertContains(response, "Payment Email")
+        self.assertContains(response, "Email server/network could not be reached.")
+        self.assertNotContains(response, "[Errno 101]")
+
+    def test_delivery_logs_show_short_provider_error_message(self):
+        EmailDeliveryLog.objects.create(
+            recipient_email="restricted@example.com",
+            subject="Payslip Email",
+            template_key="payroll_payslip_email_v1",
+            status=EmailDeliveryLog.STATUS_FAILED,
+            error_message=(
+                "(550, b'You can only send testing emails to your own email address. "
+                "To send emails to other recipients, please verify a domain at resend.com/domains.')"
+            ),
+        )
+        self.client.login(username=self.admin.username, password=self.password)
+
+        response = self.client.get(reverse("email-delivery-log-list"), data={"status": "failed"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Email provider rejected the recipient.")
+        self.assertNotContains(response, "You can only send testing emails")
+
     def test_customer_cannot_open_announcement_email_page(self):
         self.client.login(username=self.customer.username, password=self.password)
 

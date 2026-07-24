@@ -21,6 +21,7 @@ from payments.models import PaymentRecord, PaymentRefund
 from payments.services import successful_payments_queryset
 from payroll.models import Employee, PayrollRecord
 from payroll.services import cpf_for_2026
+from support.models import SupportTicket, get_support_ticket_response_target_days
 
 OUTSTANDING_INVOICE_STATUSES = {
     Invoice.STATUS_SENT,
@@ -828,6 +829,7 @@ def admin_security_report(request):
     user_model = get_user_model()
     today = timezone.localdate()
     month_start = today.replace(day=1)
+    report_generated_at = timezone.localtime()
     raw_date_from = (request.GET.get("date_from") or "").strip()
     raw_date_to = (request.GET.get("date_to") or "").strip()
     date_from, date_to, filter_date_from, filter_date_to, date_filter_error = _parse_date_range(
@@ -837,6 +839,7 @@ def admin_security_report(request):
 
     filtered_audit_logs = AuditLog.objects.all()
     filtered_email_logs = EmailDeliveryLog.objects.all()
+    filtered_support_tickets = SupportTicket.objects.select_related("created_by", "assigned_to").all()
     if not date_filter_error:
         filtered_audit_logs = _apply_date_bounds(
             filtered_audit_logs,
@@ -847,6 +850,12 @@ def admin_security_report(request):
         filtered_email_logs = _apply_date_bounds(
             filtered_email_logs,
             "attempted_at__date",
+            filter_date_from,
+            filter_date_to,
+        )
+        filtered_support_tickets = _apply_date_bounds(
+            filtered_support_tickets,
+            "created_at__date",
             filter_date_from,
             filter_date_to,
         )
@@ -979,10 +988,23 @@ def admin_security_report(request):
     recent_failed_email_logs = filtered_email_logs.filter(
         status=EmailDeliveryLog.STATUS_FAILED
     ).order_by("-attempted_at")[:10]
+    support_response_target_days = get_support_ticket_response_target_days()
+    unresolved_support_tickets = filtered_support_tickets.exclude(status=SupportTicket.STATUS_RESOLVED)
+    overdue_support_cutoff_date = today - timezone.timedelta(days=support_response_target_days)
+    overdue_support_tickets = unresolved_support_tickets.filter(created_at__date__lte=overdue_support_cutoff_date)
+    open_support_ticket_count = filtered_support_tickets.filter(status=SupportTicket.STATUS_OPEN).count()
+    in_progress_support_ticket_count = filtered_support_tickets.filter(
+        status=SupportTicket.STATUS_IN_PROGRESS
+    ).count()
+    overdue_support_ticket_count = overdue_support_tickets.count()
+    recent_overdue_support_tickets = list(overdue_support_tickets.order_by("created_at")[:5])
+    for ticket in recent_overdue_support_tickets:
+        ticket.response_target_breached = True
     requires_investigation_count = (
         suspicious_activity_count
         + failed_email_deliveries_count
         + suspended_accounts_count
+        + overdue_support_ticket_count
     )
     active_filter_badges = []
     if filter_date_from or filter_date_to:
@@ -990,6 +1012,15 @@ def admin_security_report(request):
         date_range_end = filter_date_to.strftime("%d %b %Y") if filter_date_to else "Today"
         active_filter_badges.append(f"Event Date: {date_range_start} to {date_range_end}")
     has_active_filters = bool(raw_date_from or raw_date_to)
+    if filter_date_from and filter_date_to:
+        reporting_period_label = f"{filter_date_from:%d %b %Y} to {filter_date_to:%d %b %Y}"
+    elif filter_date_from:
+        reporting_period_label = f"From {filter_date_from:%d %b %Y}"
+    elif filter_date_to:
+        reporting_period_label = f"Up to {filter_date_to:%d %b %Y}"
+    else:
+        reporting_period_label = "Current records"
+    report_return_url = request.get_full_path()
 
     return render(
         request,
@@ -997,6 +1028,9 @@ def admin_security_report(request):
         {
             "today": today,
             "month_start": month_start,
+            "reporting_period_label": reporting_period_label,
+            "report_generated_at": report_generated_at,
+            "report_return_url": report_return_url,
             "total_users": total_users,
             "users_by_role": users_by_role,
             "users_by_role_chart": users_by_role_chart,
@@ -1023,18 +1057,27 @@ def admin_security_report(request):
             "recent_reminder_email_logs": recent_reminder_email_logs,
             "failed_email_deliveries_count": failed_email_deliveries_count,
             "recent_failed_email_logs": recent_failed_email_logs,
+            "support_response_target_days": support_response_target_days,
+            "open_support_ticket_count": open_support_ticket_count,
+            "in_progress_support_ticket_count": in_progress_support_ticket_count,
+            "overdue_support_ticket_count": overdue_support_ticket_count,
+            "recent_overdue_support_tickets": recent_overdue_support_tickets,
             "requires_investigation_count": requires_investigation_count,
             "date_from": date_from.isoformat() if date_from else raw_date_from,
             "date_to": date_to.isoformat() if date_to else raw_date_to,
             "date_filter_error": date_filter_error,
             "has_active_filters": has_active_filters,
             "active_filter_badges": active_filter_badges,
-            "suspicious_activity_url": reverse("suspicious-activity-list"),
-            "suspicious_failed_url": reverse("suspicious-activity-list") + _query_string({"reason": "failed"}),
+            "suspicious_activity_url": reverse("suspicious-activity-list")
+            + _query_string({"next": report_return_url}),
+            "suspicious_failed_url": reverse("suspicious-activity-list")
+            + _query_string({"reason": "failed", "next": report_return_url}),
             "permission_denied_audit_url": reverse("dashboard-audit-logs")
-            + _query_string({"action": "auth.permission_denied"}),
-            "failed_email_logs_url": reverse("email-delivery-log-list") + _query_string({"status": "failed"}),
-            "audit_log_url": reverse("dashboard-audit-logs"),
+            + _query_string({"action": "auth.permission_denied", "next": report_return_url}),
+            "failed_email_logs_url": reverse("email-delivery-log-list")
+            + _query_string({"status": "failed", "next": report_return_url}),
+            "support_ticket_url": reverse("support-ticket-list") + _query_string({"next": report_return_url}),
+            "audit_log_url": reverse("dashboard-audit-logs") + _query_string({"next": report_return_url}),
             "reminder_settings_url": reverse("payment-reminder-settings-update"),
             "announcement_email_url": reverse("mass-email-send"),
         },

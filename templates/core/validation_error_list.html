@@ -8,12 +8,13 @@
         <h1 class="page-title">Validation Errors</h1>
         <p class="page-subtitle">Uploaded rows that could not be saved, with the file name, row number, and fix needed.</p>
     </div>
-    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
+    <a href="{{ back_url }}" class="btn btn-outline-secondary">Back</a>
 </div>
 
 <div class="card">
     <div class="card-header">
         <form method="get" class="row g-2 align-items-end">
+            {% if return_url %}<input type="hidden" name="next" value="{{ return_url }}">{% endif %}
             <div class="col-md-4">
                 <label class="form-label small">Module</label>
                 <select name="module" class="form-select form-select-sm">

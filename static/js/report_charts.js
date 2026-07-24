@@ -73,6 +73,20 @@
                 ctx.lineWidth = 3;
                 ctx.lineJoin = "round";
 
+                function clampLabelY(preferredY, fallbackY) {
+                    var chartArea = chart.chartArea || {};
+                    var topLimit = Number.isFinite(chartArea.top) ? chartArea.top + 12 : 12;
+                    var bottomLimit = Number.isFinite(chartArea.bottom) ? chartArea.bottom - 12 : preferredY;
+                    var y = preferredY < topLimit && Number.isFinite(fallbackY) ? fallbackY : preferredY;
+                    if (y < topLimit) {
+                        return topLimit;
+                    }
+                    if (y > bottomLimit) {
+                        return bottomLimit;
+                    }
+                    return y;
+                }
+
                 chart.data.datasets.forEach(function (dataset, datasetIndex) {
                     var meta = chart.getDatasetMeta(datasetIndex);
                     if (!meta || meta.hidden) {
@@ -96,17 +110,19 @@
 
                         if (chartType === "bar") {
                             if (chart.options && chart.options.indexAxis === "y") {
-                                x = element.x + 18;
+                                var chartArea = chart.chartArea || {};
+                                var rightLimit = Number.isFinite(chartArea.right) ? chartArea.right - 10 : element.x + 18;
+                                x = Math.min(element.x + 18, rightLimit);
                                 y = element.y;
                                 ctx.textAlign = "left";
                             } else {
                                 x = element.x;
-                                y = element.y - 12;
+                                y = clampLabelY(element.y - 12, element.y + 14);
                                 ctx.textAlign = "center";
                             }
                         } else if (chartType === "line") {
                             x = element.x;
-                            y = element.y - 14;
+                            y = clampLabelY(element.y - 14, element.y + 14);
                             ctx.textAlign = "center";
                         } else if (chartType === "doughnut" || chartType === "pie") {
                             var position = element.tooltipPosition();

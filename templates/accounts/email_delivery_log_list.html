@@ -6,21 +6,26 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">Delivery Logs</h1>
-        <p class="page-subtitle">Announcement, reminder, and support resolution delivery attempts.</p>
+        <p class="page-subtitle">All recorded email delivery attempts across reminders, invoices, payments, payslips, support, and account verification.</p>
     </div>
-    <a href="{% url 'admin-dashboard' %}" class="btn btn-outline-secondary">Back</a>
+    <a href="{{ back_url }}" class="btn btn-outline-secondary">Back</a>
 </div>
 
 <div class="card">
     <div class="card-header">
         <form method="get" class="row g-2 align-items-end">
+            {% if return_url %}<input type="hidden" name="next" value="{{ return_url }}">{% endif %}
             <div class="col-md-2">
                 <label class="form-label small">Type</label>
                 <select name="type" class="form-select form-select-sm">
-                    <option value="">All operational emails</option>
+                    <option value="">All emails</option>
                     <option value="mass" {% if selected_type == "mass" %}selected{% endif %}>Announcement email</option>
                     <option value="reminder" {% if selected_type == "reminder" %}selected{% endif %}>Reminder email</option>
+                    <option value="invoice" {% if selected_type == "invoice" %}selected{% endif %}>Invoice email</option>
+                    <option value="payment" {% if selected_type == "payment" %}selected{% endif %}>Payment email</option>
+                    <option value="payroll" {% if selected_type == "payroll" %}selected{% endif %}>Payslip email</option>
                     <option value="support" {% if selected_type == "support" %}selected{% endif %}>Support resolution email</option>
+                    <option value="account" {% if selected_type == "account" %}selected{% endif %}>Account verification email</option>
                 </select>
             </div>
             <div class="col-md-2">
@@ -66,23 +71,33 @@
                 {% for log in logs %}
                 <tr>
                     <td class="text-nowrap">{{ log.attempted_at|date:"Y-m-d H:i" }}</td>
-                    <td>
+                    <td class="email-log-type">
                         {% if log.template_key == "admin_mass_email" %}
                         Announcement Email
+                        {% elif log.template_key|slice:":17" == "payment_reminder_" %}
+                        Reminder Email
                         {% elif log.template_key == "support_ticket_resolved_v1" %}
                         Support Resolution Email
+                        {% elif log.template_key == "invoice_email_v1" %}
+                        Invoice Email
+                        {% elif log.template_key == "payroll_payslip" or log.template_key == "payroll_payslip_email_v1" %}
+                        Payslip Email
+                        {% elif log.template_key == "account_verification_email_v1" %}
+                        Account Verification Email
+                        {% elif "payment" in log.template_key or "refund" in log.template_key or log.template_key|slice:":14" == "bank_transfer_" %}
+                        Payment Email
                         {% else %}
-                        Reminder Email
+                        {{ log.template_key|default:"Email" }}
                         {% endif %}
                     </td>
                     <td>{{ log.recipient_email }}</td>
                     <td>
                         <div class="fw-semibold">{{ log.subject }}</div>
                         {% if log.error_message %}
-                        <div class="text-danger small">{{ log.error_message }}</div>
+                        <div class="text-danger small delivery-log-error" title="{{ log.display_error_message }}">{{ log.display_error_message }}</div>
                         {% endif %}
                     </td>
-                    <td>
+                    <td class="email-log-reference">
                         {% if log.status == "sent" %}
                         <span class="badge bg-success">Sent</span>
                         {% elif log.status == "failed" %}
@@ -96,8 +111,10 @@
                         {{ log.related_object_id|default:"Selected roles" }}
                         {% elif log.template_key == "support_ticket_resolved_v1" %}
                         Support Ticket #{{ log.related_object_id }}
-                        {% else %}
+                        {% elif log.template_key|slice:":17" == "payment_reminder_" or log.template_key == "invoice_email_v1" %}
                         {{ log.metadata.invoice_number|default:log.related_object_id }}
+                        {% else %}
+                        {{ log.related_object_id|default:"-" }}
                         {% endif %}
                     </td>
                     <td>{{ log.triggered_by.username|default:"System" }}</td>

@@ -30,6 +30,14 @@
             answer: "Open My Invoices, choose the invoice, then use the payment instructions or available payment action on that invoice page.",
         },
         {
+            keywords: ["payment proof", "upload receipt", "bank receipt", "transfer proof", "paid by bank"],
+            answer: "If you paid by bank transfer, keep your transfer reference or receipt. Open the invoice and follow the bank transfer instructions so Finance can verify the payment.",
+        },
+        {
+            keywords: ["payment pending", "paid already", "already paid", "payment not updated", "still pending", "still overdue"],
+            answer: "Payment status updates after the payment is recorded or verified. If you already paid but the invoice is still pending or overdue, choose I have a payment issue and select the invoice.",
+        },
+        {
             keywords: ["download invoice", "invoice pdf", "save invoice"],
             answer: "Open My Invoices, choose the invoice, then use Download PDF on the invoice page.",
         },
@@ -38,8 +46,16 @@
             answer: "Open My Invoices to see pending, overdue, and paid invoices linked to your account.",
         },
         {
+            keywords: ["invoice status", "status mean", "pending payment", "paid status", "viewed status"],
+            answer: "Invoice status shows the current stage of the invoice. Pending means payment has not been completed, overdue means the due date has passed, and paid means payment has been recorded.",
+        },
+        {
             keywords: ["calculate invoice", "invoice calculated", "invoice total", "invoice amount", "amount due", "gst", "tax"],
             answer: "Invoice totals are based on the invoice line items, quantities, unit prices, and any GST or tax shown on the invoice. If a specific invoice amount looks wrong, choose Invoice amount is wrong and select that invoice.",
+        },
+        {
+            keywords: ["invoice due date", "when due", "due date", "late payment"],
+            answer: "The due date is shown on each invoice. If the due date has passed and payment is not recorded, the invoice will be treated as overdue.",
         },
         {
             keywords: ["view payslip", "my payslip", "payslip history", "payroll record"],
@@ -54,8 +70,36 @@
             answer: "Your pay is calculated from the payroll record: basic salary plus allowances or commissions, minus deductions and employee CPF. Open My Payslips for the exact breakdown. If a specific payslip looks wrong, choose My payslip looks wrong and select that payslip.",
         },
         {
+            keywords: ["gross pay", "gross salary"],
+            answer: "Gross salary is the amount before deductions. Your net salary is the final amount after deductions such as employee CPF are applied.",
+        },
+        {
+            keywords: ["net pay", "net salary", "take home pay"],
+            answer: "Net salary is the final amount you receive after deductions are taken from your gross salary.",
+        },
+        {
+            keywords: ["allowance", "allowances"],
+            answer: "Allowances are additional payroll amounts added to your salary record before deductions are applied.",
+        },
+        {
+            keywords: ["commission", "commissions"],
+            answer: "Commission is added based on the payroll record for that pay period. If the commission amount looks wrong, choose My payslip looks wrong and select the payslip.",
+        },
+        {
             keywords: ["reset password", "change password", "forgot password", "update password"],
             answer: "Use the account password reset or ask Admin if you cannot access your account. If you still cannot log in, choose I need account help so Admin can follow up.",
+        },
+        {
+            keywords: ["change email", "update email", "wrong email", "change profile", "update profile", "personal details"],
+            answer: "Profile or account detail changes need Admin follow-up. Choose I need account help and explain what should be updated.",
+        },
+        {
+            keywords: ["cannot access", "permission denied", "not allowed", "access denied"],
+            answer: "Access depends on your account role. If you think you should have access to a page, choose I need account help so Admin can check your role.",
+        },
+        {
+            keywords: ["email not received", "did not get email", "no email", "missing email", "reminder not received"],
+            answer: "Emails depend on the address saved in your account and the email delivery status. Check your junk or spam folder first. If it is still missing, choose I need account help.",
         },
         {
             keywords: ["what is cpf", "cpf meaning", "employee cpf"],
@@ -66,8 +110,16 @@
             answer: "Reminder emails are sent based on the saved reminder rules. An invoice is treated as overdue when the due date has passed and payment has not been recorded.",
         },
         {
+            keywords: ["unsubscribe", "stop reminder", "stop email", "too many emails"],
+            answer: "Payment reminders are sent based on invoice status and the saved reminder rules. If you think reminders are being sent wrongly, choose I have a payment issue and select the invoice.",
+        },
+        {
             keywords: ["ticket status", "support status", "my support", "support request", "request history"],
             answer: "Open My Support Requests to review the tickets you submitted and any resolution notes from the support team.",
+        },
+        {
+            keywords: ["priority", "urgent", "high priority"],
+            answer: "Payment problems, failed payments, refunds, missing pay, and login problems are treated as higher priority because they can affect access, salary, or payment follow-up.",
         },
         {
             keywords: ["how long", "response time", "resolve", "resolved", "response target"],
@@ -78,6 +130,10 @@
         {
             keywords: ["who handles", "finance", "payroll", "hr", "admin"],
             answer: "Finance handles invoice and payment requests. Payroll handles payslip and payroll requests. Admin handles account and general support routing.",
+        },
+        {
+            keywords: ["what can you do", "help me", "how can you help", "what do you help with"],
+            answer: "I can answer common portal questions and help submit support requests for invoice, payment, payslip, payroll, and account issues.",
         },
     ];
 
@@ -165,6 +221,11 @@
             return;
         }
         if (awaitingMoreHelp) {
+            resetChat();
+            setOpen(false);
+            return;
+        }
+        if (chatEnded) {
             resetChat();
             setOpen(false);
             return;
@@ -260,6 +321,21 @@
         return message.toLowerCase().replace(/[.!?]/g, "").trim();
     }
 
+    function messageTokens(message) {
+        return normalizeMessage(message)
+            .replace(/[^a-z0-9\s]/g, " ")
+            .split(/\s+/)
+            .filter((token) => token.length > 2 && !["the", "and", "for", "you", "my", "how", "what", "why", "can"].includes(token));
+    }
+
+    function looksLikeQuestion(message) {
+        const normalized = normalizeMessage(message);
+        return (
+            message.includes("?")
+            || ["how", "what", "why", "when", "where", "who", "can", "could", "do", "does", "is", "are"].some((word) => normalized.startsWith(`${word} `))
+        );
+    }
+
     function isNegativeResponse(message) {
         return [
             "no",
@@ -293,32 +369,53 @@
         return (chatOptions.options || []).find((option) => option.label === label) || null;
     }
 
+    function optionBySimilarity(message) {
+        const tokens = messageTokens(message);
+        if (!tokens.length) {
+            return null;
+        }
+
+        let bestOption = null;
+        let bestScore = 0;
+        (chatOptions.options || []).forEach((option) => {
+            const labelTokens = messageTokens(option.label || "");
+            const score = labelTokens.reduce((total, token) => (
+                tokens.includes(token) ? total + 1 : total
+            ), 0);
+            if (score > bestScore) {
+                bestScore = score;
+                bestOption = option;
+            }
+        });
+        return bestScore >= 2 ? bestOption : null;
+    }
+
     function inferOptionFromMessage(message) {
         const normalized = message.toLowerCase();
-        const accountKeywords = ["account", "login", "log in", "password", "profile", "access"];
+        const accountKeywords = ["account", "login", "log in", "password", "profile", "access", "permission denied", "cannot access"];
         if (includesAny(normalized, accountKeywords)) {
             return optionByLabel("I need account help");
         }
 
         if (chatOptions.role === "staff") {
-            if (includesAny(normalized, ["did not receive", "didn't receive", "not paid", "missing pay", "salary missing", "pay missing", "never receive pay"])) {
+            if (includesAny(normalized, ["did not receive", "didn't receive", "not paid", "missing pay", "salary missing", "pay missing", "never receive pay", "pay not in", "salary not in"])) {
                 return optionByLabel("I did not receive my pay");
             }
-            if (includesAny(normalized, ["payslip", "pay slip", "salary", "payroll", "cpf", "deduction", "allowance", "commission", "net salary", "gross salary", "pay amount"])) {
+            if (includesAny(normalized, ["payslip", "pay slip", "salary", "payroll", "cpf", "deduction", "allowance", "commission", "net salary", "gross salary", "pay amount", "wrong pay", "pay wrong", "salary wrong", "underpaid", "short pay"])) {
                 return optionByLabel("My payslip looks wrong");
             }
         }
 
         if (chatOptions.role === "customer") {
-            if (includesAny(normalized, ["payment", "paid", "pay", "card", "stripe", "receipt", "refund", "failed payment", "payment failed"])) {
+            if (includesAny(normalized, ["payment", "paid", "pay", "card", "stripe", "receipt", "refund", "failed payment", "payment failed", "bank transfer", "payment not updated"])) {
                 return optionByLabel("I have a payment issue");
             }
-            if (includesAny(normalized, ["invoice", "bill", "amount", "total", "gst", "tax", "charge", "overcharged", "wrong amount"])) {
+            if (includesAny(normalized, ["invoice", "bill", "amount", "total", "gst", "tax", "charge", "overcharged", "wrong amount", "invoice error", "bill wrong"])) {
                 return optionByLabel("Invoice amount is wrong");
             }
         }
 
-        return null;
+        return optionBySimilarity(message);
     }
 
     function findGeneralAnswer(message) {
@@ -327,6 +424,19 @@
             entry.keywords.some((keyword) => normalized.includes(keyword))
         ));
         return matchedAnswer ? matchedAnswer.answer : "";
+    }
+
+    function fallbackGeneralAnswer(message) {
+        if (!looksLikeQuestion(message)) {
+            return "";
+        }
+        if (chatOptions.role === "staff") {
+            return "For staff, you can use My Payslips to view your salary breakdown and My Support Requests to check submitted enquiries. If your question is about a specific payslip or account issue, choose the matching support topic so Payroll or Admin can follow up.";
+        }
+        if (chatOptions.role === "customer") {
+            return "For customers, you can use My Invoices to view invoice status, payment details, due dates, and invoice PDFs. If your question is about a specific invoice, payment, or account issue, choose the matching support topic so Finance or Admin can follow up.";
+        }
+        return "This portal can help with invoices, payments, payroll, payslips, account access, reminders, and support requests.";
     }
 
     function looksLikeSupportIssue(message) {
@@ -344,6 +454,19 @@
             "incorrect",
             "did not receive",
             "didn't receive",
+            "not correct",
+            "doesnt tally",
+            "doesn't tally",
+            "mistake",
+            "too high",
+            "too low",
+            "underpaid",
+            "overcharged",
+            "refund",
+            "receipt",
+            "not updated",
+            "access denied",
+            "login",
         ].some((keyword) => normalized.includes(keyword));
     }
 
@@ -370,7 +493,16 @@
             return;
         }
 
-        if (looksLikeSupportIssue(message)) {
+        const generalAnswer = findGeneralAnswer(message);
+        const supportIssue = looksLikeSupportIssue(message);
+        if (generalAnswer && !supportIssue) {
+            appendMessage(generalAnswer, "bot");
+            clearComposer();
+            showMoreHelpPrompt("Do you need help with anything else?");
+            return;
+        }
+
+        if (supportIssue) {
             const inferredIssueOption = inferOptionFromMessage(message);
             clearComposer();
             if (inferredIssueOption) {
@@ -382,7 +514,6 @@
             return;
         }
 
-        const generalAnswer = findGeneralAnswer(message);
         if (generalAnswer) {
             appendMessage(generalAnswer, "bot");
             clearComposer();
@@ -397,9 +528,17 @@
             return;
         }
 
-        appendMessage("I can answer common questions here. For account-specific issues, choose a topic first so the request is routed to the correct officer.", "bot");
+        const fallbackAnswer = fallbackGeneralAnswer(message);
+        appendMessage(
+            fallbackAnswer || "I can answer common questions here. For account-specific issues, choose a topic first so the request is routed to the correct officer.",
+            "bot"
+        );
         clearComposer();
-        showTopicOptions("Choose a topic so we can route this correctly.");
+        if (fallbackAnswer) {
+            showMoreHelpPrompt("Do you need help with anything else?");
+        } else {
+            showTopicOptions("Choose a topic so we can route this correctly.");
+        }
     }
 
     if (launcher) {
@@ -444,6 +583,21 @@
 
         if (!activeOption || awaitingMoreHelp || isNegativeResponse(message)) {
             handleNonTicketMessage(message);
+            return;
+        }
+
+        const generalAnswer = findGeneralAnswer(message);
+        if (generalAnswer && !looksLikeSupportIssue(message)) {
+            appendMessage(message, "user");
+            appendMessage(generalAnswer, "bot");
+            clearComposer();
+            resetConversationMetadata();
+            showMoreHelpPrompt("Do you need help with anything else?");
+            return;
+        }
+
+        if (activeOption.referenceKind && !referenceInput.value) {
+            appendMessage("Please choose the related record first so the officer knows what to check.", "bot");
             return;
         }
 

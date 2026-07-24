@@ -112,7 +112,7 @@ def _staff_support_chat_options(user):
                 "label": "My payslip looks wrong",
                 "category": "payroll",
                 "referenceKind": "payroll",
-                "prompt": "Which payslip should HR check?",
+                "prompt": "Which payslip should Payroll check?",
                 "detailPrompt": "Tell us what looks wrong on that payslip.",
             },
             {

@@ -3,9 +3,10 @@
 {% block title %}Support Ticket | Automated Invoicing & Payroll{% endblock %}
 
 {% block content %}
+<div class="support-ticket-detail-page {% if not can_manage %}support-ticket-detail-page-readonly{% endif %}">
 <div class="page-header">
     <div>
-        <h1 class="page-title">{{ ticket.subject }}</h1>
+        <h1 class="page-title">{{ detail_page_title|default:ticket.subject }}</h1>
         <p class="page-subtitle">{{ ticket.get_category_display }} support request</p>
     </div>
     <a href="{{ back_url }}" class="btn btn-outline-secondary">{{ back_label }}</a>
@@ -17,7 +18,7 @@
 </div>
 {% endif %}
 
-<div class="row g-3">
+<div class="row g-3 {% if not can_manage %}justify-content-center{% endif %}">
     <div class="{% if can_manage %}col-lg-7{% else %}col-lg-8{% endif %}">
         <div class="card">
             <div class="card-header">Request Details</div>
@@ -100,5 +101,6 @@
         </div>
     </div>
     {% endif %}
+</div>
 </div>
 {% endblock %}
